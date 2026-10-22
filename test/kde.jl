@@ -212,6 +212,31 @@ end
   @test pdf(fit(KDE, d), 0.5) == pdf(fit(KDE, XQ), 0.5)   # responses are ignored
 end
 
+# a kernel defined outside the package, with unbounded support
+struct LaplaceKernel <: AbstractKernel end
+(::LaplaceKernel)(u::Real) = exp(-abs(u)) / 2
+KernelSmoothing.support(::LaplaceKernel) = (-Inf, Inf)
+KernelSmoothing.cdf(::LaplaceKernel, u::Real) = u < 0 ? exp(u) / 2 : 1 - exp(-u) / 2
+KernelSmoothing.moment(::LaplaceKernel, j::Integer) = iseven(j) ? Float64(factorial(j)) : 0.0
+
+@testset "other kernels" begin
+  k, h = LaplaceKernel(), 0.6
+  f = fit(KDE, XQ; kernel = k, bandwidth = h, weights = WQ)
+  ts = collect(range(-5, 5; length = 41))
+  @test pdf.(f, ts) ≈ [bf_pdf(XQ, WQ, k, h, t) for t in ts] rtol = 1e-12
+  @test cdf.(f, ts) ≈ [bf_cdf(XQ, WQ, k, h, t) for t in ts] rtol = 1e-12
+  @test stderror.(f, ts) ≈ [bf_se(XQ, WQ, k, h, t) for t in ts] rtol = 1e-10
+  @test cdf(f, quantile(f, 0.01)) ≈ 0.01 atol = 1e-12
+  @test var(f) ≈ sum(WQ .* (XQ .- sum(WQ .* XQ) / sum(WQ)) .^ 2) / sum(WQ) + 2h^2 rtol = 1e-12
+  s = rand(MersenneTwister(5), f, 20_000)
+  @test abs(mean(s) - mean(f)) < 5 * std(f) / sqrt(20_000)
+  # a polynomial kernel written with zero coefficients of high powers
+  e0 = PiecewisePolynomialKernel([-1, 1], [[0.75, 0, -0.75, 0, 0]])
+  @test _isnonnegative(e0) && pdf(fit(KDE, XQ; kernel = e0, bandwidth = 1.0), 0.2) ≈
+        pdf(fit(KDE, XQ; bandwidth = 1.0), 0.2)
+  @test sprint(show, BandwidthSelection(0.5)) == "BandwidthSelection(0.5)"
+end
+
 @testset "type stability" begin
   for k in (EpanechnikovKernel(), GaussianKernel())
     f = fit(KDE, XQ; kernel = k, weights = WQ)

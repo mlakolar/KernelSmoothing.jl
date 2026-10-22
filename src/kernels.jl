@@ -567,6 +567,28 @@ function _reflect(k::PolynomialKernel)
   return PiecewisePolynomialKernel(Centered(), breaks, coefs, smoothness(k))
 end
 
+# other kernels: a lazy reflection
+_reflect(k::AbstractKernel) = _Reflected(k)
+
+struct _Reflected{K<:AbstractKernel} <: AbstractKernel
+  k::K
+end
+
+(r::_Reflected)(u::Real) = r.k(-u)
+support(r::_Reflected) = (s = support(r.k); (-s[2], -s[1]))
+
+# k(u)², as a kernel: closed forms where they exist, a lazy product otherwise
+_square(k::Union{PolynomialKernel,GaussianKernel}) = k * k
+_square(k::GaussianDerivativeKernel) = k.r == 0 ? k * k : _Squared(k)
+_square(k::AbstractKernel) = _Squared(k)
+
+struct _Squared{K<:AbstractKernel} <: AbstractKernel
+  k::K
+end
+
+(s::_Squared)(u::Real) = s.k(u)^2
+support(s::_Squared) = support(s.k)
+
 # Whether k(u) ≥ 0 for all u. A polynomial piece is checked at its ends and at the
 # real zeros of its derivative inside it, with a tolerance for rounding.
 _isnonnegative(::Union{NamedPolynomialKernel,GaussianKernel}) = true

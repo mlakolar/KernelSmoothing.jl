@@ -233,7 +233,7 @@ function _stderror(f::KDE, x)
   return _evaluate(t -> stderror(f, t), x) do p
     s0 = _sums(f, k, p; engine)
     s1 = f.data.w === nothing ? s0 : _sums(f, k, p; z = f.data.w, engine)
-    s2 = _sums(f, k * k, p; z = f.data.w, engine)
+    s2 = _sums(f, _square(k), p; z = f.data.w, engine)
     _kdese.(Ref(f), s0, s1, s2)
   end
 end
