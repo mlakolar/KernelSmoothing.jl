@@ -404,7 +404,7 @@ The standard errors at the points: of the estimates, or with
 `method = RobustBiasCorrected()` of the bias-corrected estimates.
 """
 stderror(m::LocalPolynomialRegression; method::InferenceMethod = Conventional()) =
-  copy(method isa Conventional ? m.se : m.se_rbc)
+  copy(_usesbc(method) ? m.se_rbc : m.se)
 
 """
     confint(m::LocalPolynomialRegression; level = 0.95, method = RobustBiasCorrected())

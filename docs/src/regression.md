@@ -23,6 +23,25 @@ Modules = [KernelSmoothing]
 Pages = ["locpoly.jl"]
 ```
 
+## Honest intervals
+
+[`Honest`](@ref) intervals (Armstrong and Kolesár 2020) bound the bias instead of
+removing it: given a bound `M` on the derivative of order `p + 1`, they add the
+worst-case bias to the critical value. [`FLCIOptimal`](@ref) chooses the bandwidth
+that makes them shortest.
+
+```julia
+m = fit(LocalPolynomialRegression, x, y; points = [0.5], bandwidth = FLCIOptimal(40))
+confint(m; method = Honest(40))          # covers whenever |m''| ≤ 40
+confint(m; method = Honest())            # M from a global quartic, a starting point for sensitivity analysis
+worstcasebias(m, 40)
+```
+
+```@autodocs
+Modules = [KernelSmoothing]
+Pages = ["honest.jl"]
+```
+
 ## Uniform bands
 
 [`vcov`](@ref) gives the covariances of the estimates at the points, and

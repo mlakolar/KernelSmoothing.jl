@@ -162,7 +162,7 @@ bandwidth(m::PointwiseDensity) = m.h
 StatsAPI.coef(m::PointwiseDensity) = copy(m.estimate)
 
 stderror(m::PointwiseDensity; method::InferenceMethod = Conventional()) =
-  copy(method isa Conventional ? m.se : m.se_rbc)
+  copy(_usesbc(method) ? m.se_rbc : m.se)
 
 function StatsAPI.confint(m::PointwiseDensity; level::Real = 0.95, method::InferenceMethod = RobustBiasCorrected())
   return _confint(m, level, method)
@@ -171,9 +171,13 @@ end
 function _confint(m::_PointwiseFit, level, method)
   0 < level < 1 || throw(ArgumentError("level must be between 0 and 1, got $level"))
   z = Distributions.quantile(Distributions.Normal(), (1 + level) / 2)
-  est, se = method isa Conventional ? (m.estimate, m.se) : (m.estimate_bc, m.se_rbc)
+  est, se = _usesbc(method) ? (m.estimate_bc, m.se_rbc) : (m.estimate, m.se)
   return hcat(est .- z .* se, est .+ z .* se)
 end
+
+# whether a method is built around the bias-corrected estimate
+_usesbc(::Conventional) = false
+_usesbc(::RobustBiasCorrected) = true
 
 function StatsAPI.coeftable(m::PointwiseDensity; level::Real = 0.95)
   c = confint(m; level, method = Conventional())

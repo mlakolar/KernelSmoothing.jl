@@ -18,7 +18,7 @@ union of two windows, which changes them slightly near the edges.
 function StatsAPI.vcov(m::LocalPolynomialRegression; method::InferenceMethod = Conventional())
   vs = _pointwise(j -> _localfit(m.data, m.kernel, m.points[j], m.h[j], m.b[j], m.degree, m.derivative,
                                  m.vce; vectors = true), eachindex(m.points))
-  return _gram([v.range for v in vs], [method isa Conventional ? v.aus : v.arb for v in vs])
+  return _gram([v.range for v in vs], [_usesbc(method) ? v.arb : v.aus for v in vs])
 end
 
 # C[j, l] = ∑ᵢ A[j][i] A[l][i] over the overlap of the index ranges of j and l
@@ -46,7 +46,7 @@ function StatsAPI.vcov(m::PointwiseDensity; method::InferenceMethod = Convention
   d, k = m.data, m.kernel
   c0, c2 = _secondderivative(k)
   κ = m.compat ? (c0 * moment(k, 4) + c2 * moment(k, 6)) / 24 : moment(k, 2) / 2
-  bc = method isa RobustBiasCorrected
+  bc = _usesbc(method)
   vs = _pointwise(eachindex(m.points)) do j
     _densityvector(d, k, m.points[j], m.h[j], m.b[j], c0, c2, κ, bc)
   end
@@ -102,10 +102,12 @@ function confband(m::_PointwiseFit; level::Real = 0.95, method::InferenceMethod 
                   draws::Integer = 10_000, rng::AbstractRNG = Random.default_rng())
   0 < level < 1 || throw(ArgumentError("level must be between 0 and 1, got $level"))
   draws >= 100 || throw(ArgumentError("draws must be at least 100, got $draws"))
+  method isa Union{Conventional,RobustBiasCorrected} ||
+    throw(ArgumentError("uniform bands are available for Conventional() and RobustBiasCorrected()"))
   C = vcov(m; method)
   se = sqrt.(max.(LinearAlgebra.diag(C), 0.0))
   c = _supt(C, se, level, draws, rng)
-  est = method isa Conventional ? m.estimate : m.estimate_bc
+  est = _usesbc(method) ? m.estimate_bc : m.estimate
   return (lower = est .- c .* se, upper = est .+ c .* se, critical = c)
 end
 
