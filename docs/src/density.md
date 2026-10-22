@@ -11,3 +11,23 @@ points uses the engines of [`kernelsums`](@ref). Bandwidths are numbers or
 Modules = [KernelSmoothing]
 Pages = ["kde.jl"]
 ```
+
+## Inference
+
+[`PointwiseDensity`](@ref) estimates the density at a set of points with
+conventional and robust bias-corrected standard errors and intervals (Calonico,
+Cattaneo and Farrell 2018), as nprobust's `kdrobust` does, but with the bias
+constant of the paper; `compat = true` reproduces nprobust. A fitted `KDE` gives
+intervals at its own bandwidth with `confint(f, points)`.
+
+```julia
+x = randn(1000)
+m = fit(PointwiseDensity, x; points = [-1, 0, 1])   # plug-in bandwidths at each point
+confint(m)                                          # robust bias-corrected 95% intervals
+confint(fit(KDE, x), [-1, 0, 1])                    # at the Sheather-Jones bandwidth
+```
+
+```@autodocs
+Modules = [KernelSmoothing]
+Pages = ["kdeinference.jl"]
+```
