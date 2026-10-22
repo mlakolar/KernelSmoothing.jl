@@ -1,0 +1,16 @@
+name = "KernelSmoothing"
+uuid = "724a8e84-0a16-41a9-ba90-78f60180b487"
+authors = ["Mladen Kolar <mkolar@usc.edu>"]
+version = "0.1.0"
+
+[compat]
+Aqua = "0.8"
+Test = "1"
+julia = "1.10"
+
+[extras]
+Aqua = "4c88cf16-eb10-579e-8560-4a9242c79595"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Aqua", "Test"]
