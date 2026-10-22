@@ -399,13 +399,8 @@ bias-corrected intervals, centred at the bias-corrected estimates; with
 `method = Conventional()`, the intervals around the estimates, which cover only
 when the bias is negligible.
 """
-function StatsAPI.confint(m::LocalPolynomialRegression; level::Real = 0.95,
-                          method::InferenceMethod = RobustBiasCorrected())
-  0 < level < 1 || throw(ArgumentError("level must be between 0 and 1, got $level"))
-  z = Distributions.quantile(Distributions.Normal(), (1 + level) / 2)
-  est, se = method isa Conventional ? (m.estimate, m.se) : (m.estimate_bc, m.se_rbc)
-  return hcat(est .- z .* se, est .+ z .* se)
-end
+StatsAPI.confint(m::LocalPolynomialRegression; level::Real = 0.95,
+                 method::InferenceMethod = RobustBiasCorrected()) = _confint(m, level, method)
 
 """
     coeftable(m::LocalPolynomialRegression; level = 0.95)
@@ -492,18 +487,7 @@ function Base.show(io::IO, ::MIME"text/plain", m::LocalPolynomialRegression)
   m.selection.rule === nothing || println(io, "  bandwidth: ", m.selection.rule)
   any(m.floored) && println(io, "  the floor of ", m.minobs, " observations raised the bandwidth at ",
                             count(m.floored), " of ", length(m.points), " points")
-  # each estimate next to its own standard error, and the robust interval next to the
-  # bias-corrected estimate it is centred at
-  r = confint(m)
-  println(io, rpad("  point", 12), rpad("h", 10), rpad("n", 7), rpad("estimate", 11), rpad("se", 11),
-          rpad("bias-corr.", 11), rpad("robust se", 11), "95% robust interval")
-  rows = length(m.points) <= 12 ? eachindex(m.points) : [1:6; length(m.points)-5:length(m.points)]
-  for j in rows
-    length(m.points) > 12 && j == length(m.points) - 5 && println(io, "  ⋮")
-    println(io, "  ", rpad(_fmt(m.points[j]), 10), rpad(_fmt(m.h[j]), 10), rpad(m.nwindow[j], 7),
-            rpad(_fmt(m.estimate[j]), 11), rpad(_fmt(m.se[j]), 11), rpad(_fmt(m.estimate_bc[j]), 11),
-            rpad(_fmt(m.se_rbc[j]), 11), "[", _fmt(r[j, 1]), ", ", _fmt(r[j, 2]), "]")
-  end
+  _showtable(io, m)
 end
 
 _fmt(x) = string(round(x; sigdigits = 4))

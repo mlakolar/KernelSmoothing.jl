@@ -19,6 +19,10 @@ and the pieces that all estimators build on:
   Distributions.jl: `pdf`, `cdf`, `quantile`, `rand` and the rest, computed
   exactly from the observations, with derivatives of the density and pointwise
   standard errors;
+- `fit(PointwiseDensity, x)`, density estimates at a set of points with robust
+  bias-corrected intervals, which agree with nprobust's `kdrobust` with
+  `compat = true` and by default use the bias constant of Calonico, Cattaneo and
+  Farrell (2018), which nprobust 1.0.0 gets wrong;
 - bandwidth selectors: Sheather and Jones (the default for densities, solved to
   tight tolerance with exact or finely binned sums), least-squares
   cross-validation that reports its whole criterion, rules of thumb, the

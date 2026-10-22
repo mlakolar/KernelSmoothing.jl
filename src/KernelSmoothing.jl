@@ -7,7 +7,8 @@ bandwidth selection and robust bias-corrected inference.
 The package provides smoothing kernels, see [`AbstractKernel`](@ref), samples
 prepared for smoothing, see [`SmoothingData`](@ref), the kernel sums that
 estimators are built from, see [`kernelsums`](@ref), kernel density estimates, see
-[`KDE`](@ref), and local polynomial regression, see
+[`KDE`](@ref), pointwise density estimates with robust bias-corrected inference,
+see [`PointwiseDensity`](@ref), and local polynomial regression, see
 [`LocalPolynomialRegression`](@ref).
 """
 module KernelSmoothing
@@ -31,7 +32,7 @@ export
   BandwidthSelector, BandwidthSelection, selectbandwidth, bandwidth,
   NormalReference, SilvermanRule, SheatherJones, LSCV, CrossValidation,
   KDE, fit, pdf, logpdf, quantile, stderror,
-  LocalPolynomialRegression, RuleOfThumb, MSEOptimal, IMSEOptimal, CoverageOptimal,
+  LocalPolynomialRegression, PointwiseDensity, RuleOfThumb, MSEOptimal, IMSEOptimal, CoverageOptimal,
   VarianceEstimator, NNVariance, HCVariance,
   InferenceMethod, Conventional, RobustBiasCorrected,
   coef, confint, coeftable, predict, fitted, residuals
@@ -45,5 +46,6 @@ include("selectors.jl")
 include("kde.jl")
 include("locpoly.jl")
 include("plugin.jl")
+include("kdeinference.jl")
 
 end

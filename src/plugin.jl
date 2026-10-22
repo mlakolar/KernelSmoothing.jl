@@ -30,6 +30,12 @@ numerically. The results agree with nprobust 1.0.0 to rounding.
 The selection holds one bandwidth per point, and the pilot bandwidths in
 `details.b`; fit with `pilot = :selected` to use them, since by default the fit
 uses `b = h / rho`, as nprobust does.
+
+For a sample without responses, the rule gives the plug-in bandwidth of
+nprobust's `kdbwselect` for the density at each point,
+`h = (R(k) f̂(x) / (4 n (μ₂(k)/2 f̂''(x))²))^(1/5)` with rule-of-thumb pilot
+estimates of `f` and `f''`, for the Epanechnikov and uniform kernels; the pilot
+bandwidth of `f''` is `b`.
 """
 struct MSEOptimal <: BandwidthSelector
   regularization::Float64
@@ -47,6 +53,11 @@ variance and squared bias constants of [`MSEOptimal`](@ref) are averaged over
 `grid` equally spaced points between the smallest and the largest observation, as
 nprobust's `imse-dpi` does, or with `grid = :points` over the evaluation points of
 the fit. The pilot bandwidth `b` is in `details.b`.
+
+For a sample without responses, the rule gives the integrated plug-in bandwidth of
+nprobust's `kdbwselect` for densities, averaged over the quantiles of order 0.1 to
+0.9 (or the evaluation points with `grid = :points`), for the Epanechnikov and
+uniform kernels.
 """
 struct IMSEOptimal <: BandwidthSelector
   grid::Union{Int,Symbol}
@@ -95,8 +106,9 @@ CoverageOptimal(base::Union{MSEOptimal,IMSEOptimal} = MSEOptimal(); convention::
 
 function selectbandwidth(rule::MSEOptimal, d::SmoothingData, k::AbstractKernel; degree::Integer = 1,
                          derivative::Integer = 0, points = nothing, vce::VarianceEstimator = NNVariance(),
-                         minobs::Integer = 21)
-  d.y === nothing && throw(ArgumentError("MSEOptimal needs responses; use SmoothingData(x, y)"))
+                         minobs::Integer = 21, compat::Bool = false)
+  d.y === nothing && return _densityplugin(rule, d, k, points === nothing ? nothing : _checkpoints(points),
+                                           minobs, compat; imse = false)
   pts = points === nothing ? collect(range(d.x[1], d.x[end]; length = 30)) : _checkpoints(points)
   r = _pointwise(c -> _msedpi(d, k, c, Int(degree), Int(derivative), rule.regularization, rule.interior,
                               vce, minobs), pts)
@@ -105,8 +117,9 @@ end
 
 function selectbandwidth(rule::IMSEOptimal, d::SmoothingData, k::AbstractKernel; degree::Integer = 1,
                          derivative::Integer = 0, points = nothing, vce::VarianceEstimator = NNVariance(),
-                         minobs::Integer = 21)
-  d.y === nothing && throw(ArgumentError("IMSEOptimal needs responses; use SmoothingData(x, y)"))
+                         minobs::Integer = 21, compat::Bool = false)
+  d.y === nothing && return _densityplugin(rule, d, k, points === nothing ? nothing : _checkpoints(points),
+                                           minobs, compat; imse = true)
   p, ν = Int(degree), Int(derivative)
   q = p + 1
   grid = if rule.grid isa Integer
@@ -132,6 +145,8 @@ end
 function selectbandwidth(rule::CoverageOptimal, d::SmoothingData, k::AbstractKernel; degree::Integer = 1,
                          derivative::Integer = 0, kwargs...)
   s = selectbandwidth(rule.base, d, k; degree, derivative, kwargs...)
+  # for densities with second-order kernels (p = 2) the factors are one, as in nprobust
+  d.y === nothing && return BandwidthSelection(s.h, rule, (s.details..., mse = s.h))
   p, ν = Int(degree), Int(derivative)
   q, N = p + 1, nobs(d)
   if iseven(p - ν)

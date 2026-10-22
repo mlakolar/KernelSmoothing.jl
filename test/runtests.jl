@@ -9,6 +9,7 @@ tests = [
   "kde",
   "locpoly",
   "plugin",
+  "kdeinference",
   "aqua"
 ]
 
