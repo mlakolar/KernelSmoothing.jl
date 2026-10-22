@@ -40,14 +40,24 @@ function _shift!(g, len, m)
   return g
 end
 
-# g[1:len+1] ← the coefficients of g(t) (t + δ); returns the new length
-function _mulaffine!(g, len, δ)
-  g[len + 1] = g[len]
+# g[1:len+1] ← the coefficients of g(t) (ρ t + δ); returns the new length
+function _mulaffine!(g, len, ρ, δ)
+  g[len + 1] = ρ * g[len]
   for q in len:-1:2
-    g[q] = muladd(δ, g[q], g[q - 1])
+    g[q] = muladd(δ, g[q], ρ * g[q - 1])
   end
   g[1] *= δ
   return len + 1
+end
+
+# g[1:len] ← the coefficients of g(ρ t)
+function _scale!(g, len, ρ)
+  f = one(ρ)
+  for q in 1:len
+    g[q] *= f
+    f *= ρ
+  end
+  return g
 end
 
 # coefficients of (α + β t)^n

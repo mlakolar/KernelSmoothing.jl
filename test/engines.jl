@@ -2,7 +2,7 @@ module EnginesTest
 
 using Test
 using KernelSmoothing
-using KernelSmoothing: PiecewisePolynomialKernel, _sumvalues
+using KernelSmoothing: PiecewisePolynomialKernel, _sumvalues!, _choose_engine
 
 # grid data with many ties and observations exactly at window edges
 const XS = round.(7 .* sin.(1:500) .+ cos.(3 .* (1:500)); digits = 1)
@@ -27,13 +27,13 @@ const POINTS = collect(range(-10, 10; length = 81))
 # within three kernel radii of the point, times sup |k| and the largest |u|^r there.
 # (Relative to the sum itself the error can be larger, where the sum is nearly zero.)
 function localscale(d, k, h, points, kmax; z = nothing)
-  v = _sumvalues(d, z)
+  v = _sumvalues!(SumsWorkspace(), d, z)
   a, b = support(k)
   R = 3 * max(abs(a), abs(b))
   supk = maximum(abs ∘ k, range(a, b; length = 2001))
   M = zeros(kmax + 1, length(points))
   for j in eachindex(points), i in eachindex(d.x)
-    abs((d.x[i] - points[j]) / h) <= R || continue
+    abs((d.x[i] - points[j]) / (h isa Real ? h : h[j])) <= R || continue
     for r in 1:kmax+1
       M[r, j] += abs(v[i]) * supk * R^(r - 1)
     end
@@ -60,6 +60,8 @@ relerr(B, D) = maximum(abs, B .- D) / maximum(abs, D)
     @test check_exact(d, k, h, POINTS, 3; z = d.y)
     @test check_exact(d, k, h, d.x[1:4:end], 2)   # at observations: many exact edge hits
   end
+  dr = SmoothingData(XR, YR; weights = WR)
+  @test check_exact(dr, TriangularKernel(), 0.35, dr.x, 2)   # 2000 points: several chunks
   dg = SmoothingData(XS)
   @test check_exact(dg, EpanechnikovKernel(), 0.1, reverse(POINTS), 2)   # unsorted points
   @test check_exact(SmoothingData([2.0]), EpanechnikovKernel(), 0.5, [1.5, 2.0, 3.0], 2)
@@ -109,6 +111,58 @@ end
   @test_throws ArgumentError BinnedSums(; binsperh = 0)
 end
 
+@testset "bandwidth per point" begin
+  d = SmoothingData(XR, YR; weights = WR)
+  smooth = [0.05 + 0.6 * abs(sin(3p)) for p in POINTS]
+  jumpy = [isodd(j) ? 0.05 : 2.0 for j in eachindex(POINTS)]   # boundaries move both ways
+  for hs in (smooth, jumpy), k in (EpanechnikovKernel(), TriangularKernel(),
+                                   convolve(EpanechnikovKernel(), EpanechnikovKernel()))
+    D = kernelsums(d, k, hs, POINTS; kmax = 2, z = d.y, engine = DirectSums())
+    # each column is the sum with that point's bandwidth alone
+    @test D == reduce(hcat, [kernelsums(d, k, hs[j], [POINTS[j]]; kmax = 2, z = d.y,
+                                        engine = DirectSums()) for j in eachindex(POINTS)])
+    @test check_exact(d, k, hs, POINTS, 2; z = d.y)
+    @test check_exact(d, k, reverse(hs), reverse(POINTS), 2)
+  end
+  g = GaussianKernel()
+  @test relerr(kernelsums(d, g, smooth, POINTS; engine = BinnedSums()),
+               kernelsums(d, g, smooth, POINTS)) < 1e-3
+  @test_throws DimensionMismatch kernelsums(d, EpanechnikovKernel(), smooth[1:10], POINTS)
+  @test_throws ArgumentError kernelsums(d, EpanechnikovKernel(), [-1.0; smooth[2:end]], POINTS)
+  @test_throws ArgumentError kernelsums(d, EpanechnikovKernel(), [Inf; smooth[2:end]], POINTS)
+end
+
+@testset "engine choice" begin
+  d = SmoothingData(XR)
+  # few small windows: windowed sums; many large ones: fast sums
+  @test _choose_engine(EpanechnikovKernel(), d.x, 0.01, POINTS[1:5], 0) isa WindowSums
+  @test _choose_engine(EpanechnikovKernel(), d.x, 0.5, d.x, 2) isa FastSums
+  @test _choose_engine(GaussianKernel(), d.x, 0.5, d.x, 2) isa DirectSums
+  for (h, points) in ((0.01, POINTS[1:5]), (0.5, d.x))
+    @test check_exact(d, EpanechnikovKernel(), h, points, 2)
+    @test kernelsums(d, EpanechnikovKernel(), h, points; kmax = 2) ==
+          kernelsums(d, EpanechnikovKernel(), h, points; kmax = 2,
+                     engine = _choose_engine(EpanechnikovKernel(), d.x, h, points, 2))
+  end
+end
+
+@testset "workspace" begin
+  d = SmoothingData(XR, YR; weights = WR)
+  ws = SumsWorkspace()
+  for (k, e, kmax) in ((EpanechnikovKernel(), FastSums(), 2), (TriangularKernel(), WindowSums(), 1),
+                       (GaussianKernel(), BinnedSums(), 0), (BiweightKernel(), FastSums(), 4),
+                       (EpanechnikovKernel(), DirectSums(), 3))
+    @test kernelsums(d, k, 0.3, POINTS; kmax, z = d.y, engine = e, workspace = ws) ==
+          kernelsums(d, k, 0.3, POINTS; kmax, z = d.y, engine = e)
+  end
+  out = zeros(3, nobs(d))
+  sumsinto(ws) =
+    kernelsums!(out, d, EpanechnikovKernel(), 0.3, d.x; engine = FastSums(), workspace = ws)
+  sumsinto(ws); sumsinto(SumsWorkspace())
+  @test @allocated(sumsinto(ws)) < @allocated(sumsinto(SumsWorkspace())) / 2
+  @test sprint(show, ws) == "SumsWorkspace()"
+end
+
 @testset "density estimate" begin
   # f̂(x) = S[1] / (h ∑w) integrates to one (up to the Riemann sum's error)
   d = SmoothingData(XR; weights = WR)
@@ -140,6 +194,8 @@ end
   @test_throws DimensionMismatch kernelsums(d, k, 0.3, POINTS; z = YS[1:10])
   @test_throws ArgumentError kernelsums(d, k, 0.3, POINTS; z = fill(NaN, 500))
   @test_throws DimensionMismatch kernelsums!(zeros(3, 80), d, k, 0.3, POINTS)
+  @test_throws MethodError kernelsums!(zeros(Float32, 1, 81), d, k, 0.3, POINTS)
+  @test kernelsums(d, k, Float64[], Float64[]) == zeros(1, 0)
 end
 
 end

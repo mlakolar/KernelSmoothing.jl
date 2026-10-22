@@ -21,7 +21,8 @@ export
   derivative, roughness, smoothness,
   cdf, support, convolve, moment,
   SmoothingData, nobs, effective_nobs, nunique, weightsum, window, knn_distance,
-  kernelsums, kernelsums!, SumEngine, DirectSums, WindowSums, FastSums, BinnedSums, isexact
+  kernelsums, kernelsums!, SumEngine, DirectSums, WindowSums, FastSums, BinnedSums, isexact,
+  SumsWorkspace
 
 include("polynomials.jl")
 include("kernels.jl")
