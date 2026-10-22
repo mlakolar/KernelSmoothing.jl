@@ -70,6 +70,7 @@ function fit(::Type{KDE}, d::SmoothingData; kernel::AbstractKernel = Epanechniko
   isapprox(mass, 1; rtol = 1e-10) ||
     throw(ArgumentError("$kernel integrates to $mass, but a density kernel must integrate to one"))
   sel = _selection(bandwidth, d, kernel)
+  sel.h isa Float64 || throw(ArgumentError("a kernel density estimate needs one bandwidth, got one per point"))
   return KDE(d, kernel, _reflect(kernel), sel.h, sel, engine)
 end
 

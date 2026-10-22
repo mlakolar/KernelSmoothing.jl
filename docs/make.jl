@@ -8,6 +8,7 @@ makedocs(;
   pages = [
     "Home" => "index.md",
     "Density estimation" => "density.md",
+    "Local polynomial regression" => "regression.md",
     "Kernels" => "kernels.md",
     "Prepared data" => "data.md",
     "Kernel sums" => "sums.md",
