@@ -5,7 +5,8 @@ Kernel density estimation and local polynomial regression, with data-driven
 bandwidth selection and robust bias-corrected inference.
 
 So far the package provides the smoothing kernels, see [`AbstractKernel`](@ref),
-and samples prepared for smoothing, see [`SmoothingData`](@ref).
+samples prepared for smoothing, see [`SmoothingData`](@ref), and the kernel sums
+that estimators are built from, see [`kernelsums`](@ref).
 """
 module KernelSmoothing
 
@@ -19,10 +20,12 @@ export
   TriweightKernel, GaussianKernel,
   derivative, roughness, smoothness,
   cdf, support, convolve, moment,
-  SmoothingData, nobs, effective_nobs, nunique, window, knn_distance
+  SmoothingData, nobs, effective_nobs, nunique, window, knn_distance,
+  kernelsums, kernelsums!, SumEngine, DirectSums, WindowSums, FastSums, BinnedSums, isexact
 
 include("polynomials.jl")
 include("kernels.jl")
 include("data.jl")
+include("engines.jl")
 
 end

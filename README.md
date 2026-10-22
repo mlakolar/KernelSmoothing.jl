@@ -16,7 +16,10 @@ will build on:
 - `SmoothingData`, a sample sorted once, with its weights and ties recorded, that
   answers local questions fast: which observations lie within a bandwidth of a
   point, how many distinct values they take, and how far away the `k`-th nearest
-  observation is.
+  observation is;
+- `kernelsums`, the sums `∑ wᵢ zᵢ K(uᵢ) uᵢʳ` that density estimates, local
+  polynomial fits and cross-validation are built from, with exact direct,
+  windowed and fast engines and an approximate binned one.
 
 ## Installation
 
