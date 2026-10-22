@@ -4,6 +4,8 @@ tests = [
   "kernels",
   "data",
   "engines",
+  "bandwidths",
+  "kde",
   "aqua"
 ]
 
