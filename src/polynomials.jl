@@ -29,16 +29,35 @@ function _polymul(a, b)
   return c
 end
 
-# coefficients of p(t + m) in the number type T, by repeated synthetic division;
-# p(u) = q(u - m) for the returned q
-function _shifted(T, c, m)
-  q = T[c[i] for i in eachindex(c)]
-  m = T(m)
-  n = length(q)
-  for i in 1:n-1, k in n-1:-1:i
-    q[k] += m * q[k + 1]
+# coefficients of p(t + m) in the number type T; p(u) = q(u - m) for the returned q
+_shifted(T, c, m) = _shift!(T[c[i] for i in eachindex(c)], length(c), T(m))
+
+# g[1:len] ← the coefficients of g(t + m), by repeated synthetic division
+function _shift!(g, len, m)
+  for i in 1:len-1, k in len-1:-1:i
+    g[k] += m * g[k + 1]
   end
-  return q
+  return g
+end
+
+# g[1:len+1] ← the coefficients of g(t) (ρ t + δ); returns the new length
+function _mulaffine!(g, len, ρ, δ)
+  g[len + 1] = ρ * g[len]
+  for q in len:-1:2
+    g[q] = muladd(δ, g[q], ρ * g[q - 1])
+  end
+  g[1] *= δ
+  return len + 1
+end
+
+# g[1:len] ← the coefficients of g(ρ t)
+function _scale!(g, len, ρ)
+  f = one(ρ)
+  for q in 1:len
+    g[q] *= f
+    f *= ρ
+  end
+  return g
 end
 
 # coefficients of (α + β t)^n

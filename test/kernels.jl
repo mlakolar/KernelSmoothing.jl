@@ -2,7 +2,8 @@ module KernelsTest
 
 using Test
 using KernelSmoothing
-using KernelSmoothing: PiecewisePolynomialKernel, PolynomialKernel, pieces
+using KernelSmoothing: PiecewisePolynomialKernel, PolynomialKernel, GaussianDerivativeKernel,
+                       pieces, _cdfpieces, _cdfcoefs
 import Distributions
 using ForwardDiff
 using QuadGK
@@ -176,6 +177,68 @@ end
   @test_throws ArgumentError PiecewisePolynomialKernel([-1, 1], [Float64[]])
   @test sprint(show, convolve(UniformKernel(), UniformKernel())) ==
         "PiecewisePolynomialKernel(2 pieces on [-2.0, 2.0], smoothness 1)"
+end
+
+@testset "cdf tables" begin
+  # the written-out cdf pieces of the named kernels are what _cdfcoefs computes
+  for k in COMPACT
+    b, cc, mass = _cdfpieces(k)
+    gcc, gmass = _cdfcoefs(pieces(k)...)
+    @test all(collect(cc[j]) == gcc[j] for j in eachindex(gcc))
+    @test mass == gmass == 1
+    @test cdf(k, last(b)) == 1 && cdf(k, 3.0) == 1
+  end
+  d = derivative(BiweightKernel(), 1)
+  @test abs(_cdfpieces(d)[3]) < 1e-15   # a derivative integrates to zero
+end
+
+@testset "Gaussian amplitudes" begin
+  g = GaussianKernel()
+  @test endswith(sprint(show, derivative(g, 2)), "GaussianDerivativeKernel(1.0, 2)")
+  @test endswith(sprint(show, g * g), "GaussianDerivativeKernel(0.7071067811865475, 0, 0.28209479177387814)")
+  s = GaussianDerivativeKernel(1.5, 2, 3.0)   # 3 φ''_1.5
+  base = GaussianDerivativeKernel(1.5, 2)
+  for u in (-2.0, 0.3, 1.7)
+    @test s(u) ≈ 3 * base(u)
+    @test cdf(s, u) ≈ 3 * cdf(base, u)
+  end
+  @test moment(s, 4) ≈ 3 * moment(base, 4)
+  @test roughness(s) ≈ 9 * roughness(base)
+  @test convolve(s, g)(0.4) ≈ 3 * convolve(base, g)(0.4)
+  @test derivative(s, 1)(0.4) ≈ 3 * derivative(base, 1)(0.4)
+  @test_throws ArgumentError GaussianDerivativeKernel(1.0, 0, Inf)
+  @test_throws ArgumentError GaussianDerivativeKernel(Inf, 0)
+end
+
+@testset "products" begin
+  for k in KERNELS
+    kk = k * k
+    @test moment(kk, 0) ≈ roughness(k)   # ∫ k(u)^2 du
+    for u in POINTS
+      @test kk(u) ≈ k(u)^2 atol = 1e-15
+    end
+  end
+  @test smoothness(EpanechnikovKernel() * EpanechnikovKernel()) == 2   # (1 - u^2)^2, like the biweight
+  for (k1, k2) in [(TriangularKernel(), BiweightKernel()),
+                   (convolve(EpanechnikovKernel(), EpanechnikovKernel()), TriangularKernel()),
+                   (derivative(TriweightKernel(), 1), UniformKernel()),
+                   (PiecewisePolynomialKernel([-1.0, 0.25, 2.0], [[0.5, 0.2], [0.1, -0.05, 0.3]]),
+                    convolve(UniformKernel(), UniformKernel()))]
+    p = k1 * k2
+    @test support(p) == (max(support(k1)[1], support(k2)[1]), min(support(k1)[2], support(k2)[2]))
+    for u in range(-2.2, 2.2; length = 23)
+      @test p(u) ≈ k1(u) * k2(u) atol = 1e-14
+    end
+    @test moment(p, 1) ≈ integral(u -> u * k1(u) * k2(u), p) atol = 1e-12
+  end
+  g = GaussianKernel()
+  for u in (-1.2, 0.0, 0.7)
+    @test (g * g)(u) ≈ g(u)^2
+    @test (g * convolve(g, g))(u) ≈ g(u) * convolve(g, g)(u)
+  end
+  @test_throws ArgumentError derivative(g, 1) * g
+  @test_throws ArgumentError EpanechnikovKernel() * g
+  @test_throws ArgumentError UniformKernel() * PiecewisePolynomialKernel([2.0, 3.0], [[1.0]])
 end
 
 @testset "names shared with Distributions" begin

@@ -3,6 +3,7 @@ using Test
 tests = [
   "kernels",
   "data",
+  "engines",
   "aqua"
 ]
 
