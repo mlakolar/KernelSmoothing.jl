@@ -58,6 +58,13 @@ psi(x, f, g, r) = sum(f((xi - xj) / g) for xi in x, xj in x) / (length(x) * (len
   @test bandwidth(fit(KDE, Q)) == bandwidth(SheatherJones(), d, EpanechnikovKernel())
 end
 
+# a kernel defined outside the package, without a convolution
+struct BumpKernel <: AbstractKernel end
+(::BumpKernel)(u::Real) = abs(u) < 1 ? 0.75 * (1 - u^2) : 0.0
+KernelSmoothing.support(::BumpKernel) = (-1.0, 1.0)
+KernelSmoothing.moment(::BumpKernel, j::Integer) = j == 0 ? 1.0 : j == 2 ? 0.2 : 0.0
+KernelSmoothing.roughness(::BumpKernel) = 0.6
+
 @testset "least-squares cross-validation" begin
   for (k, w) in ((EpanechnikovKernel(), nothing), (GaussianKernel(), nothing),
                  (TriangularKernel(), 1.0 .+ mod.(1:400, 3)), (GaussianKernel(), 1.0 .+ mod.(1:400, 3)))
@@ -81,6 +88,11 @@ end
     @test cv(s.h) <= min(cv(0.99 * s.h), cv(1.01 * s.h)) + 1e-12   # a local minimizer
     @test length(s.details.grid) == length(s.details.criterion) == 60
   end
+  # with heavy ties the criterion falls as h shrinks, without an interior minimum
+  st = selectbandwidth(LSCV(), SmoothingData(repeat([0.0, 1.0, 2.0, 3.0], 50)), GaussianKernel())
+  @test st.details.atbound && isempty(st.details.minimizers)
+  @test st.h == st.details.grid[1]
+  @test_throws ArgumentError selectbandwidth(LSCV(), SmoothingData(Z), BumpKernel())
   d = SmoothingData(Z)
   # the criterion is flat near its minimum, so binning moves the minimizer by about 1e-4
   @test bandwidth(LSCV(exact = 0), d, GaussianKernel()) ≈ bandwidth(LSCV(), d, GaussianKernel()) rtol = 5e-4
