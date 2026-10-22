@@ -7,8 +7,11 @@ cross-validation curve.
 
 For densities, [`SheatherJones`](@ref) is the default; [`LSCV`](@ref),
 [`NormalReference`](@ref) and [`SilvermanRule`](@ref) are alternatives. For
-regression, [`RuleOfThumb`](@ref) is the default and [`CrossValidation`](@ref) an
-alternative.
+regression, the default follows nprobust: [`MSEOptimal`](@ref) at a single point
+and [`IMSEOptimal`](@ref) at several, the plug-in bandwidths of Calonico, Cattaneo
+and Farrell. [`CoverageOptimal`](@ref) rescales them for robust bias-corrected
+inference, and [`RuleOfThumb`](@ref) and [`CrossValidation`](@ref) are
+alternatives.
 
 ```julia
 d = SmoothingData(randn(1000))
@@ -18,5 +21,5 @@ s.h, s.details.minimizers        # the bandwidth, and all local minimizers of th
 
 ```@autodocs
 Modules = [KernelSmoothing]
-Pages = ["bandwidths.jl", "selectors.jl"]
+Pages = ["bandwidths.jl", "selectors.jl", "plugin.jl"]
 ```

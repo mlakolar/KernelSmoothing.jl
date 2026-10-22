@@ -13,15 +13,17 @@ and the pieces that all estimators build on:
 - `fit(LocalPolynomialRegression, x, y)`, local polynomial estimates of a
   regression function or its derivatives at a set of points, with conventional
   and robust bias-corrected standard errors and intervals that agree with
-  nprobust, nearest-neighbour and HC0–HC3 variances, floors on the windows that
-  are reported where they bind, and a rule-of-thumb bandwidth;
+  nprobust, nearest-neighbour and HC0–HC3 variances, and floors on the windows
+  that are reported where they bind;
 - `fit(KDE, x)`, a kernel density estimate that is a distribution of
   Distributions.jl: `pdf`, `cdf`, `quantile`, `rand` and the rest, computed
   exactly from the observations, with derivatives of the density and pointwise
   standard errors;
 - bandwidth selectors: Sheather and Jones (the default for densities, solved to
   tight tolerance with exact or finely binned sums), least-squares
-  cross-validation that reports its whole criterion, rules of thumb, and
+  cross-validation that reports its whole criterion, rules of thumb, the
+  plug-in bandwidths of nprobust for regression (pointwise MSE and IMSE, which
+  agree with nprobust to rounding) with coverage-error-optimal rescalings, and
   leave-one-out cross-validation for regression in `O(n)` per bandwidth;
 - smoothing kernels: the uniform, triangular, Epanechnikov, biweight, triweight
   and Gaussian kernels, with their distribution functions, moments, roughness,

@@ -8,6 +8,7 @@ tests = [
   "selectors",
   "kde",
   "locpoly",
+  "plugin",
   "aqua"
 ]
 

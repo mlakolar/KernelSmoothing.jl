@@ -31,7 +31,8 @@ export
   BandwidthSelector, BandwidthSelection, selectbandwidth, bandwidth,
   NormalReference, SilvermanRule, SheatherJones, LSCV, CrossValidation,
   KDE, fit, pdf, logpdf, quantile, stderror,
-  LocalPolynomialRegression, RuleOfThumb, VarianceEstimator, NNVariance, HCVariance,
+  LocalPolynomialRegression, RuleOfThumb, MSEOptimal, IMSEOptimal, CoverageOptimal,
+  VarianceEstimator, NNVariance, HCVariance,
   InferenceMethod, Conventional, RobustBiasCorrected,
   coef, confint, coeftable, predict, fitted, residuals
 
@@ -43,5 +44,6 @@ include("bandwidths.jl")
 include("selectors.jl")
 include("kde.jl")
 include("locpoly.jl")
+include("plugin.jl")
 
 end
