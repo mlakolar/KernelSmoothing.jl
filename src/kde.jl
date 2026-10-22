@@ -263,8 +263,6 @@ struct KDEDerivative{F<:KDE,K<:AbstractKernel}
   reflected::K   # u ↦ k⁽ʳ⁾(-u)
 end
 
-Base.broadcastable(g::KDEDerivative) = Ref(g)
-
 function (g::KDEDerivative)(x::Real)
   isnan(x) && return float(x)
   f = g.kde

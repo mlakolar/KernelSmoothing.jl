@@ -219,7 +219,19 @@ KernelSmoothing.support(::LaplaceKernel) = (-Inf, Inf)
 KernelSmoothing.cdf(::LaplaceKernel, u::Real) = u < 0 ? exp(u) / 2 : 1 - exp(-u) / 2
 KernelSmoothing.moment(::LaplaceKernel, j::Integer) = iseven(j) ? Float64(factorial(j)) : 0.0
 
+# and a compactly supported one
+struct CosineKernel <: AbstractKernel end
+(::CosineKernel)(u::Real) = abs(u) <= 1 ? π / 4 * cos(π * u / 2) : 0.0
+KernelSmoothing.support(::CosineKernel) = (-1.0, 1.0)
+KernelSmoothing.cdf(::CosineKernel, u::Real) = u <= -1 ? 0.0 : u >= 1 ? 1.0 : (1 + sin(π * u / 2)) / 2
+KernelSmoothing.moment(::CosineKernel, j::Integer) = j == 0 ? 1.0 : quadgk(u -> u^j * CosineKernel()(u), -1, 1)[1]
+
 @testset "other kernels" begin
+  kc = CosineKernel()
+  fc = fit(KDE, XS; kernel = kc, bandwidth = 0.8, weights = WS)
+  ts = points(XS, 0.8)
+  @test stderror.(fc, ts) ≈ [bf_se(XS, WS, kc, 0.8, t) for t in ts] rtol = 1e-10 atol = 1e-14
+  @test cdf.(fc, ts) ≈ [bf_cdf(XS, WS, kc, 0.8, t) for t in ts] atol = 1e-12
   k, h = LaplaceKernel(), 0.6
   f = fit(KDE, XQ; kernel = k, bandwidth = h, weights = WQ)
   ts = collect(range(-5, 5; length = 41))
