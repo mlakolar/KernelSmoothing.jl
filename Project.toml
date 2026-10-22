@@ -3,14 +3,22 @@ uuid = "724a8e84-0a16-41a9-ba90-78f60180b487"
 authors = ["Mladen Kolar <mkolar@usc.edu>"]
 version = "0.1.0"
 
+[deps]
+Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
+
 [compat]
 Aqua = "0.8"
+Distributions = "0.25"
+ForwardDiff = "1"
+QuadGK = "2"
 Test = "1"
 julia = "1.10"
 
 [extras]
 Aqua = "4c88cf16-eb10-579e-8560-4a9242c79595"
+ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
+QuadGK = "1fd47b50-473d-5c70-9696-f719f8f3bcdc"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["Aqua", "Test"]
+test = ["Aqua", "ForwardDiff", "QuadGK", "Test"]

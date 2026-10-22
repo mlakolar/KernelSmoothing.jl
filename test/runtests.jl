@@ -1,6 +1,7 @@
 using Test
 
 tests = [
+  "kernels",
   "aqua"
 ]
 
