@@ -15,13 +15,13 @@ abstract type BandwidthSelector end
 """
     BandwidthSelection
 
-The result of [`selectbandwidth`](@ref): the bandwidth `h`, the `rule` that chose
-it (`nothing` for a bandwidth given by the user) and the named tuple `details`
-with what the rule computed on the way, such as the scale estimate of a rule of
-thumb.
+The result of [`selectbandwidth`](@ref): the bandwidth `h`, a number or a vector
+with one bandwidth per evaluation point, the `rule` that chose it (`nothing` for a
+bandwidth given by the user) and the named tuple `details` with what the rule
+computed on the way, such as the scale estimate of a rule of thumb.
 """
-struct BandwidthSelection{R,T<:NamedTuple}
-  h::Float64
+struct BandwidthSelection{H<:Union{Float64,Vector{Float64}},R,T<:NamedTuple}
+  h::H
   rule::R
   details::T
 end

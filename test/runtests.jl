@@ -6,6 +6,7 @@ tests = [
   "engines",
   "bandwidths",
   "kde",
+  "locpoly",
   "aqua"
 ]
 

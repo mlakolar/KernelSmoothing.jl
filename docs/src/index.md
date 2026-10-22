@@ -11,7 +11,8 @@ weights and ties recorded. [Kernel sums](@ref sums-page) are the sums
 `∑ wᵢ zᵢ k(uᵢ) uᵢʳ` that all estimators are built from, computed by exact
 direct, windowed and fast engines or approximately from binned data. On top of
 them, [kernel density estimates](@ref density-page) are distributions of
-Distributions.jl.
+Distributions.jl, and [local polynomial regression](@ref regression-page) comes
+with conventional and robust bias-corrected inference.
 
 ```@docs
 KernelSmoothing
