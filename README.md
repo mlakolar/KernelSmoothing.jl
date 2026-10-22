@@ -7,10 +7,16 @@
 Kernel density estimation and local polynomial regression, with data-driven
 bandwidth selection and robust bias-corrected inference.
 
-The package is under development. So far it provides the smoothing kernels the
-estimators will build on: the uniform, triangular, Epanechnikov, biweight,
-triweight and Gaussian kernels, with their distribution functions, moments,
-roughness, derivatives and convolutions.
+The package is under development. So far it provides the pieces the estimators
+will build on:
+
+- smoothing kernels: the uniform, triangular, Epanechnikov, biweight, triweight
+  and Gaussian kernels, with their distribution functions, moments, roughness,
+  derivatives and convolutions;
+- `SmoothingData`, a sample sorted once, with its weights and ties recorded, that
+  answers local questions fast: which observations lie within a bandwidth of a
+  point, how many distinct values they take, and how far away the `k`-th nearest
+  observation is.
 
 ## Installation
 
