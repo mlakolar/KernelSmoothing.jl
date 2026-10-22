@@ -22,3 +22,20 @@ fit(LocalPolynomialRegression, x, y; degree = 2, derivative = 1)   # the derivat
 Modules = [KernelSmoothing]
 Pages = ["locpoly.jl"]
 ```
+
+## Uniform bands
+
+[`vcov`](@ref) gives the covariances of the estimates at the points, and
+[`confband`](@ref) a sup-t band that covers the curve at all points at once, for
+regression and density fits alike.
+
+```julia
+m = fit(LocalPolynomialRegression, x, y; points = range(0, 1; length = 50))
+b = confband(m)              # robust bias-corrected 95% band
+b.lower, b.upper, b.critical
+```
+
+```@autodocs
+Modules = [KernelSmoothing]
+Pages = ["bands.jl"]
+```

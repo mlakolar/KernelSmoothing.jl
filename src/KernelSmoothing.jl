@@ -17,7 +17,8 @@ import Distributions
 import Distributions: cdf, support, convolve, moment, pdf, logpdf, quantile, insupport, mean, var
 import LinearAlgebra
 import StatsAPI
-import StatsAPI: fit, nobs, stderror, coef, confint, coeftable, predict, fitted, residuals
+import StatsAPI: fit, nobs, stderror, coef, confint, coeftable, predict, fitted, residuals, vcov
+import Random
 using Random: AbstractRNG
 
 export
@@ -35,7 +36,7 @@ export
   LocalPolynomialRegression, PointwiseDensity, RuleOfThumb, MSEOptimal, IMSEOptimal, CoverageOptimal,
   VarianceEstimator, NNVariance, HCVariance,
   InferenceMethod, Conventional, RobustBiasCorrected,
-  coef, confint, coeftable, predict, fitted, residuals
+  coef, confint, coeftable, predict, fitted, residuals, vcov, confband
 
 include("polynomials.jl")
 include("kernels.jl")
@@ -47,5 +48,6 @@ include("kde.jl")
 include("locpoly.jl")
 include("plugin.jl")
 include("kdeinference.jl")
+include("bands.jl")
 
 end

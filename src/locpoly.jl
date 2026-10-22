@@ -247,8 +247,10 @@ end
 # Gram matrices, Λ = ∑ wᵢ k(uᵢ) uᵢ^(p+1) r_p(uᵢ), g = Γ_p⁻¹ e_ν and c = Γ_q⁻¹ e_(p+1),
 # the estimate is ∑ ℓᵢ yᵢ with ℓᵢ = wᵢ k(uᵢ) g'r_p(uᵢ), and the bias-corrected one
 # ∑ ℓᵢᵇᶜ yᵢ with ℓᵢᵇᶜ = ℓᵢ - (h/b)^(p+1) g'Λ wᵢ k(vᵢ) c'r_q(vᵢ), the modified design of
-# nprobust in these variables. The variances are ∑ ℓᵢ² σ̂ᵢ² and ∑ (ℓᵢᵇᶜ)² σ̂ᵢ².
-function _localfit(d::SmoothingData, k::AbstractKernel, x0, h, b, p, ν, vce)
+# nprobust in these variables. With residuals ε̂ᵢ from the variance estimator, the
+# variances are ∑ (ℓᵢ ε̂ᵢ)² and ∑ (ℓᵢᵇᶜ ε̂ᵢᵇ)², and these products are also the
+# vectors whose inner products give the covariances between points.
+function _localsetup(d::SmoothingData, k::AbstractKernel, x0, h, b, p, ν)
   xs, ys, n = d.x, d.y, nobs(d)
   q = p + 1
   # the observations with positive weight for the larger bandwidth, as in nprobust
@@ -262,9 +264,7 @@ function _localfit(d::SmoothingData, k::AbstractKernel, x0, h, b, p, ν, vce)
   while e >= a && k((xs[e] - x0) / hb) == 0
     e -= 1
   end
-  nwin = e - a + 1
-  nan = _LocalFit(NaN, NaN, NaN, NaN, nwin, 0)
-  nwin >= 1 || return nan
+  e >= a || return (a = a, e = e, ok = false, nuniq = 0)
   # power sums: sh[j+1] = ∑ wk(u) u^j, th[j+1] = ∑ wk(u) u^j y, and the same in v
   sh, th = zeros(2p + 2), zeros(p + 1)
   sb, tb = zeros(2q + 1), zeros(q + 1)
@@ -281,22 +281,29 @@ function _localfit(d::SmoothingData, k::AbstractKernel, x0, h, b, p, ν, vce)
     _powersums!(sb, tb, kb, v, ys[i])
   end
   nuniq = nunique(d, ah:eh)
-  Gp = LinearAlgebra.Symmetric([sh[i + j + 1] for i in 0:p, j in 0:p])
-  Gq = LinearAlgebra.Symmetric([sb[i + j + 1] for i in 0:q, j in 0:q])
-  Cp = LinearAlgebra.cholesky(Gp; check = false)
-  Cq = LinearAlgebra.cholesky(Gq; check = false)
-  LinearAlgebra.issuccess(Cp) && LinearAlgebra.issuccess(Cq) ||
-    return _LocalFit(NaN, NaN, NaN, NaN, nwin, nuniq)
-  βp, γ = Cp \ th, Cq \ tb
+  Cp = LinearAlgebra.cholesky(LinearAlgebra.Symmetric([sh[i + j + 1] for i in 0:p, j in 0:p]); check = false)
+  Cq = LinearAlgebra.cholesky(LinearAlgebra.Symmetric([sb[i + j + 1] for i in 0:q, j in 0:q]); check = false)
+  LinearAlgebra.issuccess(Cp) && LinearAlgebra.issuccess(Cq) || return (a = a, e = e, ok = false, nuniq = nuniq)
   g = Cp \ [i == ν ? 1.0 : 0.0 for i in 0:p]
-  c = Cq \ [i == p + 1 ? 1.0 : 0.0 for i in 0:q]
-  ρ = (h / b)^(p + 1)
-  s = sum(g[i + 1] * sh[p + i + 2] for i in 0:p)   # g'Λ
-  scale = factorial(ν) / h^ν
-  estimate = scale * βp[ν + 1]
-  estimate_bc = scale * (βp[ν + 1] - ρ * s * γ[p + 2])
-  # the variances
-  σ2 = vce isa NNVariance ? _nnvariances(d, a, e, vce.matches) : nothing
+  return (a = a, e = e, ok = true, nuniq = nuniq, Cp = Cp, βp = Cp \ th, γ = Cq \ tb, g = g,
+          c = Cq \ [i == p + 1 ? 1.0 : 0.0 for i in 0:q], ρ = (h / b)^(p + 1),
+          s = sum(g[i + 1] * sh[p + i + 2] for i in 0:p), scale = factorial(ν) / h^ν)
+end
+
+# The estimates and standard errors at x0; with `vectors = true` also the vectors
+# scale ℓᵢ ε̂ᵢ and scale ℓᵢᵇᶜ ε̂ᵢᵇ over the window
+function _localfit(d::SmoothingData, k::AbstractKernel, x0, h, b, p, ν, vce; vectors::Bool = false)
+  f = _localsetup(d, k, x0, h, b, p, ν)
+  nwin = f.e - f.a + 1
+  if !f.ok
+    fit = _LocalFit(NaN, NaN, NaN, NaN, nwin, f.nuniq)
+    return vectors ? (fit = fit, range = f.a:f.e, aus = fill(NaN, nwin), arb = fill(NaN, nwin)) : fit
+  end
+  xs, ys = d.x, d.y
+  a, e, βp, γ, g, c, ρ, s, scale = f.a, f.e, f.βp, f.γ, f.g, f.c, f.ρ, f.s, f.scale
+  r = vce isa NNVariance ? _nnresiduals(d, a, e, vce.matches) : nothing
+  aus = vectors ? Vector{Float64}(undef, nwin) : Float64[]
+  arb = vectors ? Vector{Float64}(undef, nwin) : Float64[]
   vh = vb = 0.0
   for i in a:e
     t = xs[i] - x0
@@ -305,12 +312,18 @@ function _localfit(d::SmoothingData, k::AbstractKernel, x0, h, b, p, ν, vce)
     kh, kb = wi * k(u), wi * k(v)
     ℓ = kh * evalpoly(u, g)
     ℓbc = ℓ - ρ * s * kb * evalpoly(v, c)
-    s2h, s2b = _variances(vce, σ2, i - a + 1, ys[i] - evalpoly(u, βp), ys[i] - evalpoly(v, γ),
-                          kh, u, Cp, nwin, p)
-    vh += ℓ^2 * s2h
-    vb += ℓbc^2 * s2b
+    rh, rb = _residuals(vce, r, i - a + 1, ys[i] - evalpoly(u, βp), ys[i] - evalpoly(v, γ),
+                        kh, u, f.Cp, nwin, p)
+    vh += (ℓ * rh)^2
+    vb += (ℓbc * rb)^2
+    if vectors
+      aus[i - a + 1] = scale * ℓ * rh
+      arb[i - a + 1] = scale * ℓbc * rb
+    end
   end
-  return _LocalFit(estimate, scale * sqrt(vh), estimate_bc, scale * sqrt(vb), nwin, nuniq)
+  fit = _LocalFit(scale * βp[ν + 1], scale * sqrt(vh), scale * (βp[ν + 1] - ρ * s * γ[p + 2]),
+                  scale * sqrt(vb), nwin, f.nuniq)
+  return vectors ? (fit = fit, range = a:e, aus = aus, arb = arb) : fit
 end
 
 # adds kw u^j to s[j+1] for j = 0, …, length(s) - 1 and kw u^j y to t[j+1]
@@ -325,23 +338,26 @@ function _powersums!(s, t, kw, u, y)
   return
 end
 
-# the variance estimates for the conventional and the bias-corrected standard error
-_variances(::NNVariance, σ2, l, εh, εb, kh, u, Cp, n, p) = (σ2[l], σ2[l])
+# the residuals for the conventional and the bias-corrected standard error, scaled
+# so that their squares are the variance estimates
+_residuals(::NNVariance, r, l, εh, εb, kh, u, Cp, n, p) = (r[l], r[l])
 
-function _variances(vce::HCVariance, σ2, l, εh, εb, kh, u, Cp, n, p)
-  vce.type == 0 && return (εh^2, εb^2)
-  vce.type == 1 && return (εh^2 * n / (n - p - 1), εb^2 * n / (n - p - 2))
-  r = [u^j for j in 0:p]
-  hii = kh * LinearAlgebra.dot(r, Cp \ r)   # the leverage in the fit of order p
-  f = vce.type == 2 ? 1 / (1 - hii) : 1 / (1 - hii)^2
-  return (εh^2 * f, εb^2 * f)
+function _residuals(vce::HCVariance, r, l, εh, εb, kh, u, Cp, n, p)
+  vce.type == 0 && return (εh, εb)
+  vce.type == 1 && return (εh * sqrt(n / (n - p - 1)), εb * sqrt(n / (n - p - 2)))
+  x = [u^j for j in 0:p]
+  hii = kh * LinearAlgebra.dot(x, Cp \ x)   # the leverage in the fit of order p
+  f = vce.type == 2 ? 1 / sqrt(1 - hii) : 1 / (1 - hii)
+  return (εh * f, εb * f)
 end
 
-# Nearest-neighbour variance estimates for the observations a:e, with the
+_nnvariances(d::SmoothingData, a, e, J) = _nnresiduals(d, a, e, J) .^ 2
+
+# Nearest-neighbour residuals √(J/(J+1)) (yᵢ - ȳᵢ) for the observations a:e, with the
 # neighbours taken among a:e: all observations tied with xᵢ, and then whole groups
 # of tied observations, nearest first and both sides at equal distances, until
 # there are at least J.
-function _nnvariances(d::SmoothingData, a, e, J)
+function _nnresiduals(d::SmoothingData, a, e, J)
   xs, ys = d.x, d.y
   n = e - a + 1
   σ2 = Vector{Float64}(undef, n)
@@ -369,7 +385,7 @@ function _nnvariances(d::SmoothingData, a, e, J)
     for i in lo:hi
       i == pos || (s += ys[i])
     end
-    σ2[pos - a + 1] = m == 0 ? NaN : m / (m + 1) * (ys[pos] - s / m)^2
+    σ2[pos - a + 1] = m == 0 ? NaN : sqrt(m / (m + 1)) * (ys[pos] - s / m)
   end
   return σ2
 end
