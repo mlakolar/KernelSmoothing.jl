@@ -1,0 +1,449 @@
+"""
+    AbstractKernel
+
+Supertype of smoothing kernels. A kernel `k` is a function of a scaled distance:
+an estimator with bandwidth `h` gives an observation at distance `d` the weight
+`k(d / h) / h`.
+
+The named kernels are symmetric probability densities with a finite, positive
+second moment, that is, second-order kernels. The compactly supported ones live
+on `[-1, 1]`, so `h` is the half-width of the smoothing window.
+[`GaussianKernel`](@ref) is the standard normal density, for which `h` is a
+standard deviation. A bandwidth `h_sd` in the standard-deviation convention of
+KernelDensity.jl, KDEpy and R's `density` corresponds to the half-width
+`h = h_sd / sqrt(moment(k, 2))`.
+
+| Kernel                       | `k(u)` on its support    | `moment(k, 2)` | `roughness(k)`    | `smoothness(k)` |
+|:-----------------------------|:-------------------------|:---------------|:------------------|:----------------|
+| [`UniformKernel`](@ref)      | `1/2`                    | `1/3`          | `1/2`             | `0`             |
+| [`TriangularKernel`](@ref)   | `1 - abs(u)`             | `1/6`          | `2/3`             | `1`             |
+| [`EpanechnikovKernel`](@ref) | `3/4 (1 - u^2)`          | `1/5`          | `3/5`             | `1`             |
+| [`BiweightKernel`](@ref)     | `15/16 (1 - u^2)^2`      | `1/7`          | `5/7`             | `2`             |
+| [`TriweightKernel`](@ref)    | `35/32 (1 - u^2)^3`      | `1/9`          | `350/429`         | `3`             |
+| [`GaussianKernel`](@ref)     | `exp(-u^2/2) / sqrt(2π)` | `1`            | `1 / (2 sqrt(π))` | `typemax(Int)`  |
+
+Every kernel can be evaluated, `k(u)`, and supports [`support`](@ref),
+[`cdf`](@ref), [`moment`](@ref), [`roughness`](@ref), [`smoothness`](@ref),
+[`derivative`](@ref) and [`convolve`](@ref). Derivatives and convolutions are
+kernels too, although a derivative integrates to zero rather than one.
+"""
+abstract type AbstractKernel end
+
+Base.broadcastable(k::AbstractKernel) = Ref(k)
+
+"""
+    smoothness(k)
+
+The number of derivatives of the kernel `k` that are functions. For
+`r ≤ smoothness(k)`, the derivative of order `r` exists almost everywhere and is
+the derivative in the sense of distributions, so [`derivative`](@ref)`(k, r)`
+estimates the `r`-th derivative of a density. The next derivative has point
+masses where the kernel or one of its derivatives jumps.
+"""
+function smoothness end
+
+"""
+    roughness(k)
+
+The integral `∫ k(u)^2 du`. A kernel density estimate with bandwidth `h` has
+variance close to `roughness(k) f(x) / (n h)`. Plug-in bandwidth selectors also
+need the roughness of a derivative, `roughness(derivative(k, r))`.
+"""
+function roughness end
+
+"""
+    derivative(k, r = 1)
+
+The derivative of order `r` of the kernel `k`, as a kernel. The estimate
+`∑_i derivative(k, r)((x - X_i) / h) / (n h^(r + 1))` is the `r`-th derivative of
+the kernel density estimate.
+
+Throws an `ArgumentError` when `r` exceeds [`smoothness`](@ref)`(k)`. The
+Epanechnikov kernel, for example, has a first derivative but no second, because
+its first derivative jumps at `±1`.
+"""
+function derivative end
+
+_check_order(r) = r >= 0 || throw(ArgumentError("derivative order must be nonnegative, got $r"))
+
+
+## Polynomial kernels
+
+# Compactly supported kernels that are polynomials between breakpoints. Subtypes
+# implement `pieces(k)`, returning breakpoints `b` and coefficients `c` with
+# k(u) = c[j][1] + c[j][2] t + c[j][3] t^2 + ..., t = u - _mid(b, j), on
+# [b[j], b[j+1]] and k(u) = 0 outside [b[1], b[end]], and `smoothness(k)`.
+# Expanding each piece about its midpoint keeps evaluation accurate where a
+# high-degree piece is nearly zero.
+abstract type PolynomialKernel <: AbstractKernel end
+
+_mid(b, j) = (b[j] + b[j + 1]) / 2
+
+"""
+    UniformKernel()
+
+The uniform kernel `k(u) = 1/2` on `[-1, 1]`. It jumps at `±1`, so it has no
+derivatives.
+"""
+struct UniformKernel <: PolynomialKernel end
+
+"""
+    TriangularKernel()
+
+The triangular kernel `k(u) = 1 - abs(u)` on `[-1, 1]`, the optimal kernel for
+local polynomial estimation at a boundary point.
+"""
+struct TriangularKernel <: PolynomialKernel end
+
+"""
+    EpanechnikovKernel()
+
+The Epanechnikov kernel `k(u) = 3/4 (1 - u^2)` on `[-1, 1]`, which minimizes the
+asymptotic mean integrated squared error among second-order kernels.
+
+# Examples
+```julia
+julia> k = EpanechnikovKernel();
+
+julia> k(0.5)
+0.5625
+
+julia> moment(k, 2), roughness(k)
+(0.2, 0.6)
+```
+"""
+struct EpanechnikovKernel <: PolynomialKernel end
+
+"""
+    BiweightKernel()
+
+The biweight, or quartic, kernel `k(u) = 15/16 (1 - u^2)^2` on `[-1, 1]`.
+"""
+struct BiweightKernel <: PolynomialKernel end
+
+"""
+    TriweightKernel()
+
+The triweight kernel `k(u) = 35/32 (1 - u^2)^3` on `[-1, 1]`.
+"""
+struct TriweightKernel <: PolynomialKernel end
+
+pieces(::UniformKernel) = ((-1.0, 1.0), ((0.5,),))
+pieces(::TriangularKernel) = ((-1.0, 0.0, 1.0), ((0.5, 1.0), (0.5, -1.0)))   # about ∓1/2
+pieces(::EpanechnikovKernel) = ((-1.0, 1.0), ((0.75, 0.0, -0.75),))
+pieces(::BiweightKernel) = ((-1.0, 1.0), ((15/16, 0.0, -15/8, 0.0, 15/16),))
+pieces(::TriweightKernel) =
+  ((-1.0, 1.0), ((35/32, 0.0, -105/32, 0.0, 105/32, 0.0, -35/32),))
+
+smoothness(::UniformKernel) = 0
+smoothness(::TriangularKernel) = 1
+smoothness(::EpanechnikovKernel) = 1
+smoothness(::BiweightKernel) = 2
+smoothness(::TriweightKernel) = 3
+
+# marks coefficients expanded about the midpoints of the pieces
+struct Centered end
+
+"""
+    PiecewisePolynomialKernel(breaks, coefs)
+
+A compactly supported kernel that is a polynomial between consecutive
+breakpoints: on `[breaks[j], breaks[j+1]]` it equals
+`coefs[j][1] + coefs[j][2] u + coefs[j][3] u^2 + ...`, and it is zero outside
+`[breaks[1], breaks[end]]`. [`derivative`](@ref) and [`convolve`](@ref) return
+this type for polynomial kernels. It also defines new kernels, for example the
+fourth-order kernel `3/8 (3 - 5u^2)` on `[-1, 1]`:
+
+```julia
+julia> k = KernelSmoothing.PiecewisePolynomialKernel([-1, 1], [[9/8, 0, -15/8]]);
+
+julia> moment(k, 0), moment(k, 2)
+(1.0, 0.0)
+```
+
+The [`smoothness`](@ref) is found by checking which derivatives are continuous
+at the breakpoints. The type is not exported, because KernelFunctions.jl exports
+a different type of the same name.
+"""
+struct PiecewisePolynomialKernel <: PolynomialKernel
+  breaks::Vector{Float64}          # strictly increasing
+  coefs::Vector{Vector{Float64}}   # coefs[j]: ascending powers of u - _mid(breaks, j)
+  smoothness::Int
+
+  function PiecewisePolynomialKernel(::Centered, breaks::AbstractVector{<:Real},
+                                     coefs::AbstractVector{<:AbstractVector{<:Real}},
+                                     smoothness::Integer)
+    isempty(coefs) && throw(ArgumentError("a kernel needs at least one piece"))
+    length(breaks) == length(coefs) + 1 || throw(ArgumentError(
+      "need one more breakpoint than pieces, got $(length(breaks)) and $(length(coefs))"))
+    all(isfinite, breaks) && all(>(0), diff(breaks)) ||
+      throw(ArgumentError("breakpoints must be finite and strictly increasing"))
+    any(isempty, coefs) && throw(ArgumentError("every piece needs at least one coefficient"))
+    smoothness >= 0 || throw(ArgumentError("smoothness must be nonnegative, got $smoothness"))
+    new(Vector{Float64}(breaks), [Vector{Float64}(c) for c in coefs], smoothness)
+  end
+end
+
+function PiecewisePolynomialKernel(breaks::AbstractVector{<:Real},
+                                   coefs::AbstractVector{<:AbstractVector{<:Real}})
+  k = PiecewisePolynomialKernel(Centered(), breaks, coefs, 0)   # validates the arguments
+  b = k.breaks
+  centered = setprecision(BigFloat, 256) do
+    [Float64.(_shifted(BigFloat, coefs[j], _mid(b, j))) for j in eachindex(k.coefs)]
+  end
+  return PiecewisePolynomialKernel(Centered(), b, centered, _smoothness(b, centered))
+end
+
+pieces(k::PiecewisePolynomialKernel) = (k.breaks, k.coefs)
+smoothness(k::PiecewisePolynomialKernel) = k.smoothness
+
+# The order of the first derivative that jumps somewhere on the real line (the
+# kernel is zero outside its support), from the one-sided limits at the breakpoints.
+function _smoothness(breaks, coefs)
+  n = length(breaks)
+  for r in 0:maximum(length, coefs)
+    d = [_derivcoefs(c, r) for c in coefs]
+    for j in 1:n
+      left = j == 1 ? 0.0 : evalpoly(breaks[j] - _mid(breaks, j - 1), d[j - 1])
+      right = j == n ? 0.0 : evalpoly(breaks[j] - _mid(breaks, j), d[j])
+      abs(left - right) > sqrt(eps()) * max(1, abs(left), abs(right)) && return r
+    end
+  end
+  return maximum(length, coefs)
+end
+
+function Base.show(io::IO, k::PiecewisePolynomialKernel)
+  n = length(k.coefs)
+  print(io, "PiecewisePolynomialKernel(", n, n == 1 ? " piece" : " pieces", " on [",
+        first(k.breaks), ", ", last(k.breaks), "], smoothness ", k.smoothness, ")")
+end
+
+function (k::PolynomialKernel)(u::Real)
+  b, c = pieces(k)
+  (u < first(b) || u > last(b)) && return zero(u * b[1])
+  j = 1
+  while j < length(c) && u >= b[j + 1]
+    j += 1
+  end
+  return evalpoly(u - _mid(b, j), c[j])
+end
+
+"""
+    support(k::AbstractKernel)
+
+The interval `(lo, hi)` outside which the kernel `k` is zero: `(-1.0, 1.0)` for
+the compactly supported named kernels and `(-Inf, Inf)` for the Gaussian.
+"""
+support(k::PolynomialKernel) = (b = first(pieces(k)); (first(b), last(b)))
+
+"""
+    cdf(k::AbstractKernel, u)
+
+The integral of the kernel `k` from `-Inf` to `u`. For a named kernel this is a
+distribution function. For a derivative of order `r ≥ 1` it is the derivative of
+order `r - 1`.
+"""
+function cdf(k::PolynomialKernel, u::Real)
+  b, c = pieces(k)
+  s = zero(u * b[1])
+  isnan(u) && return s + u
+  u <= first(b) && return s
+  for j in eachindex(c)
+    m = _mid(b, j)
+    u < b[j + 1] && return s + _integrate(c[j], b[j] - m, u - m)
+    s += _integrate(c[j], b[j] - m, b[j + 1] - m)
+  end
+  return s
+end
+
+"""
+    moment(k::AbstractKernel, j)
+
+The moment `∫ u^j k(u) du` of order `j ≥ 0`. A second-order kernel has
+`moment(k, 0) == 1`, `moment(k, 1) == 0` and a positive `moment(k, 2)`, its
+variance.
+"""
+function moment(k::PolynomialKernel, j::Integer)
+  j >= 0 || throw(ArgumentError("moment order must be nonnegative, got $j"))
+  b, c = pieces(k)
+  return sum(eachindex(c)) do p
+    m = _mid(b, p)
+    # u^j = (t + m)^j with t = u - m
+    sum(binomial(j, i) * m^(j - i) * _integrate(c[p], b[p] - m, b[p + 1] - m, i) for i in 0:j)
+  end
+end
+
+function roughness(k::PolynomialKernel)
+  b, c = pieces(k)
+  return sum(eachindex(c)) do p
+    m = _mid(b, p)
+    _integrate(_polymul(c[p], c[p]), b[p] - m, b[p + 1] - m)
+  end
+end
+
+function derivative(k::PolynomialKernel, r::Integer = 1)
+  _check_order(r)
+  r == 0 && return k
+  s = smoothness(k)
+  r <= s || throw(ArgumentError("$k has smoothness $s, so its derivative of order $r " *
+    "is not a function: it has point masses where a lower derivative jumps"))
+  b, c = pieces(k)
+  return PiecewisePolynomialKernel(Centered(), collect(b), [_derivcoefs(cj, r) for cj in c], s - r)
+end
+
+"""
+    convolve(k1::AbstractKernel, k2::AbstractKernel)
+
+The convolution `u ↦ ∫ k1(u - v) k2(v) dv`, as a kernel. Least-squares
+cross-validation needs `convolve(k, k)`, because `∫ f̂(x)^2 dx` is a double sum
+of it over pairs of observations. Convolutions of polynomial kernels are
+polynomial kernels, and convolutions of Gaussian kernels and their derivatives
+are derivatives of scaled Gaussian densities. Mixing the two families throws an
+`ArgumentError`.
+"""
+function convolve(k1::PolynomialKernel, k2::PolynomialKernel)
+  b1, c1 = pieces(k1)
+  b2, c2 = pieces(k2)
+  # The pieces are expanded in powers of u, convolved and expanded about the new
+  # midpoints in extended precision, where the cancellation is harmless.
+  centered = setprecision(BigFloat, 256) do
+    g1 = [_shifted(BigFloat, c1[i], -_mid(b1, i)) for i in eachindex(c1)]
+    g2 = [_shifted(BigFloat, c2[j], -_mid(b2, j)) for j in eachindex(c2)]
+    parts = Tuple{Float64,Float64,Vector{BigFloat}}[]   # (lo, hi, coefficients in powers of u)
+    for i in eachindex(c1), j in eachindex(c2)
+      _convolve_pieces!(parts, g1[i], b1[i], b1[i + 1], g2[j], b2[j], b2[j + 1])
+    end
+    breaks = sort!(unique!(vcat([p[1] for p in parts], [p[2] for p in parts])))
+    coefs = [zeros(BigFloat, 1) for _ in 1:length(breaks) - 1]
+    for (lo, hi, c) in parts, m in eachindex(coefs)
+      lo < _mid(breaks, m) < hi && _addto!(coefs[m], c)
+    end
+    breaks, [Float64.(_shifted(BigFloat, coefs[m], _mid(breaks, m))) for m in eachindex(coefs)]
+  end
+  return PiecewisePolynomialKernel(Centered(), centered..., smoothness(k1) + smoothness(k2) + 1)
+end
+
+# The convolution of p on [a, b] with q on [c, d] (both zero elsewhere, and both
+# in powers of u) is a polynomial between consecutive points of a + c, a + d,
+# b + c and b + d. There it is ∫ p(u - v) q(v) dv over max(c, u - b) ≤ v ≤
+# min(d, u - a), and both limits are affine in u.
+function _convolve_pieces!(parts, p, a, b, q, c, d)
+  T = promote_type(eltype(p), eltype(q))
+  # A[m, l] is the coefficient of u^(m-1) v^(l-1) in p(u - v) q(v)
+  A = zeros(T, length(p), length(p) + length(q) - 1)
+  for i in eachindex(p), k in 0:i-1, j in eachindex(q)
+    A[i - k, k + j] += p[i] * binomial(i - 1, k) * (-1)^k * q[j]
+  end
+  ts = sort!([a + c, a + d, b + c, b + d])
+  for s in 1:3
+    lo, hi = ts[s], ts[s + 1]
+    lo < hi || continue
+    mid = (lo + hi) / 2
+    αL, βL = mid - b > c ? (-b, 1) : (c, 0)   # lower limit αL + βL u
+    αU, βU = mid - a < d ? (-a, 1) : (d, 0)   # upper limit αU + βU u
+    poly = zeros(T, 1)
+    for m in axes(A, 1), l in axes(A, 2)
+      iszero(A[m, l]) && continue
+      # u^(m-1) ∫ v^(l-1) dv = u^(m-1) (U^l - L^l) / l
+      upper = _affinepow(T(αU), T(βU), l) .- _affinepow(T(αL), T(βL), l)
+      _addto!(poly, vcat(zeros(T, m - 1), upper), A[m, l] / l)
+    end
+    push!(parts, (lo, hi, poly))
+  end
+  return parts
+end
+
+
+## Gaussian kernels
+
+"""
+    GaussianKernel()
+
+The Gaussian kernel `k(u) = exp(-u^2/2) / sqrt(2π)`, the standard normal
+density. It has unbounded support, so the bandwidth is its standard deviation,
+and derivatives of every order.
+"""
+struct GaussianKernel <: AbstractKernel end
+
+"""
+    GaussianDerivativeKernel(σ, r)
+
+The derivative of order `r` of the normal density with mean zero and standard
+deviation `σ`, `u ↦ σ^-(r+1) φ^(r)(u / σ)`. [`derivative`](@ref) and
+[`convolve`](@ref) return this type for Gaussian kernels.
+"""
+struct GaussianDerivativeKernel <: AbstractKernel
+  σ::Float64   # standard deviation
+  r::Int       # order of the derivative
+
+  function GaussianDerivativeKernel(σ::Real, r::Integer)
+    σ > 0 || throw(ArgumentError("standard deviation σ must be positive, got $σ"))
+    _check_order(r)
+    new(σ, r)
+  end
+end
+
+const GaussianFamily = Union{GaussianKernel, GaussianDerivativeKernel}
+_scale_order(::GaussianKernel) = (1.0, 0)
+_scale_order(k::GaussianDerivativeKernel) = (k.σ, k.r)
+
+const INV_SQRT_2PI = 1 / sqrt(2π)
+
+(::GaussianKernel)(u::Real) = INV_SQRT_2PI * exp(-u^2 / 2)
+
+# φ^(r)(z) = (-1)^r He_r(z) φ(z), with He_r the probabilists' Hermite polynomials
+function (k::GaussianDerivativeKernel)(u::Real)
+  z = u / k.σ
+  return (-1)^k.r * _hermite(k.r, z) * INV_SQRT_2PI * exp(-z^2 / 2) / k.σ^(k.r + 1)
+end
+
+# He_r(z), from He_{n+1} = z He_n - n He_{n-1}
+function _hermite(r::Integer, z)
+  r == 0 && return one(z)
+  h0, h1 = one(z), z
+  for n in 1:r-1
+    h0, h1 = h1, z * h1 - n * h0
+  end
+  return h1
+end
+
+support(::GaussianFamily) = (-Inf, Inf)
+smoothness(::GaussianFamily) = typemax(Int)
+
+cdf(::GaussianKernel, u::Real) = cdf(Distributions.Normal(), u)
+
+function cdf(k::GaussianDerivativeKernel, u::Real)
+  k.r == 0 && return cdf(Distributions.Normal(), u / k.σ)
+  return GaussianDerivativeKernel(k.σ, k.r - 1)(u)
+end
+
+# ∫ u^j φ^(r)(u) du = (-1)^r j!/(j-r)! E[Z^(j-r)], and E[Z^m] = (m-1)!! for even m
+function moment(k::GaussianFamily, j::Integer)
+  j >= 0 || throw(ArgumentError("moment order must be nonnegative, got $j"))
+  σ, r = _scale_order(k)
+  m = j - r
+  (m < 0 || isodd(m)) && return 0.0
+  return (-1)^r * prod(m+1:j; init = 1.0) * prod(1:2:m-1; init = 1.0) * σ^m
+end
+
+# ∫ (φ^(r))^2 = (2r)! / (2^(2r+1) r! sqrt(π))
+function roughness(k::GaussianFamily)
+  σ, r = _scale_order(k)
+  return prod(r+1:2r; init = 1.0) / (2.0^(2r + 1) * sqrt(π) * σ^(2r + 1))
+end
+
+function derivative(k::GaussianFamily, r::Integer = 1)
+  _check_order(r)
+  r == 0 && return k
+  σ, r0 = _scale_order(k)
+  return GaussianDerivativeKernel(σ, r0 + r)
+end
+
+function convolve(k1::GaussianFamily, k2::GaussianFamily)
+  σ1, r1 = _scale_order(k1)
+  σ2, r2 = _scale_order(k2)
+  return GaussianDerivativeKernel(hypot(σ1, σ2), r1 + r2)
+end
+
+convolve(k1::AbstractKernel, k2::AbstractKernel) =
+  throw(ArgumentError("the convolution of $k1 and $k2 is not implemented"))
