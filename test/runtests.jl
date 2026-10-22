@@ -2,6 +2,7 @@ using Test
 
 tests = [
   "kernels",
+  "data",
   "aqua"
 ]
 
