@@ -82,6 +82,15 @@ end
   end
 end
 
+@testset "other kernels" begin
+  # kernels outside nprobust get the exact normal-reference constant for the variances
+  d = SmoothingData(X, Y)
+  s = selectbandwidth(MSEOptimal(), d, BiweightKernel(); points = [0.3, 0.6])
+  @test all(isfinite, s.h) && all(s.h .> 0)
+  @test KernelSmoothing._nrconstant(BiweightKernel()) ≈ (8 * sqrt(π) * (5 / 7) / (3 / 49))^(1 / 5)
+  @test KernelSmoothing._nrconstant(GaussianKernel()) == 1.06
+end
+
 @testset "Brent's method" begin
   @test _fmin(x -> (x - 0.3)^2 + 1, 0.0, 1.0) ≈ 0.3 atol = 1e-4
   @test _fmin(x -> abs(x - 2.5), 0.0, 10.0) ≈ 2.5 atol = 1e-4

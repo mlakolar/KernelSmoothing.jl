@@ -183,11 +183,13 @@ function _msedpi(d, k, c, p, ν, regul, interior, vce, minobs)
 end
 
 # nprobust's normal-reference constants for its kernels, and the exact ones otherwise
-_nrconstant(::EpanechnikovKernel) = 2.34
-_nrconstant(::UniformKernel) = 1.843
-_nrconstant(::TriangularKernel) = 2.576
-_nrconstant(::GaussianKernel) = 1.06
-_nrconstant(k::AbstractKernel) = (8 * sqrt(π) * roughness(k) / (3 * _mu2(k)^2))^(1 / 5)
+function _nrconstant(k::AbstractKernel)
+  k isa EpanechnikovKernel && return 2.34
+  k isa UniformKernel && return 1.843
+  k isa TriangularKernel && return 2.576
+  k isa GaussianKernel && return 1.06
+  return (8 * sqrt(π) * roughness(k) / (3 * _mu2(k)^2))^(1 / 5)
+end
 
 # R's type 7 quantile of sorted values
 function _unweightedquantile(xs, p)
