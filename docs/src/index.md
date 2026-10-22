@@ -24,7 +24,7 @@ KernelSmoothing
 using KernelSmoothing
 
 x = randn(1000)
-f = fit(KDE, x)                     # Epanechnikov kernel, normal-reference bandwidth
+f = fit(KDE, x)                     # Epanechnikov kernel, Sheather–Jones bandwidth
 pdf(f, 0.0), cdf(f, 0.0), quantile(f, 0.975)
 pdf.(f, range(-3, 3; length = 401))  # many points at once, exactly
 derivative(f, 1)(0.5)                # the estimated derivative of the density

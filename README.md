@@ -17,8 +17,12 @@ and the pieces that all estimators build on:
   are reported where they bind, and a rule-of-thumb bandwidth;
 - `fit(KDE, x)`, a kernel density estimate that is a distribution of
   Distributions.jl: `pdf`, `cdf`, `quantile`, `rand` and the rest, computed
-  exactly from the observations, with derivatives of the density, pointwise
-  standard errors and rule-of-thumb bandwidths;
+  exactly from the observations, with derivatives of the density and pointwise
+  standard errors;
+- bandwidth selectors: Sheather and Jones (the default for densities, solved to
+  tight tolerance with exact or finely binned sums), least-squares
+  cross-validation that reports its whole criterion, rules of thumb, and
+  leave-one-out cross-validation for regression in `O(n)` per bandwidth;
 - smoothing kernels: the uniform, triangular, Epanechnikov, biweight, triweight
   and Gaussian kernels, with their distribution functions, moments, roughness,
   derivatives, convolutions and products;
@@ -34,7 +38,7 @@ and the pieces that all estimators build on:
 
 ```julia
 using KernelSmoothing
-f = fit(KDE, randn(1000))            # Epanechnikov kernel, normal-reference bandwidth
+f = fit(KDE, randn(1000))            # Epanechnikov kernel, Sheather–Jones bandwidth
 pdf(f, 0.0), cdf(f, 0.0), quantile(f, 0.975)
 pdf.(f, range(-3, 3; length = 401))   # many points at once
 

@@ -207,7 +207,7 @@ _pointbandwidths(h, m) = throw(ArgumentError("a bandwidth must be a number or a 
 
 _regression_selection(h::Union{Real,AbstractVector{<:Real}}, d, k, p, ν, pts) =
   BandwidthSelection(h isa Real ? _bandwidths(h, 1) : _bandwidths(h, length(pts)), nothing, NamedTuple())
-_regression_selection(rule::Union{NormalReference,SilvermanRule}, d, k, p, ν, pts) =
+_regression_selection(rule::Union{NormalReference,SilvermanRule,SheatherJones,LSCV}, d, k, p, ν, pts) =
   throw(ArgumentError("$rule chooses bandwidths for densities; use a regression rule such as RuleOfThumb()"))
 _regression_selection(rule::BandwidthSelector, d, k, p, ν, pts) =
   selectbandwidth(rule, d, k; degree = p, derivative = ν, points = pts)
@@ -526,6 +526,9 @@ and scale. When `p - ν` is even, the rule of order `p + 1` is used, which has t
 same rate. The bandwidth is capped at the range of the data.
 """
 struct RuleOfThumb <: BandwidthSelector end
+
+_selection(rule::Union{RuleOfThumb,CrossValidation}, d, k) =
+  throw(ArgumentError("$rule chooses bandwidths for regression; use a density rule such as SheatherJones()"))
 
 function selectbandwidth(rule::RuleOfThumb, d::SmoothingData, k::AbstractKernel;
                          degree::Integer = 1, derivative::Integer = 0, points = nothing)
