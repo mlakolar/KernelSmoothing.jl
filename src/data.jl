@@ -9,10 +9,11 @@ starts in the sorted order.
 
 Sorting once makes local questions cheap. [`window`](@ref) finds the
 observations within a bandwidth of a point in `O(log n)` time,
-[`nunique`](@ref) counts the distinct values among them in `O(1)` time, and
-[`knn_distance`](@ref) finds the distance to the `k`-th nearest observation in
-`O(log n + k)` time. Estimators and bandwidth selectors will accept a
-`SmoothingData`, so a sample used for many fits is sorted and checked once.
+[`nunique`](@ref) and [`weightsum`](@ref) count the distinct values and add up
+the weights among them in `O(1)` time, and [`knn_distance`](@ref) finds the
+distance to the `k`-th nearest observation in `O(log n + k)` time. Estimators and
+bandwidth selectors will accept a `SmoothingData`, so a sample used for many fits
+is sorted and checked once.
 
 All values must be finite real numbers. Vectors containing `missing` are
 rejected, so remove incomplete observations first. Weights must be nonnegative
@@ -27,6 +28,7 @@ The fields, all in sorted order:
 - `values`: the distinct values of `x`
 - `starts`: observations `starts[j]:starts[j+1]-1` equal `values[j]`
 - `valueindex`: `x[i] == values[valueindex[i]]`
+- `cumw`: cumulative weights, `cumw[i + 1] = w[1] + ⋯ + w[i]` and `cumw[1] = 0`
 
 # Examples
 ```julia
@@ -50,6 +52,7 @@ struct SmoothingData{Y<:Union{Nothing,Vector{Float64}},W<:Union{Nothing,Vector{F
   values::Vector{Float64}   # distinct values of x
   starts::Vector{Int}       # x[starts[j]:starts[j+1]-1] .== values[j]
   valueindex::Vector{Int}   # x[i] == values[valueindex[i]]
+  cumw::Vector{Float64}     # cumw[i + 1] = w[1] + ⋯ + w[i], cumw[1] = 0
   sumw::Float64             # total weight
   neff::Float64             # Kish's effective sample size
 end
@@ -66,7 +69,7 @@ function _smoothingdata(x, y, weights)
     length(y) == length(x) ||
       throw(DimensionMismatch("y has $(length(y)) values for $(length(x)) observations"))
   end
-  keep = collect(eachindex(x))
+  keep = eachindex(x)
   if weights !== nothing
     _check_values(weights, "weights")
     length(weights) == length(x) || throw(DimensionMismatch(
@@ -76,7 +79,7 @@ function _smoothingdata(x, y, weights)
     isempty(keep) && throw(ArgumentError("weights must have a positive sum"))
   end
 
-  perm = keep[sortperm(view(x, keep))]   # sortperm is stable: ties keep their order
+  perm = _sortperm(x, keep)
   xs = [Float64(x[i]) + 0.0 for i in perm]   # adding 0.0 turns -0.0 into 0.0
   ys = y === nothing ? nothing : Float64[y[i] for i in perm]
   ws = weights === nothing ? nothing : Float64[weights[i] for i in perm]
@@ -91,9 +94,39 @@ function _smoothingdata(x, y, weights)
   push!(starts, length(xs) + 1)
 
   n = length(xs)
-  sumw = ws === nothing ? Float64(n) : sum(ws)
-  neff = ws === nothing ? Float64(n) : sumw^2 / sum(abs2, ws)
-  return SmoothingData(xs, ys, ws, perm, values, starts, valueindex, sumw, neff)
+  cumw = ws === nothing ? collect(0.0:n) : _cumsum0(ws)
+  neff = ws === nothing ? Float64(n) : cumw[end]^2 / sum(abs2, ws)
+  return SmoothingData(xs, ys, ws, perm, values, starts, valueindex, cumw, cumw[end], neff)
+end
+
+# The stable sorting permutation of x[keep], as indices of x. Each observation gets
+# a 128-bit key: the high half maps x[i] to an unsigned integer in the same order
+# (flip the sign bit of positive numbers, all bits of negative ones), the low half
+# is i, so sorting the keys orders by value and then by index. This is faster
+# than sortperm because integers sort by radix sort.
+function _sortperm(x, keep)
+  keys = Vector{UInt128}(undef, length(keep))
+  for (j, i) in enumerate(keep)
+    v = Float64(x[i]) + 0.0   # -0.0 sorts with 0.0
+    u = reinterpret(UInt64, v)
+    keys[j] = UInt128(signbit(v) ? ~u : u | 0x8000000000000000) << 64 | UInt128(i)
+  end
+  sort!(keys)
+  return [Int(k % UInt64) for k in keys]
+end
+
+# [0, w[1], w[1] + w[2], …] by compensated summation
+function _cumsum0(w)
+  c = Vector{Float64}(undef, length(w) + 1)
+  c[1] = s = comp = 0.0
+  for i in eachindex(w)
+    y = w[i] - comp
+    t = s + y
+    comp = (t - s) - y
+    s = t
+    c[i + 1] = s
+  end
+  return c
 end
 
 function _check_values(v, name)
@@ -134,6 +167,18 @@ The number of distinct values of `x`, overall or among the sorted observations
 nunique(d::SmoothingData) = length(d.values)
 nunique(d::SmoothingData, r::AbstractUnitRange{<:Integer}) =
   isempty(r) ? 0 : d.valueindex[last(r)] - d.valueindex[first(r)] + 1
+
+"""
+    weightsum(d::SmoothingData)
+    weightsum(d::SmoothingData, r::AbstractUnitRange)
+
+The total weight of the observations, overall or among the sorted observations
+`r`, such as a [`window`](@ref), in `O(1)` time from the cumulative weights.
+Without weights every observation counts one.
+"""
+weightsum(d::SmoothingData) = d.sumw
+weightsum(d::SmoothingData, r::AbstractUnitRange{<:Integer}) =
+  d.cumw[last(r) + 1] - d.cumw[first(r)]
 
 """
     window(d::SmoothingData, x0, h)

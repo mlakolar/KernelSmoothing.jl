@@ -20,7 +20,7 @@ export
   TriweightKernel, GaussianKernel,
   derivative, roughness, smoothness,
   cdf, support, convolve, moment,
-  SmoothingData, nobs, effective_nobs, nunique, window, knn_distance,
+  SmoothingData, nobs, effective_nobs, nunique, weightsum, window, knn_distance,
   kernelsums, kernelsums!, SumEngine, DirectSums, WindowSums, FastSums, BinnedSums, isexact
 
 include("polynomials.jl")

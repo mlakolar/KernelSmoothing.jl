@@ -56,6 +56,28 @@ brute_window(d, x0, h) = findall(xi -> abs((xi - x0) / h) <= 1, d.x)
         "SmoothingData(2 observations, 2 distinct values, weighted, with responses)"
 end
 
+@testset "sorting and weight sums" begin
+  # the integer-key sort gives the stable sortperm (with -0.0 sorted as 0.0)
+  @test SmoothingData(XS).perm == sortperm(XS .+ 0.0)
+  keep = findall(>(0), WS)
+  @test SmoothingData(XS; weights = WS).perm == keep[sortperm(XS[keep] .+ 0.0)]
+  xr = [7 * sin(1.618i) + 0.3 * cos(2.7i) for i in 1:2000]
+  @test SmoothingData(xr).perm == sortperm(xr)
+  @test SmoothingData([3, 1, 2, 1]).perm == [2, 4, 3, 1]
+  @test SmoothingData([-2.5, 1e300, -1e-300, 0.0, -0.0, 5e-324, -floatmax()]).perm ==
+        sortperm([-2.5, 1e300, -1e-300, 0.0, 0.0, 5e-324, -floatmax()])
+
+  d, dw = SmoothingData(XS), SmoothingData(XS; weights = WS)
+  @test d.cumw == 0:500 && weightsum(d) == 500
+  @test dw.cumw[end] == dw.sumw && weightsum(dw) ≈ sum(WS)
+  for x0 in range(-9, 9; length = 19), h in (0.1, 0.7, 3.0)
+    r, rw = window(d, x0, h), window(dw, x0, h)
+    @test weightsum(d, r) == length(r)
+    @test weightsum(dw, rw) ≈ sum(dw.w[rw]) atol = 1e-12
+  end
+  @test weightsum(dw, 1:0) == 0 && weightsum(dw, window(dw, 100.0, 1.0)) == 0
+end
+
 @testset "invalid input" begin
   @test_throws ArgumentError SmoothingData(Float64[])
   @test_throws ArgumentError SmoothingData([1.0, NaN])
