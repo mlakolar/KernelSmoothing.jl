@@ -17,6 +17,9 @@ and the pieces that all estimators build on:
   are reported where they bind, the covariances of the estimates between points,
   uniform sup-t bands, and honest intervals (Armstrong and Kolesár) with their
   optimal bandwidths, which agree with RDHonest;
+- `fit(LocalPolynomialDensity, x)`, the boundary-adaptive density estimator of
+  Cattaneo, Jansson and Ma, with robust bias-corrected intervals, covariances and
+  the rule-of-thumb bandwidth of lpdensity, with which it agrees;
 - `fit(KDE, x)`, a kernel density estimate that is a distribution of
   Distributions.jl: `pdf`, `cdf`, `quantile`, `rand` and the rest, computed
   exactly from the observations, with derivatives of the density and pointwise

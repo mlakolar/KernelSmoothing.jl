@@ -31,3 +31,21 @@ confint(fit(KDE, x), [-1, 0, 1])                    # at the Sheather-Jones band
 Modules = [KernelSmoothing]
 Pages = ["kdeinference.jl"]
 ```
+
+## At boundaries
+
+[`LocalPolynomialDensity`](@ref) is the estimator of Cattaneo, Jansson and Ma
+(2020), as R's lpdensity computes it: a local polynomial fit to the empirical
+distribution function, whose slope estimates the density. It needs no knowledge of
+where a boundary lies and keeps its rate there.
+
+```julia
+x = randexp(5000)
+m = fit(LocalPolynomialDensity, x; points = [0.0, 0.5, 1.0])   # consistent at the boundary 0
+confint(m)
+```
+
+```@autodocs
+Modules = [KernelSmoothing]
+Pages = ["lpdensity.jl"]
+```

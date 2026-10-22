@@ -98,8 +98,10 @@ Returns a named tuple with the `lower` and `upper` ends of the band and the
 critical value `critical`. By default the band is robust bias-corrected, centred at
 the bias-corrected estimates; with `method = Conventional()` it ignores the bias.
 """
-function confband(m::_PointwiseFit; level::Real = 0.95, method::InferenceMethod = RobustBiasCorrected(),
-                  draws::Integer = 10_000, rng::AbstractRNG = Random.default_rng())
+confband(m::_PointwiseFit; kwargs...) = _confband(m; kwargs...)
+
+function _confband(m; level::Real = 0.95, method::InferenceMethod = RobustBiasCorrected(),
+                   draws::Integer = 10_000, rng::AbstractRNG = Random.default_rng())
   0 < level < 1 || throw(ArgumentError("level must be between 0 and 1, got $level"))
   draws >= 100 || throw(ArgumentError("draws must be at least 100, got $draws"))
   method isa Union{Conventional,RobustBiasCorrected} ||

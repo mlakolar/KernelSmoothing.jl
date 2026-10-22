@@ -168,7 +168,7 @@ function StatsAPI.confint(m::PointwiseDensity; level::Real = 0.95, method::Infer
   return _confint(m, level, method)
 end
 
-function _confint(m::_PointwiseFit, level, method)
+function _confint(m, level, method)
   0 < level < 1 || throw(ArgumentError("level must be between 0 and 1, got $level"))
   z = Distributions.quantile(Distributions.Normal(), (1 + level) / 2)
   est, se = _usesbc(method) ? (m.estimate_bc, m.se_rbc) : (m.estimate, m.se)
@@ -202,7 +202,7 @@ function Base.show(io::IO, ::MIME"text/plain", m::PointwiseDensity)
   _showtable(io, m)
 end
 
-function _showtable(io, m::_PointwiseFit)
+function _showtable(io, m)
   r = confint(m)
   println(io, rpad("  point", 12), rpad("h", 10), rpad("n", 7), rpad("estimate", 11), rpad("se", 11),
           rpad("bias-corr.", 11), rpad("robust se", 11), "95% robust interval")
