@@ -10,6 +10,7 @@ tests = [
   "locpoly",
   "plugin",
   "kdeinference",
+  "bands",
   "aqua"
 ]
 
