@@ -29,7 +29,7 @@ export
   kernelsums, kernelsums!, SumEngine, DirectSums, WindowSums, FastSums, BinnedSums, isexact,
   SumsWorkspace,
   BandwidthSelector, BandwidthSelection, selectbandwidth, bandwidth,
-  NormalReference, SilvermanRule,
+  NormalReference, SilvermanRule, SheatherJones, LSCV, CrossValidation,
   KDE, fit, pdf, logpdf, quantile, stderror,
   LocalPolynomialRegression, RuleOfThumb, VarianceEstimator, NNVariance, HCVariance,
   InferenceMethod, Conventional, RobustBiasCorrected,
@@ -40,6 +40,7 @@ include("kernels.jl")
 include("data.jl")
 include("engines.jl")
 include("bandwidths.jl")
+include("selectors.jl")
 include("kde.jl")
 include("locpoly.jl")
 

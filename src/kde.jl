@@ -28,15 +28,15 @@ struct KDE{K<:AbstractKernel,RK<:AbstractKernel,D<:SmoothingData,S<:BandwidthSel
 end
 
 """
-    fit(KDE, x; kernel = EpanechnikovKernel(), bandwidth = NormalReference(), weights = nothing, engine = nothing)
+    fit(KDE, x; kernel = EpanechnikovKernel(), bandwidth = SheatherJones(), weights = nothing, engine = nothing)
     fit(KDE, d::SmoothingData; kernel, bandwidth, engine)
 
 The kernel density estimate of the sample `x`, with optional `weights`, or of a
 prepared sample `d`. The `bandwidth` is a positive number or a
-[`BandwidthSelector`](@ref); with the default, [`NormalReference`](@ref), it
-minimizes the asymptotic mean integrated squared error for normal data. It is a
-half-width for the compactly supported kernels and a standard deviation for the
-Gaussian kernel.
+[`BandwidthSelector`](@ref); the default, [`SheatherJones`](@ref), is the
+plug-in bandwidth that studies found the most reliable for densities without
+boundaries. It is a half-width for the compactly supported kernels and a standard
+deviation for the Gaussian kernel.
 
 The kernel must be a probability density, nonnegative and integrating to one, so
 that the estimate is one too. Kernels that take negative values, such as
@@ -62,7 +62,7 @@ function fit(::Type{KDE}, x::AbstractVector{<:Real}; weights = nothing, kwargs..
 end
 
 function fit(::Type{KDE}, d::SmoothingData; kernel::AbstractKernel = EpanechnikovKernel(),
-             bandwidth = NormalReference(), engine::Union{Nothing,SumEngine} = nothing)
+             bandwidth = SheatherJones(), engine::Union{Nothing,SumEngine} = nothing)
   _isnonnegative(kernel) || throw(ArgumentError("$kernel takes negative values, so a " *
     "kernel density estimate with it is not a density; use a nonnegative kernel, and " *
     "derivative(f, r) for derivatives of the density"))

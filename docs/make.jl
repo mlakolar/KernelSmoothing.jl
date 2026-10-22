@@ -9,6 +9,7 @@ makedocs(;
     "Home" => "index.md",
     "Density estimation" => "density.md",
     "Local polynomial regression" => "regression.md",
+    "Bandwidth selection" => "bandwidths.md",
     "Kernels" => "kernels.md",
     "Prepared data" => "data.md",
     "Kernel sums" => "sums.md",

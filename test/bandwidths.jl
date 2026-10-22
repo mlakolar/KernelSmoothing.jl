@@ -72,7 +72,7 @@ end
 end
 
 @testset "fit with a rule" begin
-  f = fit(KDE, XR)
+  f = fit(KDE, XR; bandwidth = NormalReference())
   @test bandwidth(f) == bandwidth(NormalReference(), SmoothingData(XR), EpanechnikovKernel())
   @test f.selection.rule == NormalReference()
   g = fit(KDE, XR; kernel = GaussianKernel(), bandwidth = SilvermanRule())

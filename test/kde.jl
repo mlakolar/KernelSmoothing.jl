@@ -113,7 +113,7 @@ end
     ts = quantile.(f, 0.05:0.05:0.95)
     @test maximum(abs(mean(s .<= t) - cdf(f, t)) for t in ts) < 2 / sqrt(N)
   end
-  f = fit(KDE, XQ)
+  f = fit(KDE, XQ; bandwidth = 0.8)
   @test rand(f) isa Float64 && size(rand(f, 2, 3)) == (2, 3)
 end
 
@@ -135,8 +135,8 @@ nthderiv(g, t, r) = r == 0 ? g(t) : ForwardDiff.derivative(s -> nthderiv(g, s, r
       @test [g(t) for t in ts] ≈ g.(ts) rtol = 1e-11 atol = 1e-13 * maximum(abs, D)
     end
   end
-  @test_throws ArgumentError derivative(fit(KDE, XQ), 2)   # the Epanechnikov kernel has one derivative
-  @test derivative(fit(KDE, XQ), 0)(0.3) ≈ pdf(fit(KDE, XQ), 0.3)
+  @test_throws ArgumentError derivative(fit(KDE, XQ; bandwidth = 0.8), 2)   # the Epanechnikov kernel has one derivative
+  @test derivative(fit(KDE, XQ; bandwidth = 0.8), 0)(0.3) ≈ pdf(fit(KDE, XQ; bandwidth = 0.8), 0.3)
 end
 
 @testset "kernels for densities" begin
@@ -150,7 +150,7 @@ end
     @test _isnonnegative(k)
   end
   @test _isnonnegative(EpanechnikovKernel() * TriangularKernel())
-  @test_throws ArgumentError fit(KDE, XQ; kernel = EpanechnikovKernel() * EpanechnikovKernel())   # mass 3/5
+  @test_throws ArgumentError fit(KDE, XQ; kernel = EpanechnikovKernel() * EpanechnikovKernel(), bandwidth = 0.8)   # mass 3/5
   # reflection: u ↦ k(-u)
   for k in vcat(DENSITY_KERNELS, signed, [derivative(TriweightKernel(), 3), derivative(ASYM)])
     r = _reflect(k)
@@ -202,14 +202,14 @@ end
   @test ccdf(f, 0.2) ≈ 1 - cdf(f, 0.2) && logcdf(f, 0.2) ≈ log(cdf(f, 0.2))
   @test std(f) ≈ sqrt(var(f))
   @test bandwidth(f) == 0.9 && nobs(f) == 7
-  g = fit(KDE, XQ; kernel = GaussianKernel())
+  g = fit(KDE, XQ; kernel = GaussianKernel(), bandwidth = 0.8)
   @test minimum(g) == -Inf && maximum(g) == Inf && insupport(g, 1e6)
   @test endswith(sprint(show, f), "EpanechnikovKernel(), bandwidth = 0.9, 7 observations, weighted)")
   @test occursin("derivative of order 1", sprint(show, derivative(f)))
   @test_throws ArgumentError fit(KDE, XQ; bandwidth = -1.0)
   @test_throws ArgumentError fit(KDE, XQ; bandwidth = "wide")
   d = SmoothingData(XQ, ones(7))
-  @test pdf(fit(KDE, d), 0.5) == pdf(fit(KDE, XQ), 0.5)   # responses are ignored
+  @test pdf(fit(KDE, d; bandwidth = 0.8), 0.5) == pdf(fit(KDE, XQ; bandwidth = 0.8), 0.5)   # responses are ignored
 end
 
 # a kernel defined outside the package, with unbounded support
@@ -251,7 +251,7 @@ end
 
 @testset "type stability" begin
   for k in (EpanechnikovKernel(), GaussianKernel())
-    f = fit(KDE, XQ; kernel = k, weights = WQ)
+    f = fit(KDE, XQ; kernel = k, weights = WQ, bandwidth = 0.8)
     @inferred pdf(f, 0.3)
     @inferred logpdf(f, 0.3)
     @inferred cdf(f, 0.3)
