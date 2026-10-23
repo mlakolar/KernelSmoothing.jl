@@ -111,7 +111,7 @@ KernelSmoothing.roughness(::BumpKernel) = 0.6
       s2 = sum(ww[i] * ww[j] * k((Z[i] - Z[j]) / h) for i in 1:400, j in 1:400 if i != j) / (h * (W^2 - S2))
       return s1 - 2s2
     end
-    crit = _lscvcriterion(d, k, true)
+    crit = _lscvcriterion(d, k, true, 0.01)
     for h in (0.1, 0.35, 0.9)
       @test crit(h) ≈ cv(h) rtol = 1e-9
     end
@@ -128,8 +128,12 @@ KernelSmoothing.roughness(::BumpKernel) = 0.6
   @test st.h == st.details.grid[1]
   @test_throws ArgumentError selectbandwidth(LSCV(), SmoothingData(Z), BumpKernel())
   d = SmoothingData(Z)
-  # the criterion is flat near its minimum, so binning moves the minimizer by about 1e-4
-  @test bandwidth(LSCV(exact = 0), d, GaussianKernel()) ≈ bandwidth(LSCV(), d, GaussianKernel()) rtol = 5e-4
+  # binned once on a fine grid, the minimizer moves by about 1e-5
+  @test bandwidth(LSCV(exact = 0), d, GaussianKernel()) ≈ bandwidth(LSCV(), d, GaussianKernel()) rtol = 2e-5
+  crit0, crit = _lscvcriterion(d, GaussianKernel(), true, 0.05), _lscvcriterion(d, GaussianKernel(), false, 0.05)
+  for h in (0.05, 0.2, 1.0)
+    @test crit(h) ≈ crit0(h) rtol = 1e-5
+  end
   @test_throws ArgumentError LSCV(gridsize = 2)
   @test_throws ArgumentError selectbandwidth(LSCV(), d, derivative(GaussianKernel(), 2))
 end

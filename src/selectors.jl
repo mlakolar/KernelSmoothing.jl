@@ -247,25 +247,28 @@ function _binlags(x, w, r, Δ)
   return _lagproducts(b)
 end
 
-function _psi(p::_LaggedBins, r, g)
-  k = GaussianDerivativeKernel(1.0, r)
+_psi(p::_LaggedBins, r, g) = _lagsum(p, GaussianDerivativeKernel(1.0, r), g, 12.0) / (p.norm * g^(r + 1))
+
+# ∑ᵢ ∑ⱼ wᵢ wⱼ K((xⱼ - xᵢ) / g), the diagonal included, for a symmetric K that is
+# negligible beyond `cutoff`
+function _lagsum(p::_LaggedBins, K, g, cutoff)
   s = 0.0
   for c in p.cs
-    s += c[1] * k(0.0)
-    for m in 1:min(length(c) - 1, floor(Int, 12g / p.Δ))
-      s += 2 * c[m + 1] * k(m * p.Δ / g)
+    s += c[1] * K(0.0)
+    for m in 1:min(length(c) - 1, floor(Int, cutoff * g / p.Δ))
+      s += 2 * c[m + 1] * K(m * p.Δ / g)
     end
   end
   # the pairs with an observation that is not binned, exactly: in both orders with
   # binned ones, and among themselves from both ends
   x, w = p.x, p.w
   for j in p.rest
-    for i in searchsortedfirst(x, x[j] - 12g):searchsortedlast(x, x[j] + 12g)
-      t = w[i] * w[j] * k((x[i] - x[j]) / g)
+    for i in searchsortedfirst(x, x[j] - cutoff * g):searchsortedlast(x, x[j] + cutoff * g)
+      t = w[i] * w[j] * K((x[i] - x[j]) / g)
       s += p.binned[i] ? 2t : t
     end
   end
-  return s / (p.norm * g^(r + 1))
+  return s
 end
 
 # ∑ₖ bₖ bₖ₊ₘ for m = 0, …, length(b) - 1, from the FFT of b padded with zeros: the
@@ -396,9 +399,9 @@ whether the minimum was at an end of the grid, which happens, for example, when 
 make the criterion fall without bound as `h` shrinks; the rule warns then.
 
 Polynomial kernels use exact fast sums. Gaussian kernels use exact double sums for
-up to `exact` observations and binned ones otherwise, as in
-[`SheatherJones`](@ref); since the criterion is flat near its minimum, binning moves
-the bandwidth by about `1e-4` relative. Cross-validation converges slowly, at the relative rate
+up to `exact` observations and otherwise the data binned once, on a grid of 100
+points per smallest bandwidth, with the lagged products of the bin weights, as in
+[`SheatherJones`](@ref); binning moves the bandwidth by about `1e-5` relative. Cross-validation converges slowly, at the relative rate
 `n^(-1/10)`, and varies a lot between samples, so it is an alternative to
 [`SheatherJones`](@ref) rather than a default.
 """
@@ -421,7 +424,7 @@ function selectbandwidth(rule::LSCV, d::SmoothingData, k::AbstractKernel)
   n = effective_nobs(d)
   c = (243 * roughness(k) / (35 * _mu2(k)^2 * n))^(1 / 5)
   hmin, hmax = c * _robustscale(sd, iqr / 1.349) / 100, 4 * c * sd
-  crit = _lscvcriterion(d, k, nobs(d) <= rule.exact)
+  crit = _lscvcriterion(d, k, nobs(d) <= rule.exact, hmin)
   hs = exp.(range(log(hmin), log(hmax); length = rule.gridsize))
   h, details = _gridminimize(crit, hs; largest = true)
   details.atbound && @warn "LSCV: the criterion is smallest at an end of the grid of bandwidths, h = $h"
@@ -429,7 +432,7 @@ function selectbandwidth(rule::LSCV, d::SmoothingData, k::AbstractKernel)
 end
 
 # h ↦ CV(h); ∫ f̂² is a double sum of the convolution of k with its reflection
-function _lscvcriterion(d, k::PolynomialKernel, exact)
+function _lscvcriterion(d, k::PolynomialKernel, exact, hmin)
   kk = convolve(k, _reflect(k))
   w = d.w === nothing ? ones(nobs(d)) : d.w
   W, sw2 = d.sumw, sum(abs2, w)
@@ -441,10 +444,23 @@ function _lscvcriterion(d, k::PolynomialKernel, exact)
   end
 end
 
-function _lscvcriterion(d, k::GaussianFamily, exact)
+# with more than `exact` observations, the data are binned once on a grid of 100
+# points per smallest standard deviation of the kernel, as for Sheather and Jones,
+# unless that grid would need more than 2^20 points; then for each h
+function _lscvcriterion(d, k::GaussianFamily, exact, hmin)
   σ, r = _scale_order(k)
   r == 0 || throw(ArgumentError("LSCV needs a density kernel, got $k"))
   kk = convolve(k, k)
+  Δ = hmin * σ / 100
+  if !exact && (d.x[end] - d.x[1]) / Δ + 2 <= 2^20
+    p = _LaggedBins(d, Δ, Inf)
+    W, sw2 = d.sumw, d.sumw^2 - p.norm
+    return function (h)
+      s1 = _lagsum(p, kk, h, 12 * kk.σ)
+      s2 = _lagsum(p, k, h, 12σ) - sw2 * k(0.0)
+      return s1 / (h * W^2) - 2 * s2 / (h * p.norm)
+    end
+  end
   return function (h)
     p = _PairSums(d, h * σ, exact)
     W, sw2 = d.sumw, d.sumw^2 - p.norm
@@ -454,7 +470,7 @@ function _lscvcriterion(d, k::GaussianFamily, exact)
   end
 end
 
-_lscvcriterion(d, k::AbstractKernel, exact) =
+_lscvcriterion(d, k::AbstractKernel, exact, hmin) =
   throw(ArgumentError("LSCV needs the convolution of the kernel with itself, which is not available for $k"))
 
 """

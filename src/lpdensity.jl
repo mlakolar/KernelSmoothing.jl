@@ -225,12 +225,9 @@ function StatsAPI.vcov(m::LocalPolynomialDensity; method::InferenceMethod = Conv
     val[r.gb+1:U] .= -f.aT
     val .* (factorial(v) / m.h[j]^v)
   end
-  G = length(m.points)
-  C = zeros(G, G)
-  for j in 1:G, l in j:G
-    C[j, l] = C[l, j] = sum(aux.Q .* dense[j] .* dense[l]) / n^2
-  end
-  return C
+  # one product of the weighted influence values, Sᵀ S, instead of a vector per pair
+  S = sqrt.(aux.Q) .* reduce(hcat, dense)
+  return (S' * S) ./ n^2
 end
 
 function Base.show(io::IO, m::LocalPolynomialDensity)
