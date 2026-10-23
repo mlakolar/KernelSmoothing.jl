@@ -49,17 +49,17 @@ bias-corrected standard errors (Calonico, Cattaneo and Farrell 2018), as nprobus
 `kdrobust` does.
 
 - `bandwidth` is a number, a vector with one bandwidth per point, or a
-  [`BandwidthSelector`](@ref). By default it is nprobust's plug-in choice for the
-  Epanechnikov and uniform kernels, [`MSEOptimal`](@ref) at one point and
-  [`IMSEOptimal`](@ref) at several, and [`SheatherJones`](@ref) for other kernels.
+  [`BandwidthSelector`](@ref). By default it is the plug-in bandwidth,
+  [`MSEOptimal`](@ref) at one point and [`IMSEOptimal`](@ref) at several, with
+  pilots that adapt to the density through the Sheather–Jones bandwidth.
 - `pilot` is the bandwidth `b` of the estimate of `f''`; by default `b = h / rho`.
   With `pilot = :selected`, the pilot bandwidth of the plug-in rule is used.
 - `minobs` raises `h` and `b` at each point to the distance of the `minobs`-th
   nearest observation, where needed; `minobs = 0` turns this off.
 - `compat = true` reproduces nprobust 1.0.0: its bias correction uses the constant
   `∫ u⁴ D(u) du / 24` instead of `μ₂(k)/2`, which removes only 5/9 of the leading
-  bias for the Epanechnikov kernel, and its integrated plug-in bandwidth squares
-  the average bias instead of averaging the squared bias.
+  bias for the Epanechnikov kernel, and its plug-in bandwidths use normal-reference
+  pilots and, when integrated, square the average bias.
 
 The kernel must be a symmetric second-order density kernel.
 """
@@ -75,7 +75,7 @@ function fit(::Type{PointwiseDensity}, d::SmoothingData; points = nothing,
     throw(ArgumentError("$kernel is not symmetric; robust bias-corrected densities need a symmetric kernel"))
   minobs >= 0 || throw(ArgumentError("minobs must be nonnegative, got $minobs"))
   pts = points === nothing ? [_quantile(d, q) for q in range(0.1, 0.9; length = 30)] : _checkpoints(points)
-  rule = bandwidth === nothing ? _default_density_rule(kernel, length(pts)) : bandwidth
+  rule = bandwidth === nothing ? _default_density_rule(kernel, length(pts), compat) : bandwidth
   sel = _density_selection(rule, d, kernel, pts, minobs, compat)
   h = _pointbandwidths(sel.h, length(pts))
   b = if pilot === :selected
@@ -101,8 +101,8 @@ function _check_density_kernel(k)
   return nothing
 end
 
-_default_density_rule(::Union{EpanechnikovKernel,UniformKernel}, m) = m == 1 ? MSEOptimal() : IMSEOptimal()
-_default_density_rule(::AbstractKernel, m) = SheatherJones()
+_default_density_rule(k, m, compat) =
+  compat && !(k isa Union{EpanechnikovKernel,UniformKernel}) ? SheatherJones() : m == 1 ? MSEOptimal() : IMSEOptimal()
 
 _density_selection(h::Union{Real,AbstractVector{<:Real}}, d, k, pts, minobs, compat) =
   _regression_selection(h, d, k, 0, 0, pts, nothing, minobs)
@@ -228,12 +228,67 @@ function StatsAPI.confint(f::KDE, x::AbstractVector{<:Real}; level::Real = 0.95,
 end
 
 
-## Plug-in bandwidths for densities (nprobust's kdbwselect)
+## Plug-in bandwidths for densities
 
+# For data without responses, MSEOptimal and IMSEOptimal give
+#   h(x) = (R(k) f(x) / (4 n (B(x)² + regularization · Rreg(x))))^(1/5),   B(x) = μ₂(k)/2 f''(x),
+# with the pilot f'' estimated with the kernel D at the bandwidth b. By default b is
+# the normal-reference ratio of the bandwidths for f'' and for f applied to the
+# Sheather–Jones bandwidth, so that it adapts to the roughness of the density, and
+# f is estimated at the Sheather–Jones bandwidth; Rreg = 3 (μ₂/2)² Var(f̂'') keeps h
+# finite where f'' vanishes. With compat = true, the rule-of-thumb pilots of
+# nprobust's kdbwselect are used instead.
 function _densityplugin(rule, d, k, points, minobs, compat; imse::Bool)
+  compat && return _kdbwselect(rule, d, k, points, minobs; imse)
+  xs, N = d.x, effective_nobs(d)
+  c0, c2 = _secondderivative(k)
+  μ2, R = moment(k, 2), roughness(k)
+  k2 = _square(k)
+  RD = c0^2 * moment(k2, 0) + 2c0 * c2 * moment(k2, 2) + c2^2 * moment(k2, 4)   # ∫ D²
+  κ4 = (c0 * moment(k, 4) + c2 * moment(k, 6)) / 24                            # ∫ u⁴ D / 4!
+  # bandwidths for f'' (kernel D) and f (kernel k) that minimize the asymptotic mean
+  # integrated squared error for the standard normal density, ψ₈ = 8!/(2⁹ 4! √π)
+  ψ8 = factorial(8) / (2^9 * factorial(4) * sqrt(π))
+  bnr = (5RD / (4 * κ4^2 * ψ8 * N))^(1 / 9)
+  hnr = (8 * sqrt(π) * R / (3 * μ2^2 * N))^(1 / 5)
+  hsj = bandwidth(SheatherJones(), d, k)
+  b = hsj * bnr / hnr
+  regul = rule.regularization
+  function constants(c)
+    fb = fh = 0.0
+    for i in eachindex(xs)
+      w = _weight(d.w, i)
+      v = (xs[i] - c) / b
+      fb += w * k(v) * (c0 + c2 * v^2)
+      fh += w * k((xs[i] - c) / hsj)
+    end
+    f, fpp = fh / (d.sumw * hsj), fb / (d.sumw * b^3)
+    return (V = R * f, B2 = (μ2 / 2 * fpp)^2, Rreg = 3 * (μ2 / 2)^2 * RD * max(f, 0.0) / (N * b^5))
+  end
+  hopt(V, B2, Rr) = (V / (4N * (B2 + regul * Rr)))^(1 / 5)
+  if imse
+    grid = points === nothing || rule.grid isa Integer ?
+      [_quantile(d, q) for q in range(0.1, 0.9; length = rule.grid isa Integer ? rule.grid : 30)] : points
+    cs = map(constants, grid)
+    h = hopt(sum(c.V for c in cs), sum(c.B2 for c in cs), sum(c.Rreg for c in cs))
+    return BandwidthSelection(h, rule, (b = b, grid = grid, sheatherjones = hsj))
+  end
+  pts = points === nothing ? [_quantile(d, q) for q in range(0.1, 0.9; length = 30)] : points
+  h, bs = similar(pts), similar(pts)
+  for (j, c) in enumerate(pts)
+    cs = constants(c)
+    floor = minobs > 0 ? knn_distance(d, c, min(minobs, nobs(d))) : 0.0
+    cap = max(abs(c - xs[1]), abs(c - xs[end]))
+    h[j], bs[j] = max(min(hopt(cs.V, cs.B2, cs.Rreg), cap), floor), max(b, floor)
+  end
+  return BandwidthSelection(h, rule, (b = bs, points = pts, sheatherjones = hsj))
+end
+
+# nprobust's kdbwselect: rule-of-thumb pilots for f and f''
+function _kdbwselect(rule, d, k, points, minobs; imse::Bool)
   k isa Union{EpanechnikovKernel,UniformKernel} || throw(ArgumentError(
-    "the plug-in density bandwidths are defined for the Epanechnikov and uniform kernels, as in " *
-    "nprobust; pass a bandwidth or use SheatherJones() for $k"))
+    "nprobust's plug-in density bandwidths (compat = true) are defined for the Epanechnikov and " *
+    "uniform kernels; pass a bandwidth or use compat = false for $k"))
   xs, N = d.x, effective_nobs(d)
   sd = _std(d)
   # nprobust's rule-of-thumb constants for the density and its second derivative
@@ -259,8 +314,8 @@ function _densityplugin(rule, d, k, points, minobs, compat; imse::Bool)
     cs = map(constants, grid)
     B = [c[1] for c in cs]
     V = sum(c[2] for c in cs) / length(cs)
-    # nprobust squares the average bias, which can cancel; the IMSE averages its square
-    B2 = compat ? (sum(B) / length(B))^2 : sum(abs2, B) / length(B)
+    # nprobust squares the average bias, which can cancel where f'' changes sign
+    B2 = (sum(B) / length(B))^2
     return BandwidthSelection(hopt(V, B2), rule, (b = brot, grid = grid))
   end
   pts = points === nothing ? [_quantile(d, q) for q in range(0.1, 0.9; length = 30)] : points

@@ -31,11 +31,15 @@ The selection holds one bandwidth per point, and the pilot bandwidths in
 `details.b`; fit with `pilot = :selected` to use them, since by default the fit
 uses `b = h / rho`, as nprobust does.
 
-For a sample without responses, the rule gives the plug-in bandwidth of
-nprobust's `kdbwselect` for the density at each point,
-`h = (R(k) f̂(x) / (4 n (μ₂(k)/2 f̂''(x))²))^(1/5)` with rule-of-thumb pilot
-estimates of `f` and `f''`, for the Epanechnikov and uniform kernels; the pilot
-bandwidth of `f''` is `b`.
+For a sample without responses, the rule gives the plug-in bandwidth for the
+density at each point, `h = (R(k) f̂(x) / (4 n (B̂² + regularization R̂)))^(1/5)`
+with `B̂ = μ₂(k)/2 f̂''(x)` and `R̂ = 3 (μ₂(k)/2)² V̂[f̂''(x)]`. The pilot `f̂''` uses
+the bandwidth `b`, the normal-reference ratio of the bandwidths for `f''` and for
+`f` applied to the [`SheatherJones`](@ref) bandwidth, so that it adapts to
+multimodal densities, and `f̂` uses the Sheather–Jones bandwidth. With
+`compat = true`, it gives nprobust's `kdbwselect` instead, whose rule-of-thumb
+pilots assume a normal density, for the Epanechnikov and uniform kernels; for a
+bimodal density they can make the bandwidth in the valley ten times too large.
 """
 struct MSEOptimal <: BandwidthSelector
   regularization::Float64
@@ -54,10 +58,10 @@ variance and squared bias constants of [`MSEOptimal`](@ref) are averaged over
 nprobust's `imse-dpi` does, or with `grid = :points` over the evaluation points of
 the fit. The pilot bandwidth `b` is in `details.b`.
 
-For a sample without responses, the rule gives the integrated plug-in bandwidth of
-nprobust's `kdbwselect` for densities, averaged over the quantiles of order 0.1 to
-0.9 (or the evaluation points with `grid = :points`), for the Epanechnikov and
-uniform kernels.
+For a sample without responses, the rule gives the integrated plug-in bandwidth
+for densities, with the constants of [`MSEOptimal`](@ref) averaged over the
+quantiles of order 0.1 to 0.9 (or the evaluation points with `grid = :points`), or
+with `compat = true` nprobust's `kdbwselect`.
 """
 struct IMSEOptimal <: BandwidthSelector
   grid::Union{Int,Symbol}
