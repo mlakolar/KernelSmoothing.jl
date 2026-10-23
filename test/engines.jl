@@ -304,4 +304,17 @@ end
   @test fetch.(tasks) == [1, 2] || fetch.(tasks) == [2, 1]
 end
 
+@testset "the engine choice samples the points in their sorted order" begin
+  d = SmoothingData([7 * sin(1.618i) + 0.3 * cos(2.7i) for i in 1:100_000])
+  grid = collect(range(-5, 5; length = 200))
+  k = EpanechnikovKernel()
+  @test typeof(_choose_engine(k, d.x, 0.3, repeat(grid, 32), 0)) == typeof(_choose_engine(k, d.x, 0.3, grid, 0))
+  # sums without weights reuse their values of one, also for samples of another size
+  ws = SumsWorkspace()
+  for n in (10, 1000, 10)
+    dn = SmoothingData(collect(range(0, 1; length = n)))
+    @test kernelsums(dn, k, 0.2, [0.5]; workspace = ws) == kernelsums(dn, k, 0.2, [0.5])
+  end
+end
+
 end

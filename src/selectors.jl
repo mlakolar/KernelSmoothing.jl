@@ -221,12 +221,17 @@ end
 # included, is about c[1] K(0) + 2 ∑ₘ c[m + 1] K(m Δ / g) for a symmetric K.
 # Data whose range needs more than 2^20 bins, because of far outliers or heavy
 # tails, are split at gaps wider than `gap`, across which the pairs are negligible,
-# and of a run that is still wider than 2^18 bins only the densest part is binned.
-# The pairs with the other observations, which are sparse, are summed exactly.
+# and each run into stretches of at most 2^18 bins: its densest stretch, which is
+# binned, and consecutive ones on either side, which are binned where their pairs
+# within reach of a pilot bandwidth would outnumber their bins. The pairs with the
+# observations of the other stretches, which are sparse, are summed exactly, and so
+# are the pairs across the boundary of two neighbouring binned stretches; with only
+# the densest stretch binned, heavy tails made the exact pairs grow quadratically.
 struct _LaggedBins
   Δ::Float64
   gap::Float64                  # pairs farther apart are left out; Inf for none
   cs::Vector{Vector{Float64}}   # the lagged products of each binned part
+  parts::Vector{UnitRange{Int}} # the observations of each binned part, in increasing order
   x::Vector{Float64}
   w::Vector{Float64}
   binned::BitVector             # whether an observation is binned
@@ -239,14 +244,24 @@ function _LaggedBins(d::SmoothingData, Δ, gap)
   w = d.w === nothing ? ones(n) : d.w
   norm = d.sumw^2 - sum(abs2, w)
   (x[end] - x[1]) / Δ + 2 <= 2^20 &&
-    return _LaggedBins(Δ, Inf, [_binlags(x, w, 1:n, Δ)], x, w, trues(n), Int[], norm)
+    return _LaggedBins(Δ, Inf, [_binlags(x, w, 1:n, Δ)], [1:n], x, w, trues(n), Int[], norm)
   binned = falses(n)
-  cs = [begin
-          part = _densest(x, r, (2^18 - 2) * Δ)
-          binned[part] .= true
-          _binlags(x, w, part, Δ)
-        end for r in _runs(x, gap)]
-  return _LaggedBins(Δ, gap, cs, x, w, binned, findall(!, binned), norm)
+  cs, parts = Vector{Float64}[], UnitRange{Int}[]
+  width = (2^18 - 2) * Δ
+  for r in _runs(x, gap)
+    D = _densest(x, r, width)
+    for part in [_stretches(x, first(r):first(D)-1, width); [D]; _stretches(x, last(D)+1:last(r), width)]
+      # binning costs a multiple of the number of bins once, the exact pairs their
+      # number at each evaluation
+      M = (x[last(part)] - x[first(part)]) / Δ + 2
+      if part == D || 8 * _pairsnear(x, part, 1200Δ) >= M
+        binned[part] .= true
+        push!(parts, part)
+        push!(cs, _binlags(x, w, part, Δ))
+      end
+    end
+  end
+  return _LaggedBins(Δ, gap, cs, parts, x, w, binned, findall(!, binned), norm)
 end
 
 # the longest stretch of the observations r whose values span at most `width`
@@ -259,6 +274,30 @@ function _densest(x, r, width)
     i - l + 1 > best && ((best, from) = (i - l + 1, l))
   end
   return from:from+best-1
+end
+
+# the number of ordered pairs of the observations r within `reach` of each other
+function _pairsnear(x, r, reach)
+  pairs, l = 0, first(r)
+  for i in r
+    while x[i] - x[l] > reach
+      l += 1
+    end
+    pairs += 2 * (i - l) + 1
+  end
+  return pairs
+end
+
+# consecutive stretches of the observations r, each spanning at most `width`
+function _stretches(x, r, width)
+  out = UnitRange{Int}[]
+  s = first(r)
+  while s <= last(r)
+    e = min(searchsortedlast(x, x[s] + width), last(r))
+    push!(out, s:e)
+    s = e + 1
+  end
+  return out
 end
 
 # the lagged products of the observations r, binned linearly on a grid of spacing Δ
@@ -289,9 +328,21 @@ function _lagsum(p::_LaggedBins, K, g, cutoff)
       s += 2 * c[m + 1] * K(m * p.Δ / g)
     end
   end
+  x, w = p.x, p.w
+  reach = cutoff * g
+  # the pairs across the boundary of two neighbouring binned parts, which neither part
+  # holds, in both orders; parts that are not neighbours are farther apart than that
+  for k in 1:length(p.parts)-1
+    A, B = p.parts[k], p.parts[k + 1]
+    x[first(B)] - x[last(A)] <= reach || continue
+    for i in max(first(A), searchsortedfirst(x, x[first(B)] - reach)):last(A)
+      for j in first(B):min(last(B), searchsortedlast(x, x[i] + reach))
+        s += 2 * w[i] * w[j] * K((x[j] - x[i]) / g)
+      end
+    end
+  end
   # the pairs with an observation that is not binned, exactly: in both orders with
   # binned ones, and among themselves from both ends
-  x, w = p.x, p.w
   for j in p.rest
     for i in searchsortedfirst(x, x[j] - cutoff * g):searchsortedlast(x, x[j] + cutoff * g)
       t = w[i] * w[j] * K((x[i] - x[j]) / g)
@@ -389,10 +440,11 @@ end
 
 # The bandwidth chosen from a criterion on a grid: the global minimizer over the
 # finite values, or with `largest = true` the largest local minimizer. An interior
-# choice is refined between its neighbours, and the refinement is kept only where it
-# is no worse. Returns the details: the grid, the criterion values, the local
-# minimizers and whether the choice is at an end of the grid.
-function _gridminimize(f, hs; largest::Bool)
+# choice is refined between its neighbours, to the relative accuracy rtol, and the
+# refinement is kept only where it is no worse. Returns the details: the grid, the
+# criterion values, the local minimizers and whether the choice is at an end of the
+# grid.
+function _gridminimize(f, hs; largest::Bool, rtol = 1e-6)
   cv = [f(h) for h in hs]
   m = length(hs)
   any(isfinite, cv) || throw(ArgumentError("the criterion is not finite at any bandwidth of the grid"))
@@ -401,7 +453,7 @@ function _gridminimize(f, hs; largest::Bool)
   atbound = i == 1 || i == m
   h = hs[i]
   if !atbound && isfinite(cv[i - 1]) && isfinite(cv[i + 1])
-    t = _goldenmin(f, hs[i - 1], hs[i + 1])
+    t = _goldenmin(f, hs[i - 1], hs[i + 1]; rtol)
     f(t) <= cv[i] && (h = t)
   end
   return h, (grid = collect(hs), criterion = cv, minimizers = hs[interior], atbound = atbound)
@@ -518,7 +570,8 @@ kernels. The grid has `gridsize` bandwidths spaced evenly on the log scale, from
 the smallest one that leaves `p + 1` other distinct values in every window, below
 which leave-one-out fits break down, to the range of the data, or to twice that
 smallest one if it is larger. The global minimizer
-on the grid is refined, and the details record the grid and the criterion.
+on the grid is refined to a relative accuracy of `1e-3`, far below the statistical
+error of the bandwidth, and the details record the grid and the criterion.
 Cross-validation estimates the regression function, so it needs `derivative = 0`.
 """
 struct CrossValidation <: BandwidthSelector
@@ -546,14 +599,15 @@ function selectbandwidth(rule::CrossValidation, d::SmoothingData, k::AbstractKer
   hmax = max(d.x[end] - d.x[1], 2hmin)
   ws = SumsWorkspace()
   crit(h) = _cvcriterion(d, k, h, p, ws)
+  # the minimum is refined to 1e-3, far below the statistical error of the bandwidth,
+  # with about half the evaluations of 1e-6
   h, details = _gridminimize(crit, exp.(range(log(hmin), log(hmax); length = rule.gridsize));
-                             largest = false)
+                             largest = false, rtol = 1e-3)
   return BandwidthSelection(h, rule, details)
 end
 
 function _cvcriterion(d, k, h, p, ws)
-  S = kernelsums(d, k, h; kmax = 2p, workspace = ws)
-  T = kernelsums(d, k, h; kmax = p, z = d.y, workspace = ws)
+  S, T = _sumsyz(d, k, h, p, ws)
   k0 = k(0.0)
   # chunks of a fixed size, run as tasks and summed in order, so that the criterion
   # does not depend on the number of threads

@@ -101,16 +101,17 @@ by two calls at the same time.
 mutable struct SumsWorkspace
   vals::Vector{Float64}       # wᵢ zᵢ in the sorted order of the data
   order::Vector{Int}          # the points in increasing order
-  prefix::Matrix{Float64}     # FastSums: power sums within blocks
+  prefixes::Vector{Matrix{Float64}}   # FastSums: power sums within blocks, one per vector of values
   starts::Vector{Int}         # FastSums: the first observation of each block
   centers::Vector{Float64}    # FastSums: the centre of each block
   blockof::Vector{Int}        # FastSums: the block of each observation
   grid::Vector{Float64}       # BinnedSums: occupied grid points
   gridvals::Vector{Float64}   # BinnedSums: their binned values
   gridindex::Vector{Int}      # BinnedSums: their indices on the grid
+  ones::Vector{Float64}       # values of one, for sums without weights and z
 
-  SumsWorkspace() = new(Float64[], Int[], Matrix{Float64}(undef, 0, 0), Int[], Float64[],
-                        Int[], Float64[], Float64[], Int[])
+  SumsWorkspace() = new(Float64[], Int[], Matrix{Float64}[], Int[], Float64[],
+                        Int[], Float64[], Float64[], Int[], Float64[])
 end
 
 Base.show(io::IO, ::SumsWorkspace) = print(io, "SumsWorkspace()")
@@ -189,7 +190,7 @@ function kernelsums!(out::AbstractMatrix{Float64}, d::SmoothingData, k::Abstract
   vals = _sumvalues!(workspace, d, z)
   isempty(points) && return out
   kmax = size(out, 1) - 1
-  e = engine === nothing ? _choose_engine(k, d.x, hs, points, kmax) : engine
+  e = engine === nothing ? _choose_engine(k, d.x, hs, points, kmax, _sortedorder!(workspace, points)) : engine
   _kernelsums!(out, e, d.x, vals, k, hs, points, kmax, workspace)
   return out
 end
@@ -218,7 +219,9 @@ function _sumvalues!(ws::SumsWorkspace, d::SmoothingData, z)
   n = nobs(d)
   if z === nothing
     d.w === nothing || return d.w
-    return fill!(resize!(ws.vals, n), 1.0)
+    # filled once for repeated calls, as in a bandwidth search; nothing else writes it
+    length(ws.ones) == n || fill!(resize!(ws.ones, n), 1.0)
+    return ws.ones
   end
   _check_values(z, "z")
   length(z) == n || throw(DimensionMismatch("z has $(length(z)) values for $n observations"))
@@ -232,17 +235,19 @@ end
 # observation in each window, 0.8 for the named kernels and 2.7 for others, whose
 # pieces are vectors; fast sums cost 0.65 per power sum of each observation, and per
 # point a constant plus the pieces of the kernel times the blocks its window spans.
-# Both are estimated from 32 of the points.
-_choose_engine(::AbstractKernel, xs, h, points, kmax) = DirectSums()
+# Both are estimated from 32 of the points, evenly spaced in their sorted `order`, so
+# that a grid repeated in the points does not put the whole sample in one place.
+_choose_engine(::AbstractKernel, xs, h, points, kmax, order) = DirectSums()
+_choose_engine(k::AbstractKernel, xs, h, points, kmax) = _choose_engine(k, xs, h, points, kmax, sortperm(points))
 
-function _choose_engine(k::PolynomialKernel, xs, h, points, kmax)
+function _choose_engine(k::PolynomialKernel, xs, h, points, kmax, order)
   m, n = length(points), length(xs)
   b, c = pieces(k)
   lo, hi = first(b), last(b)
   np, len = length(c), maximum(length, c)
   f = _blockfactor(len - 1 + kmax)
   h0 = _hmin(h)
-  sample = 1:max(1, m ÷ 32):m
+  sample = view(order, 1:max(1, m ÷ 32):m)
   terms = blocks = 0.0
   for j in sample
     p, hj = points[j], _bw(h, j)
@@ -257,10 +262,10 @@ end
 # Gaussian kernels: the sums over the observations within the radius where the
 # kernel underflows to zero, which equal the direct sums term by term, when the
 # windows hold fewer than about half of the observations
-function _choose_engine(k::GaussianFamily, xs, h, points, kmax)
+function _choose_engine(k::GaussianFamily, xs, h, points, kmax, order)
   m, n = length(points), length(xs)
   r = _zeroradius(k)
-  sample = 1:max(1, m ÷ 32):m
+  sample = view(order, 1:max(1, m ÷ 32):m)
   terms = 0
   for j in sample
     p, hj = points[j], _bw(h, j)
@@ -292,9 +297,12 @@ _zerosupport(k::GaussianFamily) = (r = _zeroradius(k); (-r, r))
 # with these factors it stayed below 5e-14.
 _blockfactor(s) = 2.0^cld(max(s - 6, 0), 7)
 
-# the indices of the points in increasing order of the points
+# the indices of the points in increasing order of the points; an order already in
+# the workspace that sorts the points, as from the engine choice, is kept
 function _sortedorder!(ws::SumsWorkspace, points)
-  order = resize!(ws.order, length(points))
+  order = ws.order
+  length(order) == length(points) && issorted(view(points, order)) && return order
+  resize!(order, length(points))
   return issorted(points) ? copyto!(order, eachindex(points)) : sortperm!(order, points)
 end
 
@@ -470,6 +478,51 @@ function _windowsums!(out, xs, vals, k, h, points, kmax::Val, lo, hi, order)
   return out
 end
 
+# windowed sums for two vectors of values in one pass, sharing the windows and the
+# kernel values; each output gets the terms of a separate pass, in the same order
+function _windowsums2!(S, T, xs, v1, v2, k, h, points, ::Val{K1}, ::Val{K2}, lo, hi, order) where {K1,K2}
+  n = length(xs)
+  _foreachchunk(order) do chunk
+    a = b = 1
+    for j in chunk
+      p, hj = points[j], _bw(h, j)
+      a = _search(i -> (xs[i] - p) / hj >= lo, a, n, h)
+      b = _search(i -> (xs[i] - p) / hj > hi, b, n, h)
+      acc1, acc2 = ntuple(_ -> 0.0, Val(K1 + 1)), ntuple(_ -> 0.0, Val(K2 + 1))
+      @inbounds for i in a:b-1
+        u = (xs[i] - p) / hj
+        kv = k(u)
+        acc1 = _accum(acc1, v1[i] * kv, u)
+        acc2 = _accum(acc2, v2[i] * kv, u)
+      end
+      _store!(S, j, acc1)
+      _store!(T, j, acc2)
+    end
+  end
+  return S, T
+end
+
+# The kernel sums at the observations with and without the responses,
+# S = kernelsums(d, k, h; kmax = 2p) and T = kernelsums(d, k, h; kmax = p, z = d.y),
+# in one pass where the engine allows it
+function _sumsyz(d::SmoothingData, k::AbstractKernel, h, p, ws::SumsWorkspace)
+  n = nobs(d)
+  S, T = Matrix{Float64}(undef, 2p + 1, n), Matrix{Float64}(undef, p + 1, n)
+  order = _sortedorder!(ws, d.x)
+  e = _choose_engine(k, d.x, h, d.x, 2p, order)
+  vS, vT = _sumvalues!(ws, d, nothing), _sumvalues!(ws, d, d.y)
+  if e isa FastSums
+    _fastsums!((S, T), d.x, (vS, vT), k, h, d.x, (2p, p), ws)
+  elseif e isa Union{WindowSums,_ZeroWindowSums} && 2p < _MAXTUPLE
+    lo, hi = e isa WindowSums ? support(k) : _zerosupport(k)
+    _windowsums2!(S, T, d.x, vS, vT, k, h, d.x, Val(2p), Val(p), lo, hi, order)
+  else
+    kernelsums!(S, d, k, h, d.x; engine = e, workspace = ws)
+    kernelsums!(T, d, k, h, d.x; z = d.y, engine = e, workspace = ws)
+  end
+  return S, T
+end
+
 
 ## Fast sums
 
@@ -477,22 +530,38 @@ _kernelsums!(out, ::FastSums, xs, vals, k::AbstractKernel, h, points, kmax, ws) 
   throw(ArgumentError("FastSums needs a polynomial kernel; use DirectSums or BinnedSums for $k"))
 
 function _kernelsums!(out, ::FastSums, xs, vals, k::PolynomialKernel, h, points, kmax, ws)
+  _fastsums!((out,), xs, (vals,), k, h, points, (kmax,), ws)
+  return out
+end
+
+# Fast sums for several vectors of values at once, each into its own output with its
+# own kmax, sharing the blocks, the searches and the polynomials of each piece, as
+# cross-validation needs for the sums with and without the responses
+function _fastsums!(outs::NTuple{N,Any}, xs, valss::NTuple{N,Any}, k::PolynomialKernel, h, points,
+                    kmaxs::NTuple{N,Int}, ws) where N
   b, c = pieces(k)
   order = _sortedorder!(ws, points)
   h0 = _hmin(h)
-  smax = maximum(length, c) - 1 + kmax   # the highest power of t needed
+  K = maximum(kmaxs)
+  len0 = maximum(length, c)
+  smax = len0 - 1 + K   # the highest power of t needed
   # block width: a window at the smallest bandwidth, narrower for wide supports and
   # high powers, whose rounding grows with the width
   Δ = (last(b) - first(b)) * h0 / _blockfactor(smax)
   # below the resolution of the data, blocks would hold single values; sum directly
-  Δ > 64 * eps(max(abs(xs[1]), abs(xs[end]))) ||
-    return _windowsums!(out, xs, vals, k, h, points, Val(kmax), first(b), last(b), order)
-  starts, centers, blockof, prefix = _blockprefix!(ws, xs, vals, Δ, h0, smax)
+  if !(Δ > 64 * eps(max(abs(xs[1]), abs(xs[end]))))
+    for l in 1:N
+      _windowsums!(outs[l], xs, valss[l], k, h, points, Val(kmaxs[l]), first(b), last(b), order)
+    end
+    return outs
+  end
+  starts, centers, blockof = _blocks!(ws, xs, Δ)
+  prefixes = ntuple(l -> _prefix!(ws, l, xs, valss[l], starts, centers, h0, len0 - 1 + kmaxs[l]), N)
   n, np = length(xs), length(c)
   _foreachchunk(order) do chunk
-    ptr = ones(Int, np + 1)   # piece π holds observations ptr[π]:ptr[π+1]-1
-    L = zeros(smax + 1)       # power sums of t over part of a block
-    g = zeros(smax + 1)       # a piece of k times u^r, in powers of t
+    ptr = ones(Int, np + 1)                         # piece π holds observations ptr[π]:ptr[π+1]-1
+    L = ntuple(l -> zeros(size(prefixes[l], 1)), N)  # power sums of t over part of a block
+    g = zeros(smax + 1)                             # a piece of k times u^r, in powers of t
     for j in chunk
       p, hj = points[j], _bw(h, j)
       ρ = h0 / hj   # u = ρ t + δ with t = (x - centre) / h0
@@ -502,8 +571,8 @@ function _kernelsums!(out, ::FastSums, xs, vals, k::PolynomialKernel, h, points,
         ptr[π] = _search(i -> (xs[i] - p) / hj >= b[π], ptr[π], n, h)
       end
       ptr[np + 1] = _search(i -> (xs[i] - p) / hj > b[np + 1], ptr[np + 1], n, h)
-      for r in 1:kmax+1
-        out[r, j] = 0.0
+      for l in 1:N, r in 1:kmaxs[l]+1
+        outs[l][r, j] = 0.0
       end
       for π in 1:np
         i1, i2 = ptr[π], ptr[π + 1] - 1
@@ -511,8 +580,11 @@ function _kernelsums!(out, ::FastSums, xs, vals, k::PolynomialKernel, h, points,
         m = _mid(b, π)
         @inbounds for β in blockof[i1]:blockof[i2]
           s, e = max(i1, starts[β]), min(i2, starts[β + 1] - 1)
-          for q in 1:smax+1
-            L[q] = prefix[q, e] - (s > starts[β] ? prefix[q, s - 1] : 0.0)
+          for l in 1:N
+            P, Ll = prefixes[l], L[l]
+            for q in eachindex(Ll)
+              Ll[q] = P[q, e] - (s > starts[β] ? P[q, s - 1] : 0.0)
+            end
           end
           δ = (centers[β] - p) / hj
           len = length(c[π])
@@ -521,32 +593,32 @@ function _kernelsums!(out, ::FastSums, xs, vals, k::PolynomialKernel, h, points,
           end
           _shift!(g, len, δ - m)        # the piece, a polynomial in u - m, in powers of ρ t
           ρ == 1 || _scale!(g, len, ρ)  # in powers of t
-          for r in 1:kmax+1
-            acc = 0.0
-            for q in 1:len
-              acc = muladd(g[q], L[q], acc)
+          for r in 1:K+1
+            for l in 1:N
+              r <= kmaxs[l] + 1 || continue
+              Ll = L[l]
+              acc = 0.0
+              for q in 1:len
+                acc = muladd(g[q], Ll[q], acc)
+              end
+              outs[l][r, j] += acc
             end
-            out[r, j] += acc
-            r <= kmax && (len = _mulaffine!(g, len, ρ, δ))
+            r <= K && (len = _mulaffine!(g, len, ρ, δ))
           end
         end
       end
     end
   end
-  return out
+  return outs
 end
 
 # Splits the sorted xs into blocks of width Δ and returns the first index and the
-# centre of each block, the block of each observation, and the power sums
-# prefix[q, i] = ∑ vals[l] t_l^(q-1) over the observations l of i's block up to i,
-# where t_l = (xs[l] - centre) / h; the arrays live in the workspace. The centre is
-# the midpoint of the block's own observations: the midpoint of its cell of the grid
-# can lie half a cell from them, and when the bandwidth, and with it the cell, is
-# much wider than the data, the power sums about it cancel.
-function _blockprefix!(ws::SumsWorkspace, xs, vals, Δ, h, smax)
+# centre of each block and the block of each observation; the arrays live in the
+# workspace. The centre is the midpoint of the block's own observations: the midpoint
+# of its cell of the grid can lie half a cell from them, and when the bandwidth, and
+# with it the cell, is much wider than the data, the power sums about it cancel.
+function _blocks!(ws::SumsWorkspace, xs, Δ)
   n = length(xs)
-  size(ws.prefix) == (smax + 1, n) || (ws.prefix = Matrix{Float64}(undef, smax + 1, n))
-  prefix = ws.prefix
   starts, centers = empty!(ws.starts), empty!(ws.centers)
   blockof = resize!(ws.blockof, n)
   q0 = -1.0
@@ -561,8 +633,21 @@ function _blockprefix!(ws::SumsWorkspace, xs, vals, Δ, h, smax)
   push!(starts, n + 1)
   @inbounds for β in 1:length(starts)-1
     s, e = starts[β], starts[β + 1] - 1
-    c = xs[s] + (xs[e] - xs[s]) / 2
-    push!(centers, c)
+    push!(centers, xs[s] + (xs[e] - xs[s]) / 2)
+  end
+  return starts, centers, blockof
+end
+
+# The power sums prefix[q, i] = ∑ vals[l] t_l^(q-1), q = 1, …, smax + 1, over the
+# observations l of i's block up to i, where t_l = (xs[l] - centre) / h, in the l-th
+# prefix matrix of the workspace
+function _prefix!(ws::SumsWorkspace, l, xs, vals, starts, centers, h, smax)
+  n = length(xs)
+  l <= length(ws.prefixes) || push!(ws.prefixes, Matrix{Float64}(undef, 0, 0))
+  size(ws.prefixes[l]) == (smax + 1, n) || (ws.prefixes[l] = Matrix{Float64}(undef, smax + 1, n))
+  prefix = ws.prefixes[l]
+  @inbounds for β in 1:length(starts)-1
+    s, e, c = starts[β], starts[β + 1] - 1, centers[β]
     for i in s:e
       t = (xs[i] - c) / h
       v = vals[i]
@@ -572,7 +657,7 @@ function _blockprefix!(ws::SumsWorkspace, xs, vals, Δ, h, smax)
       end
     end
   end
-  return starts, centers, blockof, prefix
+  return prefix
 end
 
 
