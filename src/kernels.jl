@@ -219,9 +219,10 @@ struct PiecewisePolynomialKernel <: PolynomialKernel
   lowercdf::Vector{Float64}           # the cdf on the first piece in powers of u - breaks[1]
   upperccdf::Vector{Float64}          # the upper tail on the last piece in powers of breaks[end] - u
 
-  # The coefficients may be given in extended precision, from which the distribution
-  # function and its tails are computed before they are rounded; `tails` passes
-  # tails that are already known, as for a reflection.
+  # Coefficients given in extended precision, the exact pieces of a convolution, a
+  # product or a kernel given in powers of u, yield the distribution function and its
+  # tails before they are rounded; others are taken as they are, in Float64. `tails`
+  # passes tails that are already known, as for a reflection.
   function PiecewisePolynomialKernel(::Centered, breaks::AbstractVector{<:Real},
                                      coefs::AbstractVector{<:AbstractVector{<:Real}},
                                      smoothness::Integer; tails = nothing)
@@ -234,10 +235,14 @@ struct PiecewisePolynomialKernel <: PolynomialKernel
     all(cj -> all(isfinite, cj), coefs) || throw(ArgumentError("coefficients must be finite"))
     smoothness >= 0 || throw(ArgumentError("smoothness must be nonnegative, got $smoothness"))
     b, c = Vector{Float64}(breaks), [Vector{Float64}(cj) for cj in coefs]
-    cc, mass, lower, upper = setprecision(BigFloat, 256) do
-      cb = [BigFloat.(cj) for cj in coefs]
-      A, M = _cdfcoefs(b, cb)
-      [Float64.(a) for a in A], Float64(M), (tails === nothing ? _cdftails(b, cb) : tails)...
+    cc, mass, lower, upper = if eltype(first(coefs)) <: BigFloat
+      setprecision(BigFloat, 256) do
+        cb = [BigFloat.(cj) for cj in coefs]
+        A, M = _cdfcoefs(b, cb)
+        [Float64.(a) for a in A], Float64(M), (tails === nothing ? _cdftails(b, cb) : tails)...
+      end
+    else
+      (_cdfcoefs(b, c)..., (tails === nothing ? _cdftails(b, c) : tails)...)
     end
     new(b, c, smoothness, cc, mass, Vector{Float64}(lower), Vector{Float64}(upper))
   end
