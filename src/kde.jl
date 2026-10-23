@@ -66,6 +66,7 @@ end
 function fit(::Type{KDE}, d::SmoothingData; kernel::AbstractKernel = EpanechnikovKernel(),
              bandwidth = SheatherJones(), engine::Union{Nothing,SumEngine} = nothing)
   d = _withouty(d)
+  engine === nothing || _check_engine(engine, kernel)
   _isnonnegative(kernel) || throw(ArgumentError("$kernel takes negative values, so a " *
     "kernel density estimate with it is not a density; use a nonnegative kernel, and " *
     "derivative(f, r) for derivatives of the density"))
@@ -76,6 +77,13 @@ function fit(::Type{KDE}, d::SmoothingData; kernel::AbstractKernel = Epanechniko
   sel.h isa Float64 || throw(ArgumentError("a kernel density estimate needs one bandwidth, got one per point"))
   return KDE(d, kernel, _reflect(kernel), sel.h, sel, engine)
 end
+
+# an engine that cannot sum the kernel would fail at every broadcast
+_check_engine(::FastSums, k) = k isa PolynomialKernel ||
+  throw(ArgumentError("FastSums needs a polynomial kernel, got $k; use DirectSums or BinnedSums"))
+_check_engine(::WindowSums, k) = all(isfinite, support(k)) ||
+  throw(ArgumentError("WindowSums needs a compactly supported kernel, got $k; use DirectSums or BinnedSums"))
+_check_engine(::SumEngine, k) = true
 
 function Base.show(io::IO, f::KDE)
   print(io, "KDE(", f.kernel, ", bandwidth = ", round(f.h; sigdigits = 4), ", ",
@@ -183,7 +191,7 @@ function ccdf(f::KDE, x::Real)
   @inbounds for i in a:b-1
     s += _weight(d.w, i) * cdf(r, (xs[i] - x) / h)
   end
-  return clamp((d.sumw - d.cumw[b] + s) / d.sumw, 0.0, 1.0)
+  return clamp((_wsum(d, b, n) + s) / d.sumw, 0.0, 1.0)
 end
 
 function _ccdf(f::KDE, x)
@@ -196,7 +204,7 @@ function _ccdf(f::KDE, x)
     for j in eachindex(p)
       if isfinite(hi)   # add the weight of the observations above the window
         b = _firsttrue(i -> (d.x[i] - p[j]) / h > hi, nobs(d))
-        s[j] += d.sumw - d.cumw[b]
+        s[j] += _wsum(d, b, nobs(d))
       end
       s[j] = p[j] <= xmin ? 1.0 : p[j] >= xmax ? 0.0 : clamp(s[j] / d.sumw, 0.0, 1.0)
     end

@@ -199,6 +199,7 @@ KernelSmoothing.support(::FailingKernel) = (-1.0, 1.0)
   @test_throws DimensionMismatch kernelsums(d, k, 0.3, POINTS; z = YS[1:10])
   @test_throws ArgumentError kernelsums(d, k, 0.3, POINTS; z = fill(NaN, 500))
   @test_throws DimensionMismatch kernelsums!(zeros(3, 80), d, k, 0.3, POINTS)
+  @test_throws "at least one row" kernelsums!(zeros(0, 81), d, k, 0.3, POINTS)
   @test_throws MethodError kernelsums!(zeros(Float32, 1, 81), d, k, 0.3, POINTS)
   @test kernelsums(d, k, Float64[], Float64[]) == zeros(1, 0)
   # an error raised in a task is thrown as itself, whatever the number of points

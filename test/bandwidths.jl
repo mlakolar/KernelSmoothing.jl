@@ -80,4 +80,16 @@ end
   @test fit(KDE, XR; bandwidth = 0.25).selection.rule === nothing
 end
 
+@testset "kernels for rules of thumb" begin
+  # an asymmetric kernel whose first moment is not zero has a bias of order h, which
+  # the rules do not assume
+  asym = PiecewisePolynomialKernel([-1.0, 0.0, 2.0], [[2/3, 2/3], [2/3, -1/3]])
+  d = SmoothingData(XR)
+  for rule in (NormalReference(), SilvermanRule(), SheatherJones())
+    @test_throws ArgumentError selectbandwidth(rule, d, asym)
+  end
+  @test_throws ArgumentError fit(KDE, XR; kernel = asym)
+  @test pdf(fit(KDE, XR; kernel = asym, bandwidth = 0.5), 0.0) > 0
+end
+
 end

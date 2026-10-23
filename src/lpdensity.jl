@@ -53,7 +53,7 @@ bias-corrected estimates of order `degree + 1`.
 - `bandwidth` is a number, a vector with one bandwidth per point, or a rule of
   lpdensity: `MSEOptimal()`, its plug-in estimate of the bandwidth that minimizes
   the asymptotic mean squared error at each point (`bwselect = "mse-dpi"`, the
-  default); `IMSEOptimal(grid = :points)`, one plug-in bandwidth for all points
+  default, which `nothing` also selects); `IMSEOptimal(grid = :points)`, one plug-in bandwidth for all points
   that minimizes the sum of these errors over the points (`"imse-dpi"`); or
   `NormalReference()`, the rule of thumb for normal data (`"mse-rot"`). The plug-in
   rules estimate the derivatives of orders `degree + 1` and `degree + 2` of the
@@ -73,8 +73,8 @@ bias-corrected estimates of order `degree + 1`.
   value, as lpdensity does, and `IMSEOptimal` applies the largest floor over the
   evaluation points to its single bandwidth.
 
-The kernel must be compactly supported; lpdensity uses the triangular,
-Epanechnikov and uniform kernels. The estimates agree with lpdensity 3.0.1 with
+The kernel must be compactly supported and nonnegative; lpdensity uses the
+triangular, Epanechnikov and uniform kernels. The estimates agree with lpdensity 3.0.1 with
 `massPoints = TRUE`.
 """
 function fit(::Type{LocalPolynomialDensity}, x::AbstractVector{<:Real}; weights = nothing, kwargs...)
@@ -89,6 +89,8 @@ function fit(::Type{LocalPolynomialDensity}, d::SmoothingData; points = nothing,
   derivative >= 0 || throw(ArgumentError("derivative must be nonnegative, got $derivative"))
   v <= p || throw(ArgumentError("the derivative of order $derivative needs degree at least $v, got $p"))
   all(isfinite, support(kernel)) || throw(ArgumentError("$kernel must be compactly supported"))
+  _isnonnegative(kernel) || throw(ArgumentError("$kernel takes negative values; the local fits need " *
+    "nonnegative kernel weights"))
   minobs >= 0 || throw(ArgumentError("minobs must be nonnegative, got $minobs"))
   pts = points === nothing ? [_quantile(d, q) for q in 0.05:0.05:0.95] : _checkpoints(points)
   sel = _lpdensity_selection(bandwidth, d, kernel, pts, p, v, minobs; compat)
@@ -114,6 +116,8 @@ _lpdensity_selection(rule::NormalReference, d, k, pts, p, v, minobs; compat = fa
   _lpdensity_rot(rule, d, k, pts, p, v, minobs)
 _lpdensity_selection(rule::Union{MSEOptimal,IMSEOptimal}, d, k, pts, p, v, minobs; compat = false) =
   _lpdensity_dpi(rule, d, k, pts, p, v, minobs, compat)
+_lpdensity_selection(::Nothing, d, k, pts, p, v, minobs; compat = false) =   # the default, as in the other fits
+  _lpdensity_dpi(MSEOptimal(), d, k, pts, p, v, minobs, compat)
 _lpdensity_selection(rule, d, k, pts, p, v, minobs; compat = false) = throw(ArgumentError(
   "LocalPolynomialDensity takes a number, a vector, MSEOptimal(), IMSEOptimal() or NormalReference() as " *
   "bandwidth, got $(repr(rule))"))
@@ -130,7 +134,7 @@ function _lpdaux(d::SmoothingData)
   P, F, Q = zeros(U), zeros(U), zeros(U)
   for g in 1:U
     s, e = d.starts[g], d.starts[g + 1] - 1
-    P[g] = (d.cumw[e + 1] - d.cumw[s]) * n / W
+    P[g] = _wsum(d, s, e) * n / W
     F[g] = d.cumw[e + 1] / W
     Q[g] = d.w === nothing ? Float64(e - s + 1) : sum(abs2, view(d.w, s:e)) * (n / W)^2
   end

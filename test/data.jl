@@ -135,4 +135,28 @@ end
   @test_throws ArgumentError knn_distance(t, NaN, 1)
 end
 
+@testset "weights at extreme scales" begin
+  v = [7 * sin(1.618i) + 0.3 * cos(2.7i) for i in 1:500]
+  k = EpanechnikovKernel()
+  hsj = bandwidth(SheatherJones(), SmoothingData(v), k)
+  for s in (1e-170, 1e170, 1e-300)
+    # products of such weights underflow or overflow, but only their ratios matter
+    d = SmoothingData(v; weights = fill(s, 500))
+    @test effective_nobs(d) ≈ 500
+    @test weightsum(d) ≈ 500s rtol = 1e-12
+    @test weightsum(d, 1:10) ≈ 10s rtol = 1e-12
+    @test bandwidth(SheatherJones(), d, k) ≈ hsj rtol = 1e-6
+    @test pdf(fit(KDE, d; bandwidth = 1.0), 0.3) ≈ pdf(fit(KDE, v; bandwidth = 1.0), 0.3) rtol = 1e-12
+  end
+  # ordinary weights are stored as given
+  @test SmoothingData(v; weights = fill(3.0, 500)).w == fill(3.0, 500)
+  # a small range after a large weight keeps its accuracy
+  d = SmoothingData(collect(1.0:11.0); weights = [1e12; fill(0.3, 10)])
+  @test weightsum(d, 2:11) ≈ 3.0 rtol = 1e-14
+  @test weightsum(d, 5:4) == 0
+  # values that are not finite as Float64
+  @test_throws ArgumentError SmoothingData([1.0, big(10.0)^400])
+  @test_throws ArgumentError SmoothingData([1.0, 2.0]; weights = [1.0, big(10.0)^400])
+end
+
 end

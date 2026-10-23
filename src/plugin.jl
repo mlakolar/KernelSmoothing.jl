@@ -23,10 +23,10 @@ to `B₁`, its bandwidth depends on the units of `y`.
 
 By default, the pilot bandwidth `b` is the [`CrossValidation`](@ref) bandwidth of
 the fit of order `p` times the ratio of the [`RuleOfThumb`](@ref) bandwidths for
-the derivative of order `p + 1` (fit of order `q`) and for the regression function
-(fit of order `p`), so that it adapts to the roughness of the regression function;
-the pilot for the derivative of order `p + 2`, which even `p - ν` needs, is formed
-in the same way. Cross-validation assumes independent errors: with positively
+the derivative of order `p + 1` and for the regression function, so that it adapts
+to the roughness of the regression function; the pilot for the derivative of order
+`p + 2`, which even `p - ν` needs, is formed in the same way. The derivative of
+order `p + 1` is then estimated by a fit of order `q` with bandwidth `b`. Cross-validation assumes independent errors: with positively
 correlated errors it undersmooths, and so does the pilot. With `compat = true`, the
 rule is nprobust's `lpbwselect` with `bwselect = "mse-dpi"` instead, which agrees
 with nprobust 1.0.0 to rounding. Its pilot bandwidths come from three more plug-in
@@ -100,7 +100,7 @@ struct IMSEOptimal <: BandwidthSelector
 
   function IMSEOptimal(grid::Union{Integer,Symbol}, regularization::Real, interior::Bool)
     grid isa Symbol && grid != :points && throw(ArgumentError("grid must be a number of points or :points, got :$grid"))
-    grid isa Integer && grid < 1 && throw(ArgumentError("grid must have at least one point, got $grid"))
+    grid isa Integer && grid < 2 && throw(ArgumentError("grid must have at least two points, got $grid"))
     new(grid, regularization, interior)
   end
 end

@@ -171,7 +171,8 @@ function kernelsums!(out::AbstractMatrix{Float64}, d::SmoothingData, k::Abstract
                      workspace::SumsWorkspace = SumsWorkspace())
   Base.require_one_based_indexing(out, points)
   all(isfinite, points) || throw(ArgumentError("points must be finite"))
-  size(out, 1) >= 1 && size(out, 2) == length(points) || throw(DimensionMismatch(
+  size(out, 1) >= 1 || throw(DimensionMismatch("out must have at least one row, for kmax = 0"))
+  size(out, 2) == length(points) || throw(DimensionMismatch(
     "out must have length(points) = $(length(points)) columns, got size $(size(out))"))
   hs = _bandwidths(h, length(points))
   vals = _sumvalues!(workspace, d, z)

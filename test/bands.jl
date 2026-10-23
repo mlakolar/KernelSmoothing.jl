@@ -78,6 +78,10 @@ end
   @test confband(f, [0.2, 0.25, 0.3]; rng = MersenneTwister(4)) == confband(md; rng = MersenneTwister(4))
   @test_throws ArgumentError confband(m2; level = 1.2)
   @test_throws ArgumentError confband(m2; draws = 10)
+  # with one point the simulated quantile scatters around the pointwise critical value,
+  # which the band never falls below
+  md1 = fit(PointwiseDensity, X; points = [0.5], bandwidth = 0.08)
+  @test all(confband(md1; rng = MersenneTwister(s)).critical >= 1.959963984540054 for s in 1:30)
 end
 
 end

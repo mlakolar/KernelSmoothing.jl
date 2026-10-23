@@ -99,7 +99,7 @@ function selectbandwidth(rule::NormalReference, d::SmoothingData, k::AbstractKer
   σ = rule.robust ? _robustscale(sd, iqr / 1.349) : sd
   _check_scale(σ, rule)
   n = effective_nobs(d)
-  h = σ * (8 * sqrt(π) * roughness(k) / (3 * _mu2(k)^2 * n))^(1 / 5)
+  h = σ * (8 * sqrt(π) * roughness(k) / (3 * _mu2centred(k)^2 * n))^(1 / 5)
   return BandwidthSelection(h, rule, (scale = σ, sd = sd, iqr = iqr, n = n))
 end
 
@@ -121,7 +121,7 @@ function selectbandwidth(rule::SilvermanRule, d::SmoothingData, k::AbstractKerne
   σ = _robustscale(sd, iqr / 1.34)
   _check_scale(σ, rule)
   n = effective_nobs(d)
-  h = 0.9 * σ * n^(-1 / 5) / sqrt(_mu2(k))
+  h = 0.9 * σ * n^(-1 / 5) / sqrt(_mu2centred(k))
   return BandwidthSelection(h, rule, (scale = σ, sd = sd, iqr = iqr, n = n))
 end
 
@@ -136,6 +136,16 @@ function _mu2(k)
   μ2 = moment(k, 2)
   μ2 > 0 || throw(ArgumentError("rules of thumb need a second-order kernel, but moment(k, 2) = $μ2 for $k"))
   return μ2
+end
+
+# The second moment of a kernel whose first moment vanishes: the rules of thumb
+# assume a bias of order h², while a kernel with moment(k, 1) ≠ 0 has a bias of
+# order h
+function _mu2centred(k)
+  μ1 = moment(k, 1)
+  abs(μ1) <= 1e-10 * sqrt(abs(moment(k, 2))) || throw(ArgumentError(
+    "rules of thumb need a kernel with moment(k, 1) = 0, whose bias is of order h², got $μ1 for $k"))
+  return _mu2(k)
 end
 
 # The weighted standard deviation and interquartile range. With equal weights

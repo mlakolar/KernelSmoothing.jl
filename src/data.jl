@@ -15,20 +15,24 @@ distance to the `k`-th nearest observation in `O(log n + k)` time. Estimators an
 bandwidth selectors will accept a `SmoothingData`, so a sample used for many fits
 is sorted and checked once.
 
-All values must be finite real numbers. Vectors containing `missing` are
-rejected, so remove incomplete observations first. Weights must be nonnegative
-with a positive sum; only their ratios matter, and observations with zero weight
-are dropped. Values are stored as `Float64`, with `-0.0` stored as `0.0`.
+All values must be finite real numbers, also after their conversion to `Float64`.
+Vectors containing `missing` are rejected, so remove incomplete observations first.
+Weights must be nonnegative with a positive sum; only their ratios matter, and
+observations with zero weight are dropped. Values are stored as `Float64`, with
+`-0.0` stored as `0.0`. Weights whose largest value lies outside `[2^-200, 2^200]`
+are stored divided by a power of two, so that products of weights neither overflow
+nor underflow; [`weightsum`](@ref) undoes the division.
 
 The fields, all in sorted order:
 - `x`: the observations
 - `y`: the responses, or `nothing`
-- `w`: the weights, or `nothing` when all weights are equal
+- `w`: the weights, or `nothing` when none are given
 - `perm`: the original indices, `x[i] == x_input[perm[i]]`
 - `values`: the distinct values of `x`
 - `starts`: observations `starts[j]:starts[j+1]-1` equal `values[j]`
 - `valueindex`: `x[i] == values[valueindex[i]]`
-- `cumw`: cumulative weights, `cumw[i + 1] = w[1] + ⋯ + w[i]` and `cumw[1] = 0`
+- `cumw`: cumulative weights, `cumw[i + 1] = w[1] + ⋯ + w[i]` and `cumw[1] = 0`,
+  rounded, with their rounding errors in `cumwlo` (empty without weights)
 
 # Examples
 ```julia
@@ -52,9 +56,11 @@ struct SmoothingData{Y<:Union{Nothing,Vector{Float64}},W<:Union{Nothing,Vector{F
   values::Vector{Float64}   # distinct values of x
   starts::Vector{Int}       # x[starts[j]:starts[j+1]-1] .== values[j]
   valueindex::Vector{Int}   # x[i] == values[valueindex[i]]
-  cumw::Vector{Float64}     # cumw[i + 1] = w[1] + ⋯ + w[i], cumw[1] = 0
+  cumw::Vector{Float64}     # cumw[i + 1] = w[1] + ⋯ + w[i], cumw[1] = 0, rounded
+  cumwlo::Vector{Float64}   # the rounding errors of cumw, or empty without weights
   sumw::Float64             # total weight
   neff::Float64             # Kish's effective sample size
+  wexp::Int                 # the weights are stored divided by 2^wexp
 end
 
 SmoothingData(x::AbstractVector; weights = nothing) = _smoothingdata(x, nothing, weights)
@@ -83,6 +89,13 @@ function _smoothingdata(x, y, weights)
   xs = [Float64(x[i]) + 0.0 for i in perm]   # adding 0.0 turns -0.0 into 0.0
   ys = y === nothing ? nothing : Float64[y[i] for i in perm]
   ws = weights === nothing ? nothing : Float64[weights[i] for i in perm]
+  # weights whose products would overflow or underflow, as with weights of 1e-170,
+  # are divided by a power of two, exactly; only their ratios matter
+  wexp = 0
+  if ws !== nothing && !(2.0^-200 <= maximum(ws) <= 2.0^200)
+    wexp = exponent(maximum(ws))
+    ws .= ldexp.(ws, -wexp)
+  end
 
   starts = [1]
   valueindex = Vector{Int}(undef, length(xs))
@@ -94,9 +107,9 @@ function _smoothingdata(x, y, weights)
   push!(starts, length(xs) + 1)
 
   n = length(xs)
-  cumw = ws === nothing ? collect(0.0:n) : _cumsum0(ws)
+  cumw, cumwlo = ws === nothing ? (collect(0.0:n), Float64[]) : _cumsum0(ws)
   neff = ws === nothing ? Float64(n) : cumw[end]^2 / sum(abs2, ws)
-  return SmoothingData(xs, ys, ws, perm, values, starts, valueindex, cumw, cumw[end], neff)
+  return SmoothingData(xs, ys, ws, perm, values, starts, valueindex, cumw, cumwlo, cumw[end], neff, wexp)
 end
 
 # The stable sorting permutation of x[keep], as indices of x. Each observation gets
@@ -115,19 +128,25 @@ function _sortperm(x, keep)
   return [Int(k % UInt64) for k in keys]
 end
 
-# [0, w[1], w[1] + w[2], …] by compensated summation
+# [0, w[1], w[1] + w[2], …] by compensated summation, and the rounding errors of
+# these sums, so that sums over ranges keep their accuracy after large weights
 function _cumsum0(w)
-  c = Vector{Float64}(undef, length(w) + 1)
-  c[1] = s = comp = 0.0
+  c, lo = Vector{Float64}(undef, length(w) + 1), Vector{Float64}(undef, length(w) + 1)
+  c[1] = lo[1] = s = comp = 0.0
   for i in eachindex(w)
     y = w[i] - comp
     t = s + y
     comp = (t - s) - y
     s = t
-    c[i + 1] = s
+    c[i + 1], lo[i + 1] = s, -comp   # the exact sum is about s - comp
   end
-  return c
+  return c, lo
 end
+
+# ∑ w[a:b] in the stored scale of the weights, from the cumulative sums and their
+# rounding errors
+_wsum(d::SmoothingData, a, b) =
+  b < a ? 0.0 : (d.cumw[b + 1] - d.cumw[a]) + (isempty(d.cumwlo) ? 0.0 : d.cumwlo[b + 1] - d.cumwlo[a])
 
 function _check_values(v, name)
   Base.require_one_based_indexing(v)
@@ -135,8 +154,9 @@ function _check_values(v, name)
     throw(ArgumentError("$name contains missing values; remove the incomplete observations first"))
   eltype(v) <: Real || all(e -> e isa Real, v) ||
     throw(ArgumentError("$name must contain real numbers"))
-  i = findfirst(!isfinite, v)
-  i === nothing || throw(ArgumentError("$name[$i] = $(v[i]) is not finite"))
+  # finite as Float64, which a BigFloat beyond its range is not
+  i = findfirst(e -> !isfinite(Float64(e)), v)
+  i === nothing || throw(ArgumentError("$name[$i] = $(v[i]) is not finite as a Float64"))
   return nothing
 end
 
@@ -151,7 +171,8 @@ nobs(d::SmoothingData) = length(d.x)
 # ignore responses, and the plug-in rules choose between densities and regression by
 # whether there are any
 _withouty(d::SmoothingData) = d.y === nothing ? d :
-  SmoothingData(d.x, nothing, d.w, d.perm, d.values, d.starts, d.valueindex, d.cumw, d.sumw, d.neff)
+  SmoothingData(d.x, nothing, d.w, d.perm, d.values, d.starts, d.valueindex, d.cumw, d.cumwlo, d.sumw,
+                d.neff, d.wexp)
 
 """
     effective_nobs(d::SmoothingData)
@@ -179,12 +200,12 @@ nunique(d::SmoothingData, r::AbstractUnitRange{<:Integer}) =
     weightsum(d::SmoothingData, r::AbstractUnitRange)
 
 The total weight of the observations, overall or among the sorted observations
-`r`, such as a [`window`](@ref), in `O(1)` time from the cumulative weights.
-Without weights every observation counts one.
+`r`, such as a [`window`](@ref), in `O(1)` time from the cumulative weights and
+their rounding errors, so that a small range after large weights keeps its
+accuracy. Without weights every observation counts one.
 """
-weightsum(d::SmoothingData) = d.sumw
-weightsum(d::SmoothingData, r::AbstractUnitRange{<:Integer}) =
-  d.cumw[last(r) + 1] - d.cumw[first(r)]
+weightsum(d::SmoothingData) = ldexp(d.sumw, d.wexp)
+weightsum(d::SmoothingData, r::AbstractUnitRange{<:Integer}) = ldexp(_wsum(d, first(r), last(r)), d.wexp)
 
 """
     window(d::SmoothingData, x0, h)

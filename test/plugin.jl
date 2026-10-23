@@ -156,6 +156,7 @@ end
   # a NaN end used to make the search run forever
   @test_throws ArgumentError _fmin(x -> x^2, 0.0, NaN)
   @test_throws ArgumentError _fmin(x -> x^2, 1.0, 1.0)
+  @test_throws ArgumentError IMSEOptimal(grid = 1)
 end
 
 @testset "fits that are not identified" begin

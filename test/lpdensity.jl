@@ -115,6 +115,9 @@ end
   @test_throws ArgumentError fit(LocalPolynomialDensity, XN; bandwidth = SheatherJones())
   @test_throws ArgumentError confint(m; method = Honest(1.0))
   @test_throws ArgumentError fit(LocalPolynomialDensity, fill(2.0, 50); bandwidth = NormalReference())
+  # nothing selects the default, as in the other fits; kernels must not be negative
+  @test fit(LocalPolynomialDensity, XN; bandwidth = nothing).h == m.h
+  @test_throws ArgumentError fit(LocalPolynomialDensity, XN; kernel = derivative(BiweightKernel()), bandwidth = 0.5)
   @test_throws ArgumentError fit(LocalPolynomialDensity, fill(2.0, 50))
 end
 

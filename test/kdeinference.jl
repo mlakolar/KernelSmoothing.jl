@@ -164,6 +164,7 @@ end
   @test_throws ArgumentError fit(PointwiseDensity, d; bandwidth = 0.3, pilot = :selected)
   @test_throws ArgumentError fit(PointwiseDensity, d; bandwidth = "wide")
   @test_throws ArgumentError fit(PointwiseDensity, d; bandwidth = 0.3, minobs = -1)
+  @test_throws ArgumentError fit(PointwiseDensity, d; bandwidth = MSEOptimal(interior = true))
   @test_throws ArgumentError confint(fit(PointwiseDensity, d; bandwidth = 0.3); level = 2)
 end
 
