@@ -14,7 +14,7 @@ where `R(k) = roughness(k)`, `μ₂(k) = moment(k, 2)` and `n` is the
 [`effective_nobs`](@ref). With `method = :ste`, "solve the equation", the pilot
 bandwidth `g = α₂ h^(5/7)` depends on `h` itself, with `α₂` estimated from `ψ̂₄`
 and `ψ̂₆` at normal-reference pilot bandwidths, and the equation is solved to a
-relative accuracy of `1e-10`. With `method = :dpi`, the direct plug-in, `g` is
+relative accuracy of `1e-10`, or `1e-8` from binned data. With `method = :dpi`, the direct plug-in, `g` is
 the bandwidth that is optimal for estimating `ψ₄` when `ψ₆` is estimated at its
 normal-reference pilot bandwidth.
 
@@ -28,7 +28,8 @@ from the data binned linearly once, on a grid with about 100 points per smallest
 pilot bandwidth, with the lagged products of the bin weights from an FFT. This
 changes the estimates by about `1e-5` and the bandwidth by about `1e-6` relative,
 far below its statistical error, and makes the selection take a few milliseconds
-for up to `10^6` observations. Data that would need more than `2^20` grid points,
+for `10^6` observations of a smooth density; heavy tails take longer, since their
+sparse stretches are summed exactly. Data that would need more than `2^20` grid points,
 because of far outliers or heavy tails, are split at gaps across which the pilot
 kernels are negligible, and each run into stretches of at most `2^18` grid points,
 of which the densest one and the others that are dense enough are binned; the pairs
@@ -54,6 +55,7 @@ SheatherJones(; method::Symbol = :ste, exact::Integer = 100) = SheatherJones(met
 
 function selectbandwidth(rule::SheatherJones, d::SmoothingData, k::AbstractKernel)
   nobs(d) >= 2 || throw(ArgumentError("SheatherJones needs at least two observations"))
+  _check_mass(k, rule)
   sd, iqr = _sdiqr(d)
   σ = _robustscale(sd, iqr / 1.349)
   _check_scale(σ, rule)
@@ -485,7 +487,8 @@ make the criterion fall without bound as `h` shrinks; the rule warns then.
 Polynomial kernels use exact fast sums. Gaussian kernels use exact double sums for
 up to `exact` observations and otherwise the data binned once, on a grid of 100
 points per smallest bandwidth, with the lagged products of the bin weights, as in
-[`SheatherJones`](@ref); binning moves the bandwidth by about `1e-5` relative. Cross-validation converges slowly, at the relative rate
+[`SheatherJones`](@ref), or binned again for each bandwidth where that grid would
+need more than `2^20` points; binning moves the bandwidth by about `1e-5` relative. Cross-validation converges slowly, at the relative rate
 `n^(-1/10)`, and varies a lot between samples, so it is an alternative to
 [`SheatherJones`](@ref) rather than a default.
 """
@@ -503,6 +506,7 @@ LSCV(; gridsize::Integer = 60, exact::Integer = 1000) = LSCV(gridsize, exact)
 
 function selectbandwidth(rule::LSCV, d::SmoothingData, k::AbstractKernel)
   nobs(d) >= 2 || throw(ArgumentError("LSCV needs at least two observations"))
+  _check_mass(k, rule)
   sd, iqr = _sdiqr(d)
   _check_scale(sd, rule)
   n = effective_nobs(d)
@@ -588,8 +592,11 @@ end
 CrossValidation(; gridsize::Integer = 40) = CrossValidation(gridsize)
 
 function selectbandwidth(rule::CrossValidation, d::SmoothingData, k::AbstractKernel;
-                         degree::Integer = 1, derivative::Integer = 0, points = nothing, kwargs...)
+                         degree::Integer = 1, derivative::Integer = 0, points = nothing,
+                         vce = nothing, minobs::Integer = 0)
+  # (the fits pass vce and minobs to every regression rule; this one does not use them)
   d.y === nothing && throw(ArgumentError("CrossValidation needs responses; use SmoothingData(x, y)"))
+  _check_degree(degree, derivative)
   derivative == 0 || throw(ArgumentError(
     "CrossValidation chooses bandwidths for the regression function, derivative = 0"))
   p = Int(degree)
@@ -613,7 +620,7 @@ function _cvcriterion(d, k, h, p, ws)
   k0 = k(0.0)
   # chunks of a fixed size, run as tasks and summed in order, so that the criterion
   # does not depend on the number of threads
-  parts = _fetchall([Threads.@spawn _cvpart(d, S, T, k0, p, r) for r in Iterators.partition(1:nobs(d), 8192)])
+  parts = _fetchall([Threads.@spawn _cvpart(d, S, T, k0, p, r) for r in Iterators.partition(1:nobs(d), 8192)], Float64)
   return sum(parts) / d.sumw
 end
 

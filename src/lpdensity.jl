@@ -18,7 +18,9 @@ standard errors come from the influence function of `F̂` on the fit, so that th
 account for its estimation.
 
 `coef`, `stderror(m; method)`, `confint(m; level, method)`, `coeftable(m)`,
-[`vcov`](@ref) and [`confband`](@ref) work as for [`PointwiseDensity`](@ref).
+[`vcov`](@ref) and [`confband`](@ref) work as for [`PointwiseDensity`](@ref). The
+columns `nobs` and `nunique` of `coeftable` count the observations and the distinct
+values within `h` of each point.
 """
 struct LocalPolynomialDensity{K<:AbstractKernel,D<:SmoothingData,S<:BandwidthSelection} <: StatsAPI.StatisticalModel
   data::D
@@ -93,7 +95,7 @@ function fit(::Type{LocalPolynomialDensity}, d::SmoothingData; points = nothing,
     "nonnegative kernel weights"))
   minobs >= 0 || throw(ArgumentError("minobs must be nonnegative, got $minobs"))
   pts = points === nothing ? [_quantile(d, q) for q in 0.05:0.05:0.95] : _checkpoints(points)
-  sel = _lpdensity_selection(bandwidth, d, kernel, pts, p, v, minobs; compat)
+  sel = _anyselection(_lpdensity_selection(bandwidth, d, kernel, pts, p, v, minobs; compat))
   h = _pointbandwidths(sel.h, length(pts))
   # the flags also mark the points where the floor decided a selected bandwidth
   floored = falses(length(pts))
@@ -196,7 +198,7 @@ nobs(m::LocalPolynomialDensity) = nobs(m.data)
 bandwidth(m::LocalPolynomialDensity) = m.h
 StatsAPI.coef(m::LocalPolynomialDensity) = copy(m.estimate)
 stderror(m::LocalPolynomialDensity; method::InferenceMethod = Conventional()) =
-  copy(_usesbc(method) ? m.se_rbc : m.se)
+  copy(_usesbc(_densitymethod(method)) ? m.se_rbc : m.se)
 StatsAPI.confint(m::LocalPolynomialDensity; level::Real = 0.95, method::InferenceMethod = RobustBiasCorrected()) =
   _confint(m, level, method)
 
@@ -218,7 +220,7 @@ end
 function StatsAPI.vcov(m::LocalPolynomialDensity; method::InferenceMethod = Conventional())
   d, U, n, v = m.data, nunique(m.data), nobs(m.data), m.derivative + 1
   aux = _lpdaux(d)
-  bc = _usesbc(method)
+  bc = _usesbc(_densitymethod(method))
   infl = _pointwise(eachindex(m.points)) do j
     r = _lpdfit(d, m.kernel, aux, m.points[j], m.h[j], m.degree, v; values = true)
     f = bc ? r.q : r.p

@@ -178,11 +178,10 @@ function fit(::Type{LocalPolynomialRegression}, d::SmoothingData; degree::Intege
   d.y === nothing && throw(ArgumentError(
     "local polynomial regression needs responses; prepare the data as SmoothingData(x, y)"))
   p, ν = Int(degree), Int(derivative)
-  p >= 0 || throw(ArgumentError("degree must be nonnegative, got $p"))
-  0 <= ν <= p || throw(ArgumentError("derivative must be between 0 and the degree $p, got $ν"))
+  _check_degree(p, ν)
   minobs >= 0 || throw(ArgumentError("minobs must be nonnegative, got $minobs"))
   pts = points === nothing ? collect(range(d.x[1], d.x[end]; length = 30)) : _checkpoints(points)
-  sel = _regression_selection(bandwidth, d, kernel, p, ν, pts, vce, minobs; compat)
+  sel = _anyselection(_regression_selection(bandwidth, d, kernel, p, ν, pts, vce, minobs; compat))
   h = _pointbandwidths(sel.h, length(pts))
   b = if pilot === :selected
     haskey(sel.details, :b) || throw(ArgumentError("pilot = :selected needs a rule that selects b, such as MSEOptimal()"))
@@ -190,7 +189,7 @@ function fit(::Type{LocalPolynomialRegression}, d::SmoothingData; degree::Intege
   elseif pilot !== nothing
     _pointbandwidths(pilot, length(pts))
   else
-    rho > 0 || throw(ArgumentError("rho must be positive, or pass the pilot bandwidth"))
+    0 < rho < Inf || throw(ArgumentError("rho must be positive and finite, or pass the pilot bandwidth"))
     h ./ rho
   end
   floored = _floor!(h, b, d, pts, minobs)
@@ -198,6 +197,13 @@ function fit(::Type{LocalPolynomialRegression}, d::SmoothingData; degree::Intege
   return LocalPolynomialRegression(d, kernel, p, ν, vce, sel, Int(minobs), pts, h, b,
     [f.estimate for f in fits], [f.se for f in fits], [f.estimate_bc for f in fits],
     [f.se_rbc for f in fits], [f.nwindow for f in fits], [f.nunique for f in fits], floored)
+end
+
+function _check_degree(degree, derivative)
+  degree >= 0 || throw(ArgumentError("degree must be nonnegative, got $degree"))
+  0 <= derivative <= degree ||
+    throw(ArgumentError("derivative must be between 0 and the degree $degree, got $derivative"))
+  return nothing
 end
 
 function _checkpoints(points)
@@ -482,8 +488,9 @@ StatsAPI.confint(m::LocalPolynomialRegression; level::Real = 0.95,
     coeftable(m::LocalPolynomialRegression; level = 0.95)
 
 The results at the points as a table, a named tuple of columns: `point`, the
-bandwidths `h` and `b`, the observations in the window `nobs` and their distinct
-values `nunique`, whether the floor on the window was binding `floored`, the
+bandwidths `h` and `b`, the observations with positive weight in the window of the
+larger bandwidth `nobs`, the distinct values with positive weight in the window of
+`h` `nunique`, whether the floor on the window was binding `floored`, the
 `estimate` with its standard error `se` and conventional interval
 `lower`, `upper`, and the bias-corrected `estimate_bc` with its robust standard
 error `se_rbc` and interval `lower_rbc`, `upper_rbc`.
@@ -596,9 +603,12 @@ struct RuleOfThumb <: BandwidthSelector end
 _selection(rule::Union{RuleOfThumb,CrossValidation}, d, k) =
   throw(ArgumentError("$rule chooses bandwidths for regression; use a density rule such as SheatherJones()"))
 
+# (the fits pass vce and minobs to every regression rule; this one does not use them)
 function selectbandwidth(rule::RuleOfThumb, d::SmoothingData, k::AbstractKernel;
-                         degree::Integer = 1, derivative::Integer = 0, points = nothing, kwargs...)
+                         degree::Integer = 1, derivative::Integer = 0, points = nothing,
+                         vce::Union{Nothing,VarianceEstimator} = nothing, minobs::Integer = 0)
   d.y === nothing && throw(ArgumentError("RuleOfThumb needs responses; use SmoothingData(x, y)"))
+  _check_degree(degree, derivative)
   ν = Int(derivative)
   p = iseven(degree - ν) ? Int(degree) + 1 : Int(degree)   # p - ν odd
   B, V = _equivalentkernel(k, p, ν)
@@ -634,7 +644,7 @@ function _globalpilot(d::SmoothingData, P, r)
   z = (d.x .- x̄) ./ s
   sw = d.w === nothing ? ones(nobs(d)) : sqrt.(d.w)
   X = [z[i]^j for i in eachindex(z), j in 0:P]
-  α = LinearAlgebra.qr(sw .* X) \ (sw .* d.y)
+  α = (LinearAlgebra.qr(sw .* X) \ (sw .* d.y))::Vector{Float64}
   res = d.y .- X * α
   n = effective_nobs(d)
   W = d.sumw

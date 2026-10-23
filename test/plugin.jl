@@ -204,4 +204,35 @@ KernelSmoothing.moment(::CosineKernel, j::Integer) =
   @test isfinite(bandwidth(RuleOfThumb(), SmoothingData(xs, sin.(xs)), k))
 end
 
+@testset "argument checks and inferable selections" begin
+  x = [sin(1.618i) + 0.3cos(2.7i) for i in 1:400]
+  d = SmoothingData(x, sin.(x) .+ 0.1 .* cos.(17 .* (1:400)))
+  k = EpanechnikovKernel()
+  # misspelled keywords are errors, not ignored
+  @test_throws MethodError selectbandwidth(CrossValidation(), d, k; degre = 2)
+  @test_throws MethodError selectbandwidth(RuleOfThumb(), d, k; degre = 2)
+  @test_throws MethodError selectbandwidth(FLCIOptimal(1.0), d, k; degre = 2)
+  # the derivative must not exceed the degree
+  for rule in (RuleOfThumb(), MSEOptimal(), IMSEOptimal(), CoverageOptimal(), FLCIOptimal(1.0), CrossValidation())
+    @test_throws ArgumentError selectbandwidth(rule, d, k; degree = 1, derivative = 2, points = [0.0])
+  end
+  @test_throws ArgumentError MSEOptimal(regularization = -1)
+  @test_throws ArgumentError MSEOptimal(-1.0, false)
+  @test_throws ArgumentError IMSEOptimal(regularization = Inf)
+  @test_throws ArgumentError fit(LocalPolynomialRegression, d; bandwidth = 0.3, rho = Inf)
+  # the selections and the default fits infer, whatever the pilots
+  for compat in (false, true), rule in (MSEOptimal(), IMSEOptimal(), CoverageOptimal())
+    @inferred selectbandwidth(rule, d, k; points = [0.0, 0.5], compat)
+  end
+  @inferred selectbandwidth(CrossValidation(), d, k)
+  @inferred fit(LocalPolynomialRegression, d)
+  @inferred fit(LocalPolynomialRegression, d; points = [0.0])
+  dx = SmoothingData(x)
+  @inferred fit(PointwiseDensity, dx)
+  @inferred fit(PointwiseDensity, dx; points = [0.0])
+  for compat in (false, true), rule in (MSEOptimal(), IMSEOptimal())
+    @inferred selectbandwidth(rule, dx, k; points = [0.0, 0.5], compat)
+  end
+end
+
 end

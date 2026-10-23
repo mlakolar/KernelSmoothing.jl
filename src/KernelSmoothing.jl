@@ -13,8 +13,8 @@ function or its derivatives with conventional, robust bias-corrected and
 [`Honest`](@ref) intervals and uniform bands, see [`confband`](@ref). They are fitted
 with `fit` and choose their bandwidths with a [`BandwidthSelector`](@ref).
 Underneath are the smoothing kernels, see [`AbstractKernel`](@ref), samples
-prepared for smoothing, see [`SmoothingData`](@ref), and the kernel sums that the
-estimators are built from, see [`kernelsums`](@ref).
+prepared for smoothing, see [`SmoothingData`](@ref), and the kernel sums that many
+of the estimators and bandwidth selectors are built from, see [`kernelsums`](@ref).
 """
 module KernelSmoothing
 

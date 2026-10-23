@@ -28,6 +28,12 @@ end
 
 BandwidthSelection(h::Real) = BandwidthSelection(_bandwidths(h, 1), nothing, NamedTuple())
 
+# A selection with the types of its fields left open, as the fits store it: their
+# default rules depend on the number of points, and a type that depends on values
+# would make the fits not inferable
+const _AnySelection = BandwidthSelection{Union{Float64,Vector{Float64}},Any,NamedTuple}
+_anyselection(s::BandwidthSelection) = _AnySelection(s.h, s.rule, s.details)
+
 function Base.show(io::IO, s::BandwidthSelection)
   print(io, "BandwidthSelection(", s.h)
   s.rule === nothing || print(io, ", ", s.rule)
@@ -95,6 +101,7 @@ NormalReference(; robust::Bool = true) = NormalReference(robust)
 Base.show(io::IO, r::NormalReference) = print(io, "NormalReference(robust = ", r.robust, ")")
 
 function selectbandwidth(rule::NormalReference, d::SmoothingData, k::AbstractKernel)
+  _check_mass(k, rule)
   sd, iqr = _sdiqr(d)
   σ = rule.robust ? _robustscale(sd, iqr / 1.349) : sd
   _check_scale(σ, rule)
@@ -117,6 +124,7 @@ factor 0.9 instead of 1.06 suits densities with several modes better.
 struct SilvermanRule <: BandwidthSelector end
 
 function selectbandwidth(rule::SilvermanRule, d::SmoothingData, k::AbstractKernel)
+  _check_mass(k, rule)
   sd, iqr = _sdiqr(d)
   σ = _robustscale(sd, iqr / 1.34)
   _check_scale(σ, rule)
@@ -127,6 +135,11 @@ end
 
 # min(sd, s), unless s is zero because more than half of the data are tied
 _robustscale(sd, s) = s > 0 ? min(sd, s) : sd
+
+# The rules for densities assume a kernel that integrates to one; a derivative of a
+# kernel integrates to zero, and a bandwidth for it means nothing
+_check_mass(k, rule) = isapprox(moment(k, 0), 1; rtol = 1e-6) || throw(ArgumentError(
+  "$rule chooses bandwidths for kernels that integrate to one, but $k integrates to $(moment(k, 0))"))
 
 _check_scale(σ, rule) = σ > 0 || throw(ArgumentError(
   "the data have no spread, so $rule cannot choose a bandwidth; pass a number instead"))

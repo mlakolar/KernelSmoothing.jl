@@ -408,4 +408,12 @@ KernelSmoothing.support(::LapKernel) = (-Inf, Inf)
   @test moment(TriangularKernel(), 80) ≈ 2 / (81 * 82) rtol = 1e-10
 end
 
+@testset "equality of derived kernels" begin
+  E = EpanechnikovKernel()
+  @test convolve(E, E) == convolve(E, E)
+  @test hash(convolve(E, E)) == hash(convolve(E, E))
+  @test length(Set([derivative(BiweightKernel(), 1), derivative(BiweightKernel(), 1)])) == 1
+  @test convolve(E, E) != E * E
+end
+
 end

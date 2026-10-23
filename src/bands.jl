@@ -48,7 +48,7 @@ function StatsAPI.vcov(m::PointwiseDensity; method::InferenceMethod = Convention
   d, k = m.data, m.kernel
   c0, c2 = _secondderivative(k)
   κ = m.compat ? (c0 * moment(k, 4) + c2 * moment(k, 6)) / 24 : moment(k, 2) / 2
-  bc = _usesbc(method)
+  bc = _usesbc(_densitymethod(method))
   vs = _pointwise(eachindex(m.points)) do j
     _densityvector(d, k, m.points[j], m.h[j], m.b[j], c0, c2, κ, bc)
   end

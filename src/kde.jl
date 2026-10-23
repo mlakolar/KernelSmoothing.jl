@@ -10,12 +10,14 @@ distribution of Distributions.jl, so `pdf`, `logpdf`, `cdf`, `ccdf`, `quantile`,
 `cquantile`, `rand`, `mean`, `var`, `minimum`, `maximum` and `insupport` work as for
 any other distribution. The density and the distribution function are computed
 exactly from the observations, without a grid; `ccdf` and `cquantile` sum the upper
-tail directly, so that they keep their relative accuracy far above the data.
-Broadcasting `pdf.(f, xs)`, `logpdf.(f, xs)`, `cdf.(f, xs)`, `ccdf.(f, xs)` or
-`stderror.(f, xs)` over many points computes them with [`kernelsums`](@ref), which
-is much faster than evaluating point by point, also inside fused broadcasts; points
-that are not plain numbers, such as dual numbers, use the scalar methods, so that
-automatic differentiation works.
+tail directly, so that they keep their relative accuracy far above the data for the
+named and piecewise polynomial kernels, the Gaussian kernel and kernels that define
+`ccdf`. Broadcasting `pdf.(f, xs)`, `logpdf.(f, xs)`, `cdf.(f, xs)`, `ccdf.(f, xs)` or
+`stderror.(f, xs)` over many points computes them for all points at once, with
+[`kernelsums`](@ref) or one pass over the windows, which is much faster than
+evaluating point by point, also inside fused broadcasts, and gives the same values
+up to rounding; points that are not plain numbers, such as dual numbers, use the
+scalar methods, so that automatic differentiation works.
 
 [`derivative`](@ref)`(f, r)` estimates the `r`-th derivative of the density,
 [`stderror`](@ref)`(f, x)` gives the standard error of `f̂(x)` and
@@ -37,7 +39,8 @@ end
 
 The kernel density estimate of the sample `x`, with optional `weights`, or of a
 prepared sample `d`. The `bandwidth` is a positive number or a
-[`BandwidthSelector`](@ref); the default, [`SheatherJones`](@ref), is the
+[`BandwidthSelector`](@ref); the default (also for `bandwidth = nothing`),
+[`SheatherJones`](@ref), is the
 plug-in bandwidth that studies found the most reliable for densities without
 boundaries. It is a half-width for the compactly supported kernels and a standard
 deviation for the Gaussian kernel.
@@ -68,6 +71,7 @@ end
 function fit(::Type{KDE}, d::SmoothingData; kernel::AbstractKernel = EpanechnikovKernel(),
              bandwidth = SheatherJones(), engine::Union{Nothing,SumEngine} = nothing)
   d = _withouty(d)
+  bandwidth === nothing && (bandwidth = SheatherJones())   # the default, as for the other fits
   engine === nothing || _check_engine(engine, kernel)
   _isnonnegative(kernel) || throw(ArgumentError("$kernel takes negative values, so a " *
     "kernel density estimate with it is not a density; use a nonnegative kernel, and " *
@@ -324,7 +328,7 @@ The standard error of the density estimate `f̂(x)`,
     √(∑ᵢ wᵢ² (gᵢ - f̂(x))²) / ∑ᵢ wᵢ,   gᵢ = k((x - xᵢ) / h) / h,
 
 the plug-in estimate of its exact variance for independent observations; with
-equal weights, the sample variance of the `gᵢ` divided by `n`. It measures how
+equal weights, the variance of the `gᵢ` with divisor `n`, divided by `n`. It measures how
 `f̂(x)` varies around its expectation, not its bias, so `f̂(x) ± 1.96 stderror(f, x)`
 covers the density only for bandwidths small enough that the bias is negligible,
 which the bandwidths that minimize the mean squared error are not.
