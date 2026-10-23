@@ -415,9 +415,18 @@ function _cvcriterion(d, k, h, p, ws)
   S = kernelsums(d, k, h; kmax = 2p, workspace = ws)
   T = kernelsums(d, k, h; kmax = p, z = d.y, workspace = ws)
   k0 = k(0.0)
+  # chunks of a fixed size, run as tasks and summed in order, so that the criterion
+  # does not depend on the number of threads
+  parts = fetch.([Threads.@spawn _cvpart(d, S, T, k0, p, r) for r in Iterators.partition(1:nobs(d), 8192)])
+  return sum(parts) / d.sumw
+end
+
+# the leave-one-out squared errors of the observations in r, or Inf if a fit there
+# does not exist
+function _cvpart(d, S, T, k0, p, r)
   A, e = zeros(p + 1, p + 1), zeros(p + 1)
   s = 0.0
-  for i in 1:nobs(d)
+  for i in r
     for b in 0:p, a in 0:p
       A[a + 1, b + 1] = S[a + b + 1, i]
     end
@@ -431,7 +440,7 @@ function _cvcriterion(d, k, h, p, ws)
     lii < 1 - 1e-10 || return Inf
     s += wi * (d.y[i] - (fit - lii * d.y[i]) / (1 - lii))^2
   end
-  return s / d.sumw
+  return s
 end
 
 # e = A⁻¹ e₁ for a symmetric positive definite A, by a Cholesky factorization in the
