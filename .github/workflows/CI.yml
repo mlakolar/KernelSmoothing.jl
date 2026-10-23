@@ -30,13 +30,39 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        version:
-          - 'lts'
-          - '1'
+        # LTS only on pull requests and manual runs; pushes (master and tags) test '1' only
+        version: ${{ fromJSON(github.event_name == 'push' && '["1"]' || '["lts", "1"]') }}
         os:
           - ubuntu-latest
         arch:
           - x64
+    steps:
+      - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: ${{ matrix.version }}
+          arch: ${{ matrix.arch }}
+      - uses: julia-actions/cache@v3
+      - uses: julia-actions/julia-buildpkg@v1
+      - uses: julia-actions/julia-runtest@v1
+      - uses: julia-actions/julia-processcoverage@v1
+      - uses: codecov/codecov-action@v7
+        with:
+          files: lcov.info
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+  cross-platform:
+    # macOS and Windows minutes cost far more than Linux: run them only for releases and on demand
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+    name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    permissions: # needed to allow julia-actions/cache to proactively delete old caches that it has created
+      actions: write
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
         include:
           - version: '1'
             os: macos-latest
