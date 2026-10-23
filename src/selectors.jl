@@ -417,7 +417,7 @@ function _cvcriterion(d, k, h, p, ws)
   k0 = k(0.0)
   # chunks of a fixed size, run as tasks and summed in order, so that the criterion
   # does not depend on the number of threads
-  parts = fetch.([Threads.@spawn _cvpart(d, S, T, k0, p, r) for r in Iterators.partition(1:nobs(d), 8192)])
+  parts = _fetchall([Threads.@spawn _cvpart(d, S, T, k0, p, r) for r in Iterators.partition(1:nobs(d), 8192)])
   return sum(parts) / d.sumw
 end
 

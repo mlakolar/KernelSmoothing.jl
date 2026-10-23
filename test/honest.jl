@@ -80,6 +80,10 @@ end
   @test_throws ArgumentError confband(m; method = Honest(10))
   @test_throws ArgumentError confint(fit(PointwiseDensity, X; bandwidth = 0.2); method = Honest(10))
   @test fit(LocalPolynomialRegression, d; bandwidth = FLCIOptimal(20), points = [0.3, 0.6]).selection.rule == FLCIOptimal(20)
+  # with few distinct values the global fit has a lower order, and with p + 1 none
+  xd = repeat([1.0, 2.0, 3.0, 4.0], inner = 25)
+  @test isfinite(_honestM(SmoothingData(xd, xd .^ 2 .+ 0.1 .* sin.(1:100)), 1))
+  @test_throws ArgumentError _honestM(SmoothingData(repeat([1.0, 2.0], 50), rand(100)), 1)
 end
 
 end

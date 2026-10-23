@@ -126,6 +126,19 @@ end
   @test _fmin(x -> (x - 0.3)^2 + 1, 0.0, 1.0) ≈ 0.3 atol = 1e-4
   @test _fmin(x -> abs(x - 2.5), 0.0, 10.0) ≈ 2.5 atol = 1e-4
   @test _fmin(x -> -x, 0.0, 1.0) ≈ 1.0 atol = 1e-3   # at an end
+  # a NaN end used to make the search run forever
+  @test_throws ArgumentError _fmin(x -> x^2, 0.0, NaN)
+  @test_throws ArgumentError _fmin(x -> x^2, 1.0, 1.0)
+end
+
+@testset "fits that are not identified" begin
+  # local constant fits use the second bias term; local linear ones do not, so that
+  # its fit of order p + 2 cannot fail for them
+  xd = repeat(collect(range(1.0, 2.0; length = 6)), inner = 50)
+  yd = log.(xd) .+ 0.2 .* sin.(7.3 .* (1:300))
+  @test all(isfinite, bandwidth(MSEOptimal(), SmoothingData(xd, yd), EpanechnikovKernel(); points = [1.5]))
+  @test_throws ArgumentError selectbandwidth(MSEOptimal(), SmoothingData(fill(1.0, 30), rand(30)), EpanechnikovKernel())
+  @test_throws ArgumentError selectbandwidth(IMSEOptimal(), SmoothingData(fill(1.0, 30), rand(30)), EpanechnikovKernel())
 end
 
 end

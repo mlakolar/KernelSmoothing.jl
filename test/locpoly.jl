@@ -133,6 +133,42 @@ end
   @test isnan(m0.estimate[1]) && m0.nwindow == [0] && m0.floored == [false]
 end
 
+@testset "identification" begin
+  # few distinct values: x = 0, …, 10, thirty times each, so that the windows of
+  # width 1 around 0.5 and 5.5 hold two distinct values. The fit of order 1 exists
+  # there, the bias correction of order 2 does not; rounding used to let its singular
+  # Gram matrix factor, with bias-corrected estimates far off and tiny standard errors.
+  x = repeat(0.0:10.0, inner = 30)
+  y = sqrt.(x .+ 1) .+ 0.1 .* sin.(7.3 .* (1:330))
+  for h in (0.7, 0.8, 0.9, 1.0), vce in (NNVariance(), HCVariance(0), HCVariance(1), HCVariance(3))
+    m = fit(LocalPolynomialRegression, x, y; bandwidth = h, points = [0.5, 5.5], vce)
+    @test m.nunique == [2, 2]
+    for (j, x0) in enumerate(m.points)
+      @test m.estimate[j] ≈ wls(x, y, ones(330), EpanechnikovKernel(), x0, h, 1)[1] rtol = 1e-10
+    end
+    @test all(isfinite, m.se)
+    @test all(isnan, m.estimate_bc) && all(isnan, m.se_rbc)
+  end
+  # one distinct value: nothing is identified
+  m = fit(LocalPolynomialRegression, x, y; bandwidth = 0.5, points = [3.0], minobs = 0)
+  @test isnan(m.estimate[1]) && isnan(m.se[1]) && m.nunique == [1]
+  # discrete covariates with few values: the default bandwidths exist
+  for nv in (5, 7, 9)
+    xd = repeat(collect(range(1.0, 2.0; length = nv)), inner = 300 ÷ nv)
+    yd = log.(xd) .+ 0.2 .* sin.(7.3 .* (1:length(xd)))
+    m = fit(LocalPolynomialRegression, xd, yd)
+    @test all(isfinite, m.h) && all(isfinite, m.estimate)
+    # nprobust's stages need more distinct values near the ends; the error says so,
+    # and is not wrapped in the exception of a task
+    @test_throws ArgumentError fit(LocalPolynomialRegression, xd, yd; compat = true)
+  end
+  # global pilot fits use the order that the distinct values identify
+  xd = repeat([1.0, 2.0, 3.0, 4.0], inner = 25)
+  yd = xd .^ 2 .+ 0.1 .* sin.(1:100)
+  @test isfinite(bandwidth(RuleOfThumb(), SmoothingData(xd, yd), EpanechnikovKernel()))
+  @test bandwidth(RuleOfThumb(), SmoothingData(xd, yd), EpanechnikovKernel(); degree = 3) == 3   # the range
+end
+
 @testset "prediction and fitted values" begin
   m = fit(LocalPolynomialRegression, XS, YS; bandwidth = 0.1, points = [0.2, 0.5, 0.7])
   @test predict(m, [0.2, 0.5, 0.7]) ≈ m.estimate rtol = 1e-10
@@ -149,6 +185,10 @@ end
   @test_throws ArgumentError fitted(m1)
   mv = fit(LocalPolynomialRegression, XS, YS; bandwidth = [0.1, 0.2], points = [0.3, 0.6])
   @test_throws ArgumentError predict(mv, [0.5])
+  # a pointwise rule at a single point selects one bandwidth too
+  m1 = fit(LocalPolynomialRegression, XS, YS; points = [0.5])
+  @test m1.selection.h isa Vector
+  @test predict(m1, [0.5]) ≈ m1.estimate rtol = 1e-10
 end
 
 @testset "intervals and tables" begin

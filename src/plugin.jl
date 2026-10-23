@@ -140,6 +140,7 @@ function selectbandwidth(rule::MSEOptimal, d::SmoothingData, k::AbstractKernel; 
                          minobs::Integer = 21, compat::Bool = false)
   d.y === nothing && return _densityplugin(rule, d, k, points === nothing ? nothing : _checkpoints(points),
                                            minobs, compat; imse = false)
+  _check_spread(d, rule)
   pts = points === nothing ? collect(range(d.x[1], d.x[end]; length = 30)) : _checkpoints(points)
   p, ν = Int(degree), Int(derivative)
   pilots = compat ? nothing : _regressionpilots(d, k, p)
@@ -154,6 +155,7 @@ function selectbandwidth(rule::IMSEOptimal, d::SmoothingData, k::AbstractKernel;
                          minobs::Integer = 21, compat::Bool = false)
   d.y === nothing && return _densityplugin(rule, d, k, points === nothing ? nothing : _checkpoints(points),
                                            minobs, compat; imse = true)
+  _check_spread(d, rule)
   p, ν = Int(degree), Int(derivative)
   q = p + 1
   grid = if rule.grid isa Integer
@@ -225,24 +227,30 @@ function _msedpi(d, k, c, p, ν, regul, interior, vce, minobs, pilots = nothing)
   bwmin = minobs > 0 ? knn_distance(d, c, min(minobs, N)) : 0.0
   cbw = max(cbw, bwmin)
   clamp_bw(h) = max(min(h, bwmax), bwmin)
+  # the second bias term enters only for even p - ν at boundary points, in every stage
+  needB2 = even && !interior
   # the bandwidth that minimizes the mean squared error from the constants of a stage
   function optimal(C, o, nu, scale)
-    (!even || interior) && return C.bw
+    isfinite(C.V) || return NaN
+    needB2 || return C.bw
     return _fmin(H -> abs(H^(2o + 2 - 2nu) * (C.B1 + H * C.B2 + scale * C.R)^2 + C.V / (N * H^(1 + 2nu))),
                  eps(), R)
   end
   if pilots === nothing
-    d1 = _lpbw(d, k, c, q + 1, q + 1, q + 2, cbw, R, R, 0.0, vce)
-    d2 = _lpbw(d, k, c, q + 2, q + 2, q + 3, cbw, R, R, 0.0, vce)
+    d1 = _lpbw(d, k, c, q + 1, q + 1, q + 2, cbw, R, R, 0.0, vce, needB2)
+    d2 = _lpbw(d, k, c, q + 2, q + 2, q + 3, cbw, R, R, 0.0, vce, needB2)
     bw2 = clamp_bw(optimal(d1, q + 1, q + 1, 0.0))
     bw3 = clamp_bw(optimal(d2, q + 2, q + 2, 0.0))
-    cb = _lpbw(d, k, c, q, p + 1, q + 1, cbw, bw2, bw3, regul, vce)
+    cb = _lpbw(d, k, c, q, p + 1, q + 1, cbw, bw2, bw3, regul, vce, needB2)
     b = clamp_bw(optimal(cb, q, p + 1, regul))
   else
     b, bw2 = clamp_bw(pilots.b1), clamp_bw(pilots.b2)
   end
-  ch = _lpbw(d, k, c, p, ν, q, cbw, b, bw2, regul, vce)
+  ch = _lpbw(d, k, c, p, ν, q, cbw, b, bw2, regul, vce, needB2)
   h = clamp_bw(optimal(ch, p, ν, regul))
+  isfinite(h) || throw(ArgumentError("the plug-in bandwidth at x = $c is not defined, since a " *
+    "local fit of its stages has fewer distinct values of x with positive weight than " *
+    "coefficients; pass a bandwidth"))
   Vh, Bh = !even || interior ? (ch.rV * ch.V, ch.rB * ch.B1^2) : (ch.V, (ch.B1 + h * ch.B2)^2)
   pilots === nothing || return (h = h, b = b, Vh = Vh, Bh = Bh)
   Vb, Bb = !even || interior ? (cb.rV * cb.V, cb.rB * cb.B1^2) : (cb.V, (cb.B1 + b * cb.B2)^2)
@@ -272,48 +280,44 @@ end
 # the regularization R, and the bandwidth that minimizes the mean squared error.
 # The fits use the scaled variable u = (x - c) / h; raw coefficients of (x - c)^j
 # are the scaled ones divided by h^j.
-function _lpbw(d, k, c, o, ν, oB, hV, hB1, hB2, scale, vce)
+function _lpbw(d, k, c, o, ν, oB, hV, hB1, hB2, scale, vce, needB2::Bool)
   N = nobs(d)
+  rB, rV = 2(o + 1 - ν), 2ν + 1
   fV = _lfit(d, k, c, hV, o, 2)
+  fB1 = _lfit(d, k, c, hB1, oB, 0)
+  # the fit for the second bias term only where it is used
+  fB2 = needB2 ? _lfit(d, k, c, hB2, oB + 1, 0) : nothing
+  fV.ok && fB1.ok && (fB2 === nothing || fB2.ok) ||
+    return (V = NaN, B1 = NaN, B2 = NaN, R = NaN, rB = rB, rV = rV, bw = NaN)
   g = fV.C \ [j == ν ? 1.0 : 0.0 for j in 0:o]
   VV = _coefvar(d, k, fV, g, vce) / hV^(2ν)
   BConst1 = sum(g[j + 1] * fV.s[o + j + 2] for j in 0:o)   # e_ν' Γ⁻¹ ∑ wk(u) u^(o+1) r(u)
   BConst2 = sum(g[j + 1] * fV.s[o + j + 3] for j in 0:o)
-  fB1 = _lfit(d, k, c, hB1, oB, 0)
   Rreg = 0.0
   if scale > 0
     gB = fB1.C \ [j == o + 1 ? 1.0 : 0.0 for j in 0:oB]
     Rreg = 3 * BConst1^2 * _coefvar(d, k, fB1, gB, vce) / hB1^(2(o + 1))
   end
-  fB2 = _lfit(d, k, c, hB2, oB + 1, 0)
   B1 = BConst1 * fB1.β[o + 2] / hB1^(o + 1)
-  B2 = BConst2 * fB2.β[o + 3] / hB2^(o + 2)
+  B2 = fB2 === nothing ? NaN : BConst2 * fB2.β[o + 3] / hB2^(o + 2)
   V = N * hV^(2ν + 1) * VV
-  rB, rV = 2(o + 1 - ν), 2ν + 1
   bw = (rV * V / (N * rB * (B1^2 + scale * Rreg)))^(1 / (2o + 3))
   return (V = V, B1 = B1, B2 = B2, R = Rreg, rB = rB, rV = rV, bw = bw)
 end
 
 # A weighted fit of order o at c with bandwidth h over the observations with positive
-# weight a:e; s holds the power sums ∑ wk(u) u^j up to j = 2o + extra
+# weight a:e, and whether the fit is identified; s holds the power sums ∑ wk(u) u^j up
+# to j = 2o + extra
 function _lfit(d, k, c, h, o, extra)
-  xs, n = d.x, nobs(d)
-  lo, hi = support(k)
-  a = isfinite(lo) ? _firsttrue(i -> (xs[i] - c) / h >= lo, n) : 1
-  e = isfinite(hi) ? _firsttrue(i -> (xs[i] - c) / h > hi, n) - 1 : n
-  while a <= e && k((xs[a] - c) / h) == 0
-    a += 1
-  end
-  while e >= a && k((xs[e] - c) / h) == 0
-    e -= 1
-  end
+  r = _poswindow(d, k, c, h)
   s, t = zeros(2o + 1 + extra), zeros(o + 1)
-  for i in a:e
-    u = (xs[i] - c) / h
+  for i in r
+    u = (d.x[i] - c) / h
     _powersums!(s, t, _weight(d.w, i) * k(u), u, d.y[i])
   end
-  C = LinearAlgebra.cholesky(LinearAlgebra.Symmetric([s[i + j + 1] for i in 0:o, j in 0:o]))
-  return (a = a, e = e, h = h, o = o, c = c, s = s, C = C, β = C \ t)
+  C, ok = _gramfactor([s[i + j + 1] for i in 0:o, j in 0:o], nunique(d, r))
+  return (a = first(r), e = last(r), h = h, o = o, c = c, s = s, C = C, ok = ok,
+          β = ok ? C \ t : fill(NaN, o + 1))
 end
 
 # ∑ᵢ (wᵢ k(uᵢ) g'r(uᵢ))² σ̂ᵢ² over the window of a fit, with σ̂ᵢ² from the variance
@@ -333,7 +337,7 @@ function _coefvar(d, k, f, g, vce)
       if vce.type == 0
         ε2
       elseif vce.type == 1
-        ε2 * n / (n - o - 1)
+        ε2 * _dofscale(n, o + 1)^2
       else
         r = [u^j for j in 0:o]
         hii = kw * LinearAlgebra.dot(r, f.C \ r)
@@ -346,8 +350,11 @@ function _coefvar(d, k, f, g, vce)
 end
 
 # The minimizer of f on [a, b] by Brent's method (golden sections and parabolic
-# interpolation), as R's optimize, with its default tolerance
+# interpolation), as R's optimize, with its default tolerance; with a NaN end the
+# search would never end
 function _fmin(f, a, b; tol = eps()^0.25)
+  isfinite(a) && isfinite(b) && a < b ||
+    throw(ArgumentError("the interval of a minimization must be finite and nonempty, got [$a, $b]"))
   c = (3 - sqrt(5)) / 2
   ϵ = sqrt(eps())
   v = w = x = a + c * (b - a)

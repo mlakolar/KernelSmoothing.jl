@@ -174,6 +174,11 @@ end
   end
 end
 
+# a kernel whose evaluation fails
+struct FailingKernel <: AbstractKernel end
+(::FailingKernel)(u::Real) = throw(DomainError(u, "this kernel fails"))
+KernelSmoothing.support(::FailingKernel) = (-1.0, 1.0)
+
 @testset "interface" begin
   d = SmoothingData(XS, YS)
   k = EpanechnikovKernel()
@@ -196,6 +201,10 @@ end
   @test_throws DimensionMismatch kernelsums!(zeros(3, 80), d, k, 0.3, POINTS)
   @test_throws MethodError kernelsums!(zeros(Float32, 1, 81), d, k, 0.3, POINTS)
   @test kernelsums(d, k, Float64[], Float64[]) == zeros(1, 0)
+  # an error raised in a task is thrown as itself, whatever the number of points
+  for m in (5, 300, 3000)
+    @test_throws DomainError kernelsums(d, FailingKernel(), 0.3, collect(range(0, 1; length = m)); engine = DirectSums())
+  end
 end
 
 end

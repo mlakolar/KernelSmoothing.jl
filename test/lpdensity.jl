@@ -114,6 +114,28 @@ end
   @test_throws ArgumentError fit(LocalPolynomialDensity, XN; kernel = GaussianKernel(), bandwidth = 0.5)
   @test_throws ArgumentError fit(LocalPolynomialDensity, XN; bandwidth = SheatherJones())
   @test_throws ArgumentError confint(m; method = Honest(1.0))
+  @test_throws ArgumentError fit(LocalPolynomialDensity, fill(2.0, 50); bandwidth = NormalReference())
+  @test_throws ArgumentError fit(LocalPolynomialDensity, fill(2.0, 50))
+end
+
+@testset "identification" begin
+  # heaped data: within one of 10.25 only the values 10 and 11 have positive weight, too
+  # few for fits of orders 2 and 3, whose singular Gram matrices used to factor with
+  # rounding into estimates far off (lpdensity returns NA)
+  x = round.(10 .+ 3 .* sin.(1:2000) .* sqrt.(mod.((1:2000) .* 0.618, 1)))
+  m = fit(LocalPolynomialDensity, x; points = [9.1, 10.25, 12.6], bandwidth = 1.0, minobs = 0)
+  @test all(isnan, m.estimate) && all(isnan, m.estimate_bc) && m.nunique == [2, 2, 2]
+  # with three distinct values the fit of order 2 exists and its bias correction does not
+  m = fit(LocalPolynomialDensity, x; points = [10.0], bandwidth = 1.5, minobs = 0)
+  @test isfinite(m.estimate[1]) && isnan(m.estimate_bc[1])
+  # vcov and bands leave out the points without an estimate
+  r = Float64.(repeat(1:5, 20))
+  m = fit(LocalPolynomialDensity, r; points = [1.5, 3.0], bandwidth = [3.0, 1.2], minobs = 0)
+  @test isfinite(m.estimate_bc[1]) && isnan(m.estimate_bc[2])
+  C = vcov(m; method = RobustBiasCorrected())
+  @test isfinite(C[1, 1]) && C[1, 1] ≈ m.se_rbc[1]^2 && all(isnan, C[2, :])
+  b = confband(m; rng = MersenneTwister(1))
+  @test isfinite(b.lower[1]) && isnan(b.lower[2])
 end
 
 end

@@ -61,7 +61,11 @@ with the corrections HC0 to HC3. In small samples at the boundary, HC0 understat
 the variance more than the nearest-neighbour estimator and HC3. At each point,
 the bandwidths are raised where needed to the distance of the `minobs`-th nearest
 observation, 21 by default as nprobust's `bwcheck`, and the fit records the points
-where this floor binds.
+where this floor binds. With ties, such a window can still hold too few distinct
+values: the fit of order ``p`` needs ``p + 1`` distinct values of positive weight
+and the bias correction ``p + 2``. Where they are missing, the estimates that need
+them are `NaN`, so that the conventional estimate survives a missing bias
+correction, and `coeftable` reports the number of distinct values at each point.
 
 The default bandwidths follow nprobust: the plug-in bandwidth
 [`MSEOptimal`](@ref) at a single point and [`IMSEOptimal`](@ref) at several, with
