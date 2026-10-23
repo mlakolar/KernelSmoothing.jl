@@ -125,7 +125,7 @@ end
 """
     fit(LocalPolynomialRegression, x, y; degree = 1, derivative = 0, kernel = EpanechnikovKernel(),
         bandwidth = nothing, pilot = nothing, rho = 1, points = nothing,
-        vce = NNVariance(), minobs = 21, weights = nothing)
+        vce = NNVariance(), minobs = 21, weights = nothing, compat = false)
     fit(LocalPolynomialRegression, d::SmoothingData; kwargs...)
 
 Fits local polynomials of order `degree` to the responses `y` at `points`, by
@@ -133,8 +133,9 @@ default 30 equally spaced points between the smallest and the largest `x`, and
 estimates the regression function or its derivative of order `derivative`.
 
 - `bandwidth` is a number, a vector with one bandwidth per point, or a
-  [`BandwidthSelector`](@ref) for regression. By default it is nprobust's choice:
-  [`MSEOptimal`](@ref) at a single point and [`IMSEOptimal`](@ref) at several.
+  [`BandwidthSelector`](@ref) for regression. By default it follows nprobust:
+  [`MSEOptimal`](@ref) at a single point and [`IMSEOptimal`](@ref) at several, with
+  adaptive pilot bandwidths unless `compat = true`.
 - `pilot` is the bandwidth `b` of the fit of order `degree + 1` that estimates the
   bias; by default `b = h / rho`, so that `rho = 1` uses the same bandwidth for
   both, as nprobust does. With `pilot = :selected`, the fit uses the pilot
@@ -144,6 +145,9 @@ estimates the regression function or its derivative of order `derivative`.
 - `minobs` raises `h` and `b` at each point, where needed, to the distance of the
   `minobs`-th nearest observation, so that every window holds enough data;
   `minobs = 0` turns this off. The fit records where the floor was binding.
+- `compat = true` gives the plug-in rules ([`MSEOptimal`](@ref),
+  [`IMSEOptimal`](@ref) and [`CoverageOptimal`](@ref)) nprobust's pilot
+  bandwidths instead of the adaptive ones, so that they agree with nprobust 1.0.0.
 
 The estimates are exact sums over the windows; with weights, they are weighted
 least-squares fits.
@@ -168,7 +172,7 @@ end
 function fit(::Type{LocalPolynomialRegression}, d::SmoothingData; degree::Integer = 1,
              derivative::Integer = 0, kernel::AbstractKernel = EpanechnikovKernel(),
              bandwidth = nothing, pilot = nothing, rho::Real = 1, points = nothing,
-             vce::VarianceEstimator = NNVariance(), minobs::Integer = 21)
+             vce::VarianceEstimator = NNVariance(), minobs::Integer = 21, compat::Bool = false)
   d.y === nothing && throw(ArgumentError(
     "local polynomial regression needs responses; prepare the data as SmoothingData(x, y)"))
   p, ν = Int(degree), Int(derivative)
@@ -176,7 +180,7 @@ function fit(::Type{LocalPolynomialRegression}, d::SmoothingData; degree::Intege
   0 <= ν <= p || throw(ArgumentError("derivative must be between 0 and the degree $p, got $ν"))
   minobs >= 0 || throw(ArgumentError("minobs must be nonnegative, got $minobs"))
   pts = points === nothing ? collect(range(d.x[1], d.x[end]; length = 30)) : _checkpoints(points)
-  sel = _regression_selection(bandwidth, d, kernel, p, ν, pts, vce, minobs)
+  sel = _regression_selection(bandwidth, d, kernel, p, ν, pts, vce, minobs; compat)
   h = _pointbandwidths(sel.h, length(pts))
   b = if pilot === :selected
     haskey(sel.details, :b) || throw(ArgumentError("pilot = :selected needs a rule that selects b, such as MSEOptimal()"))
@@ -205,15 +209,16 @@ _pointbandwidths(h::Real, m) = fill(_bandwidths(h, m), m)
 _pointbandwidths(h::AbstractVector{<:Real}, m) = copy(_bandwidths(h, m))
 _pointbandwidths(h, m) = throw(ArgumentError("a bandwidth must be a number or a vector, got $(repr(h))"))
 
-_regression_selection(h::Union{Real,AbstractVector{<:Real}}, d, k, p, ν, pts, vce, minobs) =
+_regression_selection(h::Union{Real,AbstractVector{<:Real}}, d, k, p, ν, pts, vce, minobs; compat = false) =
   BandwidthSelection(h isa Real ? _bandwidths(h, 1) : _bandwidths(h, length(pts)), nothing, NamedTuple())
-_regression_selection(rule::Union{NormalReference,SilvermanRule,SheatherJones,LSCV}, d, k, p, ν, pts, vce, minobs) =
+_regression_selection(rule::Union{NormalReference,SilvermanRule,SheatherJones,LSCV}, d, k, p, ν, pts, vce, minobs;
+                      compat = false) =
   throw(ArgumentError("$rule chooses bandwidths for densities; use a regression rule such as RuleOfThumb()"))
-_regression_selection(rule::BandwidthSelector, d, k, p, ν, pts, vce, minobs) =
+_regression_selection(rule::BandwidthSelector, d, k, p, ν, pts, vce, minobs; compat = false) =
   selectbandwidth(rule, d, k; degree = p, derivative = ν, points = pts, vce, minobs)
-_regression_selection(::Nothing, d, k, p, ν, pts, vce, minobs) =   # nprobust's default
-  _regression_selection(length(pts) == 1 ? MSEOptimal() : IMSEOptimal(), d, k, p, ν, pts, vce, minobs)
-_regression_selection(h, d, k, p, ν, pts, vce, minobs) = throw(ArgumentError(
+_regression_selection(::Nothing, d, k, p, ν, pts, vce, minobs; compat = false) =   # nprobust's default
+  _regression_selection(length(pts) == 1 ? MSEOptimal() : IMSEOptimal(), d, k, p, ν, pts, vce, minobs; compat)
+_regression_selection(h, d, k, p, ν, pts, vce, minobs; compat = false) = throw(ArgumentError(
   "bandwidth must be a positive number, a vector or a BandwidthSelector, got $(repr(h))"))
 
 # raises h[j] and b[j] to the distance of the minobs-th nearest observation of the

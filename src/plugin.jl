@@ -4,32 +4,38 @@
     MSEOptimal(; regularization = 1, interior = false)
 
 The direct plug-in estimate of the bandwidth that minimizes the mean squared error
-of a local polynomial fit at each evaluation point, and of the pilot bandwidth `b`
-of its bias correction, as computed by nprobust's `lpbwselect` with
-`bwselect = "mse-dpi"` (Calonico, Cattaneo and Farrell 2019). It works in four
-stages at each point:
+of a local polynomial fit at each evaluation point (Calonico, Cattaneo and Farrell
+2019). At each point, the derivative of order `p + 1` that drives the bias of the
+fit of order `p` is estimated by a fit of order `q = p + 1` with the pilot
+bandwidth `b`, and `h` minimizes the estimated mean squared error, with the
+finite-sample bias and variance constants of the local fits, a preliminary
+normal-reference bandwidth for the variances, a cap at the distance to the farther
+end of the data and a floor at the distance of the `minobs`-th nearest
+observation. The squared bias carries the regularization term `3 B₁² V̂[β̂]` times
+`regularization`, which keeps the bandwidth finite where the derivative is nearly
+zero (Imbens and Kalyanaraman 2012). When `p - ν` is even and `interior = false`,
+the bias includes the next term of its expansion and the mean squared error is
+minimized numerically.
 
-1. preliminary fits of orders `q + 1 = p + 2` and `p + 3`, whose bias constants
-   are estimated with fits of orders two higher over the whole range of the data,
-   give pilot bandwidths for the derivatives of orders `p + 2` and `p + 3`;
-2. these estimate the bias of the fit of order `q` for the derivative of order
-   `p + 1`, which gives `b`;
-3. that derivative, estimated with `b`, gives the bias of the fit of order `p`,
-   and hence `h`.
-
-Each stage uses the finite-sample bias and variance constants of the local fits,
-with a preliminary normal-reference bandwidth for the variances, and caps the
-bandwidth at the distance to the farther end of the data and floors it at the
-distance of the `minobs`-th nearest observation. The squared bias of the last two
-stages carries the regularization term `3 B₁² V̂[β̂]` times `regularization`, which
-keeps the bandwidth finite where the derivative is nearly zero (Imbens and
-Kalyanaraman 2012). When `p - ν` is even and `interior = false`, the bias includes
-the next term of its expansion and the mean squared error is minimized
-numerically. The results agree with nprobust 1.0.0 to rounding.
+By default, the pilot bandwidth `b` is the [`CrossValidation`](@ref) bandwidth of
+the fit of order `p` times the ratio of the [`RuleOfThumb`](@ref) bandwidths for
+the derivative of order `p + 1` (fit of order `q`) and for the regression function
+(fit of order `p`), so that it adapts to the roughness of the regression function;
+the pilot for the derivative of order `p + 2`, which even `p - ν` needs, is formed
+in the same way. Cross-validation assumes independent errors: with positively
+correlated errors it undersmooths, and so does the pilot. With `compat = true`, the
+rule is nprobust's `lpbwselect` with `bwselect = "mse-dpi"` instead, which agrees
+with nprobust 1.0.0 to rounding. Its pilot bandwidths come from three more plug-in
+stages whose bias constants are estimated by fits over the whole range of the data,
+and at interior points they end at the cap, so that the derivative is estimated
+over nearly the whole range. For local linear fits, its bandwidths are then about
+twice the optimal ones at a sharp peak and five times for `sin(6πx)`, where the
+adaptive pilots come within 10 percent at interior points.
 
 The selection holds one bandwidth per point, and the pilot bandwidths in
 `details.b`; fit with `pilot = :selected` to use them, since by default the fit
-uses `b = h / rho`, as nprobust does.
+uses `b = h / rho`, as nprobust does. With the adaptive pilots, `details` also
+holds the cross-validation bandwidth.
 
 For a sample without responses, the rule gives the plug-in bandwidth for the
 density at each point, `h = (R(k) f̂(x) / (4 n (B̂² + regularization R̂)))^(1/5)`
@@ -65,7 +71,8 @@ squared error of a local polynomial fit, one bandwidth for all points: the
 variance and squared bias constants of [`MSEOptimal`](@ref) are averaged over
 `grid` equally spaced points between the smallest and the largest observation, as
 nprobust's `imse-dpi` does, or with `grid = :points` over the evaluation points of
-the fit. The pilot bandwidth `b` is in `details.b`.
+the fit. The pilot bandwidths are those of [`MSEOptimal`](@ref), adaptive by
+default and nprobust's with `compat = true`, and `b` is in `details.b`.
 
 For a sample without responses, the rule gives the integrated plug-in bandwidth
 for densities, with the constants of [`MSEOptimal`](@ref) averaged over the
@@ -120,15 +127,23 @@ end
 CoverageOptimal(base::Union{MSEOptimal,IMSEOptimal} = MSEOptimal(); convention::Symbol = :nprobust) =
   CoverageOptimal(base, convention)
 
+# the plug-in rules take the choice between the adaptive pilots and nprobust's
+_regression_selection(rule::Union{MSEOptimal,IMSEOptimal,CoverageOptimal}, d, k, p, ν, pts, vce, minobs;
+                      compat = false) =
+  selectbandwidth(rule, d, k; degree = p, derivative = ν, points = pts, vce, minobs, compat)
+
 function selectbandwidth(rule::MSEOptimal, d::SmoothingData, k::AbstractKernel; degree::Integer = 1,
                          derivative::Integer = 0, points = nothing, vce::VarianceEstimator = NNVariance(),
                          minobs::Integer = 21, compat::Bool = false)
   d.y === nothing && return _densityplugin(rule, d, k, points === nothing ? nothing : _checkpoints(points),
                                            minobs, compat; imse = false)
   pts = points === nothing ? collect(range(d.x[1], d.x[end]; length = 30)) : _checkpoints(points)
-  r = _pointwise(c -> _msedpi(d, k, c, Int(degree), Int(derivative), rule.regularization, rule.interior,
-                              vce, minobs), pts)
-  return BandwidthSelection([s.h for s in r], rule, (b = [s.b for s in r], points = pts))
+  p, ν = Int(degree), Int(derivative)
+  pilots = compat ? nothing : _regressionpilots(d, k, p)
+  r = _pointwise(c -> _msedpi(d, k, c, p, ν, rule.regularization, rule.interior, vce, minobs, pilots), pts)
+  details = (b = [s.b for s in r], points = pts)
+  return BandwidthSelection([s.h for s in r], rule,
+                            compat ? details : (details..., crossvalidation = pilots.crossvalidation))
 end
 
 function selectbandwidth(rule::IMSEOptimal, d::SmoothingData, k::AbstractKernel; degree::Integer = 1,
@@ -144,16 +159,21 @@ function selectbandwidth(rule::IMSEOptimal, d::SmoothingData, k::AbstractKernel;
     points === nothing && throw(ArgumentError("IMSEOptimal(grid = :points) needs the evaluation points"))
     _checkpoints(points)
   end
-  r = _pointwise(c -> _msedpi(d, k, c, p, ν, rule.regularization, rule.interior, vce, minobs), grid)
+  pilots = compat ? nothing : _regressionpilots(d, k, p)
+  r = _pointwise(c -> _msedpi(d, k, c, p, ν, rule.regularization, rule.interior, vce, minobs, pilots), grid)
   N, R = nobs(d), d.x[end] - d.x[1]
   Vh, Bh = sum(s.Vh for s in r) / length(r), sum(s.Bh for s in r) / length(r)
+  if isodd(p - ν) || rule.interior
+    h = (Vh / (N * Bh))^(1 / (2p + 3))
+  else
+    h = _fmin(H -> abs(H^(2p + 2 - 2ν) * Bh + Vh / (N * H^(1 + 2ν))), eps(), R)
+  end
+  compat || return BandwidthSelection(h, rule, (b = pilots.b1, grid = grid, crossvalidation = pilots.crossvalidation))
   Vb, Bb = sum(s.Vb for s in r) / length(r), sum(s.Bb for s in r) / length(r)
   if isodd(p - ν) || rule.interior
     b = (Vb / (N * Bb))^(1 / (2q + 3))
-    h = (Vh / (N * Bh))^(1 / (2p + 3))
   else
     b = _fmin(H -> abs(H^(2q + 2 - 2(p + 1)) * Bb + Vb / (N * H^(1 + 2(p + 1)))), eps(), R)
-    h = _fmin(H -> abs(H^(2p + 2 - 2ν) * Bh + Vh / (N * H^(1 + 2ν))), eps(), R)
   end
   return BandwidthSelection(h, rule, (b = b, grid = grid))
 end
@@ -174,10 +194,21 @@ function selectbandwidth(rule::CoverageOptimal, d::SmoothingData, k::AbstractKer
   return BandwidthSelection(s.h * fh, rule, (s.details..., b = s.details.b * fb, mse = s.h))
 end
 
-# The four stages of nprobust's lpbwselect.mse.dpi at the point c, for a fit of
-# order p of the derivative ν; returns h, b and the variance and squared-bias
-# constants that IMSEOptimal averages.
-function _msedpi(d, k, c, p, ν, regul, interior, vce, minobs)
+# The pilot bandwidths of the adaptive rule for a fit of order p: the
+# cross-validation bandwidth times the ratios of the rule-of-thumb bandwidths for the
+# derivatives of orders p + 1 (fit of order p + 1) and p + 2 (fit of order p + 2) to
+# that for the regression function
+function _regressionpilots(d, k, p)
+  hcv = selectbandwidth(CrossValidation(), d, k; degree = p).h
+  rot(o, ν) = selectbandwidth(RuleOfThumb(), d, k; degree = o, derivative = ν).h
+  h0 = rot(p, 0)
+  return (b1 = hcv * rot(p + 1, p + 1) / h0, b2 = hcv * rot(p + 2, p + 2) / h0, crossvalidation = hcv)
+end
+
+# The stages of nprobust's lpbwselect.mse.dpi at the point c, for a fit of order p
+# of the derivative ν, or only its last stage with the adaptive pilot bandwidths;
+# returns h, b and the variance and squared-bias constants that IMSEOptimal averages.
+function _msedpi(d, k, c, p, ν, regul, interior, vce, minobs, pilots = nothing)
   q = p + 1
   even = iseven(p - ν)
   xs, N = d.x, nobs(d)
@@ -197,19 +228,21 @@ function _msedpi(d, k, c, p, ν, regul, interior, vce, minobs)
     return _fmin(H -> abs(H^(2o + 2 - 2nu) * (C.B1 + H * C.B2 + scale * C.R)^2 + C.V / (N * H^(1 + 2nu))),
                  eps(), R)
   end
-  d1 = _lpbw(d, k, c, q + 1, q + 1, q + 2, cbw, R, R, 0.0, vce)
-  d2 = _lpbw(d, k, c, q + 2, q + 2, q + 3, cbw, R, R, 0.0, vce)
-  bw2 = clamp_bw(optimal(d1, q + 1, q + 1, 0.0))
-  bw3 = clamp_bw(optimal(d2, q + 2, q + 2, 0.0))
-  cb = _lpbw(d, k, c, q, p + 1, q + 1, cbw, bw2, bw3, regul, vce)
-  b = clamp_bw(optimal(cb, q, p + 1, regul))
+  if pilots === nothing
+    d1 = _lpbw(d, k, c, q + 1, q + 1, q + 2, cbw, R, R, 0.0, vce)
+    d2 = _lpbw(d, k, c, q + 2, q + 2, q + 3, cbw, R, R, 0.0, vce)
+    bw2 = clamp_bw(optimal(d1, q + 1, q + 1, 0.0))
+    bw3 = clamp_bw(optimal(d2, q + 2, q + 2, 0.0))
+    cb = _lpbw(d, k, c, q, p + 1, q + 1, cbw, bw2, bw3, regul, vce)
+    b = clamp_bw(optimal(cb, q, p + 1, regul))
+  else
+    b, bw2 = clamp_bw(pilots.b1), clamp_bw(pilots.b2)
+  end
   ch = _lpbw(d, k, c, p, ν, q, cbw, b, bw2, regul, vce)
   h = clamp_bw(optimal(ch, p, ν, regul))
-  if !even || interior
-    Vh, Bh, Vb, Bb = ch.rV * ch.V, ch.rB * ch.B1^2, cb.rV * cb.V, cb.rB * cb.B1^2
-  else
-    Vh, Bh, Vb, Bb = ch.V, (ch.B1 + h * ch.B2)^2, cb.V, (cb.B1 + b * cb.B2)^2
-  end
+  Vh, Bh = !even || interior ? (ch.rV * ch.V, ch.rB * ch.B1^2) : (ch.V, (ch.B1 + h * ch.B2)^2)
+  pilots === nothing || return (h = h, b = b, Vh = Vh, Bh = Bh)
+  Vb, Bb = !even || interior ? (cb.rV * cb.V, cb.rB * cb.B1^2) : (cb.V, (cb.B1 + b * cb.B2)^2)
   return (h = h, b = b, Vh = Vh, Bh = Bh, Vb = Vb, Bb = Bb)
 end
 

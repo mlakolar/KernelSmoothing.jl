@@ -21,7 +21,8 @@ const NPKERNELS = Dict("epa" => EpanechnikovKernel(), "tri" => TriangularKernel(
     base = c.bwselect == "imse-dpi" ? IMSEOptimal(regularization = c.regul, interior = c.interior) :
            MSEOptimal(regularization = c.regul, interior = c.interior)
     rule = c.bwselect == "ce-rot" ? CoverageOptimal(base) : base
-    s = selectbandwidth(rule, d, NPKERNELS[c.kernel]; degree = c.p, derivative = c.deriv, points = EVAL, vce)
+    s = selectbandwidth(rule, d, NPKERNELS[c.kernel]; degree = c.p, derivative = c.deriv, points = EVAL, vce,
+                        compat = true)
     # R's optimize stops at an absolute tolerance, which the even cases inherit
     @test [s.h;] ≈ c.h rtol = 1e-7   # IMSEOptimal gives one bandwidth
     @test [s.details.b;] ≈ c.b rtol = 1e-7
@@ -31,22 +32,52 @@ end
 @testset "fits with plug-in bandwidths" begin
   d = SmoothingData(X, Y)
   # nprobust's default: MSE-optimal at one point, IMSE-optimal at several
-  m1 = fit(LocalPolynomialRegression, d; points = [0.3])
+  m1 = fit(LocalPolynomialRegression, d; points = [0.3], compat = true)
   @test m1.selection.rule == MSEOptimal()
   @test m1.h ≈ [LPBWSELECT[1].h[2]] rtol = 1e-10
   @test m1.b == m1.h   # rho = 1
-  m = fit(LocalPolynomialRegression, d; points = EVAL)
+  m = fit(LocalPolynomialRegression, d; points = EVAL, compat = true)
   @test m.selection.rule == IMSEOptimal()
   @test all(m.h .≈ LPBWSELECT[8].h[1])
   # the selected pilot bandwidths, if asked for
-  ms = fit(LocalPolynomialRegression, d; bandwidth = MSEOptimal(), pilot = :selected, points = EVAL)
+  ms = fit(LocalPolynomialRegression, d; bandwidth = MSEOptimal(), pilot = :selected, points = EVAL, compat = true)
   @test ms.b ≈ LPBWSELECT[1].b rtol = 1e-10
   @test_throws ArgumentError fit(LocalPolynomialRegression, d; bandwidth = 0.1, pilot = :selected)
   # averaged over the evaluation points instead of nprobust's grid
-  s = selectbandwidth(IMSEOptimal(grid = :points), d, EpanechnikovKernel(); points = EVAL)
+  s = selectbandwidth(IMSEOptimal(grid = :points), d, EpanechnikovKernel(); points = EVAL, compat = true)
   @test s.details.grid == EVAL && s.h != LPBWSELECT[8].h[1]
   @test_throws ArgumentError IMSEOptimal(grid = :all)
   @test_throws ArgumentError IMSEOptimal(grid = 0)
+end
+
+@testset "adaptive pilot bandwidths" begin
+  # a sharp peak: nprobust's pilots end at the cap at interior points, so that its
+  # bandwidths are about twice the optimal ones there, while the adaptive pilots
+  # adapt through cross-validation
+  n = 5000
+  xs = [mod(0.7548776662466927i, 1.0) for i in 1:n]
+  m(x) = exp(-32 * (x - 0.5)^2) + 0.5x
+  ys = m.(xs) .+ 0.3 .* sin.(1.0e4 .* (1:n))   # deterministic noise with variance 0.045
+  d = SmoothingData(xs, ys)
+  k = EpanechnikovKernel()
+  hstar = (0.045 * 0.6 / (4n * 0.01 * 64^2))^(1 / 5)   # the optimal bandwidth at 0.5
+  s = selectbandwidth(MSEOptimal(), d, k; points = [0.5])
+  sc = selectbandwidth(MSEOptimal(), d, k; points = [0.5], compat = true)
+  @test abs(s.h[1] / hstar - 1) < 0.25
+  @test sc.h[1] / hstar > 1.5
+  @test sc.details.b[1] == max(0.5 - minimum(xs), maximum(xs) - 0.5)   # the cap: the farther end of the data
+  hcv = selectbandwidth(CrossValidation(), d, k).h
+  @test s.details.crossvalidation == hcv
+  ρ = selectbandwidth(RuleOfThumb(), d, k; degree = 2, derivative = 2).h / selectbandwidth(RuleOfThumb(), d, k).h
+  @test s.details.b[1] ≈ hcv * ρ
+  # the integrated rule uses the same pilot for all points
+  si = selectbandwidth(IMSEOptimal(), d, k)
+  @test si.details.b ≈ hcv * ρ && si.details.crossvalidation == hcv
+  @test fit(LocalPolynomialRegression, d; points = [0.25, 0.5]).h ≈ fill(si.h, 2)
+  # even p - ν: the bias needs the derivative of order p + 2, with its own pilot
+  s0 = selectbandwidth(MSEOptimal(), d, k; degree = 0, points = [0.3, 0.5])
+  @test all(isfinite, s0.h) && all(s0.h .> 0)
+  @test selectbandwidth(MSEOptimal(), d, k; degree = 2, derivative = 1, points = [0.3]).h[1] > 0
 end
 
 @testset "coverage-error-optimal bandwidths" begin
