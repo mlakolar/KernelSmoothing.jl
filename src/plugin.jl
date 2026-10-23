@@ -149,6 +149,7 @@ function selectbandwidth(rule::MSEOptimal, d::SmoothingData, k::AbstractKernel; 
   d.y === nothing && return _densityplugin(rule, d, k, points === nothing ? nothing : _checkpoints(points),
                                            minobs, compat; imse = false)
   _check_spread(d, rule)
+  _check_responses(d, rule)
   pts = points === nothing ? collect(range(d.x[1], d.x[end]; length = 30)) : _checkpoints(points)
   p, ν = Int(degree), Int(derivative)
   pilots = compat ? nothing : _regressionpilots(d, k, p)
@@ -164,6 +165,7 @@ function selectbandwidth(rule::IMSEOptimal, d::SmoothingData, k::AbstractKernel;
   d.y === nothing && return _densityplugin(rule, d, k, points === nothing ? nothing : _checkpoints(points),
                                            minobs, compat; imse = true)
   _check_spread(d, rule)
+  _check_responses(d, rule)
   p, ν = Int(degree), Int(derivative)
   q = p + 1
   grid = if rule.grid isa Integer
@@ -210,6 +212,11 @@ function selectbandwidth(rule::CoverageOptimal, d::SmoothingData, k::AbstractKer
   return BandwidthSelection(s.h * fh, rule, (s.details..., b = s.details.b * fb, mse = s.h))
 end
 
+# With constant responses the estimated bias and variance vanish at every bandwidth,
+# so that the mean squared error has no minimizer
+_check_responses(d, rule) = allequal(d.y) && throw(ArgumentError("the responses are constant, so " *
+  "the estimated mean squared error vanishes at every bandwidth and $rule cannot choose one; pass a bandwidth"))
+
 # The pilot bandwidths of the adaptive rule for a fit of order p: the
 # cross-validation bandwidth times the ratios of the rule-of-thumb bandwidths for the
 # derivatives of orders p + 1 (fit of order p + 1) and p + 2 (fit of order p + 2) to
@@ -230,11 +237,15 @@ function _msedpi(d, k, c, p, ν, regul, interior, vce, minobs, pilots = nothing)
   xs, N = d.x, nobs(d)
   R = xs[end] - xs[1]
   bwmax = max(abs(c - xs[1]), abs(c - xs[end]))
+  compat = pilots === nothing
   # the preliminary bandwidth for the variances: a normal-reference rule with the
-  # unweighted spread of x, as in nprobust
+  # unweighted spread of x, as in nprobust; the adaptive rule takes the standard
+  # deviation where more than half of the data are tied and the interquartile range
+  # vanishes, which without a floor made the bandwidth zero
   sd = N > 1 ? sqrt(sum(abs2, xs .- _sortedmean(xs)) / (N - 1)) : 0.0
   iqr = _unweightedquantile(xs, 0.75) - _unweightedquantile(xs, 0.25)
-  cbw = min(_nrconstant(k) * min(sd, iqr / 1.349) * N^(-1 / 5), bwmax)
+  spread = compat ? min(sd, iqr / 1.349) : _robustscale(sd, iqr / 1.349)
+  cbw = min(_nrconstant(k) * spread * N^(-1 / 5), bwmax)
   bwmin = minobs > 0 ? knn_distance(d, c, min(minobs, N)) : 0.0
   cbw = max(cbw, bwmin)
   clamp_bw(h) = max(min(h, bwmax), bwmin)
@@ -244,7 +255,6 @@ function _msedpi(d, k, c, p, ν, regul, interior, vce, minobs, pilots = nothing)
   # units of B₁², to B₁, so that the bandwidth depends on the units of y, and vanishes
   # where the estimated terms cancel; the adaptive rule bounds it by
   # (|B₁| + H |B₂|)² + λR instead, as for lpdensity
-  compat = pilots === nothing
   sqbias(C, H, scale) = compat ? (C.B1 + H * C.B2 + scale * C.R)^2 :
                                  (abs(C.B1) + H * abs(C.B2))^2 + scale * C.R
   # the bandwidth that minimizes the mean squared error from the constants of a stage
@@ -254,16 +264,16 @@ function _msedpi(d, k, c, p, ν, regul, interior, vce, minobs, pilots = nothing)
     return _fmin(H -> abs(H^(2o + 2 - 2nu) * sqbias(C, H, scale) + C.V / (N * H^(1 + 2nu))), eps(), R)
   end
   if pilots === nothing
-    d1 = _lpbw(d, k, c, q + 1, q + 1, q + 2, cbw, R, R, 0.0, vce, needB2)
-    d2 = _lpbw(d, k, c, q + 2, q + 2, q + 3, cbw, R, R, 0.0, vce, needB2)
+    d1 = _lpbw(d, k, c, q + 1, q + 1, q + 2, cbw, R, R, 0.0, vce, needB2, false)
+    d2 = _lpbw(d, k, c, q + 2, q + 2, q + 3, cbw, R, R, 0.0, vce, needB2, false)
     bw2 = clamp_bw(optimal(d1, q + 1, q + 1, 0.0))
     bw3 = clamp_bw(optimal(d2, q + 2, q + 2, 0.0))
-    cb = _lpbw(d, k, c, q, p + 1, q + 1, cbw, bw2, bw3, regul, vce, needB2)
+    cb = _lpbw(d, k, c, q, p + 1, q + 1, cbw, bw2, bw3, regul, vce, needB2, false)
     b = clamp_bw(optimal(cb, q, p + 1, regul))
   else
     b, bw2 = clamp_bw(pilots.b1), clamp_bw(pilots.b2)
   end
-  ch = _lpbw(d, k, c, p, ν, q, cbw, b, bw2, regul, vce, needB2)
+  ch = _lpbw(d, k, c, p, ν, q, cbw, b, bw2, regul, vce, needB2, !compat)
   h = clamp_bw(optimal(ch, p, ν, regul))
   isfinite(h) || throw(ArgumentError("the plug-in bandwidth at x = $c is not defined, since a " *
     "local fit of its stages has fewer distinct values of x with positive weight than " *
@@ -302,16 +312,19 @@ end
 # derivatives estimated by fits of orders oB and oB + 1 with bandwidths hB1, hB2,
 # the regularization R, and the bandwidth that minimizes the mean squared error.
 # The fits use the scaled variable u = (x - c) / h; raw coefficients of (x - c)^j
-# are the scaled ones divided by h^j.
-function _lpbw(d, k, c, o, ν, oB, hV, hB1, hB2, scale, vce, needB2::Bool)
+# are the scaled ones divided by h^j. With `widen`, as in the adaptive rule, a fit
+# that is not identified widens its window; nprobust's stages, under compat, do not.
+function _lpbw(d, k, c, o, ν, oB, hV, hB1, hB2, scale, vce, needB2::Bool, widen::Bool)
   N = nobs(d)
   rB, rV = 2(o + 1 - ν), 2ν + 1
-  fV = _lfit(d, k, c, hV, o, 2)
-  fB1 = _lfit(d, k, c, hB1, oB, 0)
+  fV = _lfit(d, k, c, hV, o, 2, widen)
+  fB1 = _lfit(d, k, c, hB1, oB, 0, widen)
   # the fit for the second bias term only where it is used
-  fB2 = needB2 ? _lfit(d, k, c, hB2, oB + 1, 0) : nothing
+  fB2 = needB2 ? _lfit(d, k, c, hB2, oB + 1, 0, widen) : nothing
   fV.ok && fB1.ok && (fB2 === nothing || fB2.ok) ||
     return (V = NaN, B1 = NaN, B2 = NaN, R = NaN, rB = rB, rV = rV, bw = NaN)
+  # the bandwidths of the fits, which a fit that is not identified raises
+  hV, hB1, hB2 = fV.h, fB1.h, fB2 === nothing ? hB2 : fB2.h
   g = fV.C \ [j == ν ? 1.0 : 0.0 for j in 0:o]
   VV = _coefvar(d, k, fV, g, vce) / hV^(2ν)
   BConst1 = sum(g[j + 1] * fV.s[o + j + 2] for j in 0:o)   # e_ν' Γ⁻¹ ∑ wk(u) u^(o+1) r(u)
@@ -330,8 +343,20 @@ end
 
 # A weighted fit of order o at c with bandwidth h over the observations with positive
 # weight a:e, and whether the fit is identified; s holds the power sums ∑ wk(u) u^j up
-# to j = 2o + extra
-function _lfit(d, k, c, h, o, extra)
+# to j = 2o + extra. With `widen`, a window with too few distinct values is widened
+# to twice the distance of the (o + 1)-th nearest distinct value, so that o + 1 of
+# them have weights well above zero also for a kernel that vanishes at the edge
+# (where two values tie in distance, the next one need not be farther): the last
+# stage of the adaptive rule ended in an undefined bandwidth with four distinct
+# values of x, where a fit exists. Fits that are identified are not changed.
+function _lfit(d, k, c, h, o, extra, widen::Bool)
+  f = _lfitat(d, k, c, h, o, extra)
+  (f.ok || !widen || nunique(d) < o + 1) && return f
+  floor = 2 * knn_distance(d, c, o + 1; distinct = true)
+  return floor > h ? _lfitat(d, k, c, floor, o, extra) : f
+end
+
+function _lfitat(d, k, c, h, o, extra)
   r = _poswindow(d, k, c, h)
   s, t = zeros(2o + 1 + extra), zeros(o + 1)
   for i in r
