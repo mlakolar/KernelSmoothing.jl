@@ -32,7 +32,8 @@ const K = Dict("triangular" => TriangularKernel(), "epanechnikov" => Epanechniko
 end
 
 @testset "critical values" begin
-  for t in (0.0, 0.5, 1.0, 3.0), level in (0.9, 0.95)
+  # also for levels below 1/2, where the quantile of |N(t, 1)| can be below t
+  for t in (0.0, 0.5, 1.0, 3.0, 30.0), level in (0.05, 0.3, 0.45, 0.5, 0.9, 0.95, 0.999)
     c = _cvb(t, level)
     @test ncdf(Normal(), c - t) - ncdf(Normal(), -c - t) ≈ level atol = 1e-12
   end
@@ -80,6 +81,10 @@ end
   @test_throws ArgumentError confband(m; method = Honest(10))
   @test_throws ArgumentError confint(fit(PointwiseDensity, X; bandwidth = 0.2); method = Honest(10))
   @test fit(LocalPolynomialRegression, d; bandwidth = FLCIOptimal(20), points = [0.3, 0.6]).selection.rule == FLCIOptimal(20)
+  # the search does not go below 21 observations, where residual-based standard errors
+  # collapse with the window, even without a floor on the fit
+  s = selectbandwidth(FLCIOptimal(1e4), d, EpanechnikovKernel(); points = [0.3, 0.6], vce = HCVariance(0), minobs = 0)
+  @test all(s.h .>= [knn_distance(d, c, 21) for c in (0.3, 0.6)])
   # with few distinct values the global fit has a lower order, and with p + 1 none
   xd = repeat([1.0, 2.0, 3.0, 4.0], inner = 25)
   @test isfinite(_honestM(SmoothingData(xd, xd .^ 2 .+ 0.1 .* sin.(1:100)), 1))
