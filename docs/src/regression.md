@@ -96,8 +96,12 @@ interval, so that it covers for every function in the class. The intervals need
 `Honest()` takes ``M`` from a global polynomial of order ``p + 3``, the rule of
 thumb of Armstrong and Kolesár, which they offer as a starting point for a
 sensitivity analysis. [`FLCIOptimal`](@ref) chooses the bandwidth that makes the
-interval shortest, which honest intervals need: at the MSE-optimal bandwidths they
-are much longer.
+interval shortest. The plug-in bandwidths of [`MSEOptimal`](@ref) estimate the bias
+rather than bound it, and where it is small, as where the curvature vanishes, they
+are much larger than the honest intervals can afford, which then become much longer.
+The bandwidth that minimizes the worst-case mean squared error over the class, in
+contrast, gives intervals only slightly longer than the shortest ones (Armstrong
+and Kolesár 2020).
 
 ```julia
 m = fit(LocalPolynomialRegression, x, y; points = [0.5], bandwidth = FLCIOptimal(40))
