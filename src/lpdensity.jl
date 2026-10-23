@@ -41,7 +41,8 @@ end
 
 """
     fit(LocalPolynomialDensity, x; points = nothing, degree = 2, derivative = 0,
-        kernel = TriangularKernel(), bandwidth = MSEOptimal(), minobs = degree + 21, weights = nothing)
+        kernel = TriangularKernel(), bandwidth = MSEOptimal(), minobs = degree + 21, weights = nothing,
+        compat = false)
     fit(LocalPolynomialDensity, d::SmoothingData; kwargs...)
 
 Estimates the density of `x`, or its derivative of order `derivative`, at `points`
@@ -59,7 +60,11 @@ bias-corrected estimates of order `degree + 1`.
   distribution function with local fits at rule-of-thumb bandwidths for the whole
   set of points, and the constants of the bias and the variance from the data.
   `IMSEOptimal(grid = m)` sums over `m` equally spaced points between the smallest
-  and the largest observation instead.
+  and the largest observation instead. lpdensity minimizes the squared bias
+  `(B₁ + a B₂)²`, which vanishes at `a = -B₁/B₂` when the two estimated terms have
+  opposite signs, so that it can choose bandwidths of the order of the range of the
+  data. We bound the bias by `(|B₁| + a |B₂|)²` instead; `compat = true` restores
+  lpdensity's rule.
 - `minobs` raises the bandwidth at each point, where needed, so that the window
   holds `minobs` observations and `minobs` distinct values, as lpdensity's
   `nLocalMin` and `nUniqueMin`; `minobs = 0` turns this off. The rules apply the
@@ -77,14 +82,14 @@ end
 
 function fit(::Type{LocalPolynomialDensity}, d::SmoothingData; points = nothing, degree::Integer = 2,
              derivative::Integer = 0, kernel::AbstractKernel = TriangularKernel(), bandwidth = MSEOptimal(),
-             minobs::Integer = degree + 21)
+             minobs::Integer = degree + 21, compat::Bool = false)
   p, v = Int(degree), Int(derivative) + 1
   derivative >= 0 || throw(ArgumentError("derivative must be nonnegative, got $derivative"))
   v <= p || throw(ArgumentError("the derivative of order $derivative needs degree at least $v, got $p"))
   all(isfinite, support(kernel)) || throw(ArgumentError("$kernel must be compactly supported"))
   minobs >= 0 || throw(ArgumentError("minobs must be nonnegative, got $minobs"))
   pts = points === nothing ? [_quantile(d, q) for q in 0.05:0.05:0.95] : _checkpoints(points)
-  sel = _lpdensity_selection(bandwidth, d, kernel, pts, p, v, minobs)
+  sel = _lpdensity_selection(bandwidth, d, kernel, pts, p, v, minobs; compat)
   h = _pointbandwidths(sel.h, length(pts))
   # the flags also mark the points where the floor decided a selected bandwidth
   floored = falses(length(pts))
@@ -101,12 +106,13 @@ function fit(::Type{LocalPolynomialDensity}, d::SmoothingData; points = nothing,
     [t.nwin for t in r], [t.nuniq for t in r], floored)
 end
 
-_lpdensity_selection(h::Union{Real,AbstractVector{<:Real}}, d, k, pts, p, v, minobs) =
+_lpdensity_selection(h::Union{Real,AbstractVector{<:Real}}, d, k, pts, p, v, minobs; compat = false) =
   _regression_selection(h, d, k, 0, 0, pts, nothing, minobs)
-_lpdensity_selection(rule::NormalReference, d, k, pts, p, v, minobs) = _lpdensity_rot(rule, d, k, pts, p, v, minobs)
-_lpdensity_selection(rule::Union{MSEOptimal,IMSEOptimal}, d, k, pts, p, v, minobs) =
-  _lpdensity_dpi(rule, d, k, pts, p, v, minobs)
-_lpdensity_selection(rule, d, k, pts, p, v, minobs) = throw(ArgumentError(
+_lpdensity_selection(rule::NormalReference, d, k, pts, p, v, minobs; compat = false) =
+  _lpdensity_rot(rule, d, k, pts, p, v, minobs)
+_lpdensity_selection(rule::Union{MSEOptimal,IMSEOptimal}, d, k, pts, p, v, minobs; compat = false) =
+  _lpdensity_dpi(rule, d, k, pts, p, v, minobs, compat)
+_lpdensity_selection(rule, d, k, pts, p, v, minobs; compat = false) = throw(ArgumentError(
   "LocalPolynomialDensity takes a number, a vector, MSEOptimal(), IMSEOptimal() or NormalReference() as " *
   "bandwidth, got $(repr(rule))"))
 
@@ -297,8 +303,9 @@ end
 # p + 3 at rule-of-thumb bandwidths for the grid estimate F⁽ᵖ⁺¹⁾/(p + 1)! and
 # F⁽ᵖ⁺²⁾/(p + 2)!, the moments of the data at a third such bandwidth h₁ give the
 # constants of the bias, and the standard error of the fit of order p at h₁ gives
-# the variance.
-function _lpdensity_dpi(rule, d::SmoothingData, k, pts, p, v, minobs)
+# the variance. Unless compat, the bias is bounded by (|B₁| + a |B₂|)², which cannot
+# vanish as lpdensity's (B₁ + a B₂)² does when the estimates have opposite signs.
+function _lpdensity_dpi(rule, d::SmoothingData, k, pts, p, v, minobs, compat = false)
   rule.regularization == 1 && !rule.interior || throw(ArgumentError(
     "lpdensity's plug-in bandwidths have no regularization or interior option, got $rule"))
   k isa PolynomialKernel || throw(ArgumentError("lpdensity's bandwidths need a polynomial kernel, got $k"))
@@ -320,8 +327,9 @@ function _lpdensity_dpi(rule, d::SmoothingData, k, pts, p, v, minobs)
     LinearAlgebra.issuccess(C) || return (B1 = NaN, B2 = NaN, V = NaN)
     c1 = vfac * (C \ f.s[p+2:2p+2])[v + 1]
     c2 = vfac * (C \ f.s[p+3:2p+3])[v + 1]
-    (B1 = _lpdcoef(dz, k, aux, z0, hp1, p + 2, p + 1) * c1, B2 = _lpdcoef(dz, k, aux, z0, hp2, p + 3, p + 2) * c2,
-     V = f.p.se^2 * h1^(2v - 1))
+    B1 = _lpdcoef(dz, k, aux, z0, hp1, p + 2, p + 1) * c1
+    B2 = _lpdcoef(dz, k, aux, z0, hp2, p + 3, p + 2) * c2
+    (B1 = compat ? B1 : abs(B1), B2 = compat ? B2 : abs(B2), V = f.p.se^2 * h1^(2v - 1))
   end
   ok(t) = isfinite(t.B1) && isfinite(t.B2) && isfinite(t.V)
   fallback(x0) = knn_distance(d, x0, min(n, max(minobs, p + 21)))

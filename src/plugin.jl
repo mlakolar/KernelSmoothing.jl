@@ -55,6 +55,9 @@ The derivatives of orders `p + 1` and `p + 2` in `B₁` and `B₂` come from loc
 of orders `p + 2` and `p + 3` at rule-of-thumb bandwidths for the whole set of
 points, and the constants of the bias and the variance from the data at a third
 such bandwidth. The options `regularization` and `interior` do not apply there.
+Unless `compat = true`, the squared bias is bounded by `(|B₁| + a |B₂|)²`, since
+lpdensity's `(B₁ + a B₂)²` vanishes at `a = -B₁/B₂` when the estimated terms have
+opposite signs.
 """
 struct MSEOptimal <: BandwidthSelector
   regularization::Float64

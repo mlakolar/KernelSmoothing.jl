@@ -23,7 +23,7 @@ const SELECTION = Dict("mse-rot" => NormalReference(), "mse-dpi" => MSEOptimal()
     selected = !isempty(c.selection)
     m = fit(LocalPolynomialDensity, x; weights = c.weighted ? W : nothing, points = c.grid, degree = c.p,
             derivative = c.v - 1, kernel = K[c.kernel], bandwidth = selected ? SELECTION[c.selection] : c.bw[1],
-            minobs = selected ? c.p + 21 : 0)
+            minobs = selected ? c.p + 21 : 0, compat = true)
     # R integrates the kernel constants numerically, to about 1e-7 for the triangular kernel,
     # which the minimizations of the plug-in rules can amplify to 1e-5
     tol = selected ? (c.kernel == "triangular" ? 1e-4 : 1e-6) : 1e-10
@@ -74,6 +74,15 @@ end
   y = repeat(1.0:5.0, 20)
   @test fit(LocalPolynomialDensity, y; points = [3.0]).h == [2.0]
   @test fit(LocalPolynomialDensity, y; points = [3.0], bandwidth = IMSEOptimal(grid = :points)).h == [2.0]
+  # lpdensity's squared bias (B₁ + a B₂)² vanishes where the estimated terms have opposite
+  # signs: on this exponential sample it chooses 5.1 at the boundary, the guarded rule 0.64
+  xc = -log.(1 .- mod.((1:2000) .* 0.5698402909980532, 1))
+  m0 = fit(LocalPolynomialDensity, xc; points = [0.0, 0.2, 0.5], compat = true)
+  m1 = fit(LocalPolynomialDensity, xc; points = [0.0, 0.2, 0.5])
+  @test m0.h[1] > 4 && m1.h[1] < 1
+  @test all(m1.h .<= m0.h)   # a larger bias bound gives smaller bandwidths
+  @test fit(LocalPolynomialDensity, xc; points = [0.0, 0.2, 0.5], bandwidth = IMSEOptimal(grid = :points)).h[1] <=
+        fit(LocalPolynomialDensity, xc; points = [0.0, 0.2, 0.5], bandwidth = IMSEOptimal(grid = :points), compat = true).h[1]
   @test_throws ArgumentError fit(LocalPolynomialDensity, XE; bandwidth = MSEOptimal(regularization = 2))
   @test_throws ArgumentError fit(LocalPolynomialDensity, XE; bandwidth = IMSEOptimal(interior = true))
   @test_throws ArgumentError fit(LocalPolynomialDensity, XE; bandwidth = CoverageOptimal())
