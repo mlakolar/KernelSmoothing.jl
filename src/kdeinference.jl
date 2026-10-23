@@ -59,7 +59,9 @@ bias-corrected standard errors (Calonico, Cattaneo and Farrell 2018), as nprobus
 - `compat = true` reproduces nprobust 1.0.0: its bias correction uses the constant
   `∫ u⁴ D(u) du / 24` instead of `μ₂(k)/2`, which removes only 5/9 of the leading
   bias for the Epanechnikov kernel, and its plug-in bandwidths use normal-reference
-  pilots and, when integrated, square the average bias.
+  pilots and, when integrated, square the average bias. nprobust has plug-in
+  bandwidths for the Epanechnikov and uniform kernels only; for other kernels the
+  default bandwidth is then [`SheatherJones`](@ref).
 
 The kernel must be a symmetric second-order density kernel.
 """
@@ -244,6 +246,8 @@ end
 # finite where f'' vanishes. With compat = true, the rule-of-thumb pilots of
 # nprobust's kdbwselect are used instead.
 function _densityplugin(rule, d, k, points, minobs, compat; imse::Bool)
+  rule.interior && throw(ArgumentError("the plug-in bandwidths for densities are for interior points " *
+    "already, and have no interior option, got $rule"))
   compat && return _kdbwselect(rule, d, k, points, minobs; imse)
   xs, N = d.x, effective_nobs(d)
   c0, c2 = _secondderivative(k)

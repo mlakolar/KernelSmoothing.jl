@@ -54,8 +54,12 @@ psi(x, f, g, r) = sum(f((xi - xj) / g) for xi in x, xj in x) / (length(x) * (len
   sb = bandwidth(SheatherJones(), d, g)
   @test bandwidth(SheatherJones(), SmoothingData(7 .- 3 .* Q), g) ≈ 3 * sb rtol = 1e-7
   # a sample too sparse for the estimates falls back to the normal reference, with a warning
-  r = @test_logs (:warn,) KernelSmoothing._sparse(SheatherJones(), d, g, "a test")
+  r = @test_logs (:warn,) KernelSmoothing._sparse(SheatherJones(), d, g, "a test", (fallback = true,))
   @test r.details.fallback && r.h == bandwidth(NormalReference(), d, g) && r.rule == SheatherJones()
+  # one shape of the details in every case, so that the default density estimate is inferable
+  @inferred selectbandwidth(SheatherJones(), d, g)
+  @inferred selectbandwidth(SheatherJones(method = :dpi), d, g)
+  @inferred fit(KDE, Q)
   @test_throws ArgumentError SheatherJones(method = :plugin)
   @test_throws ArgumentError selectbandwidth(SheatherJones(), SmoothingData([1.0]), g)
   # the default bandwidth of a density estimate

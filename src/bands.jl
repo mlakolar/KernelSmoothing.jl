@@ -10,10 +10,12 @@ or with `method = RobustBiasCorrected()` of the bias-corrected estimates.
 Each estimate is linear in the data, and its standard error is the norm of a
 vector of residual-weighted kernel weights. The covariances are the inner products
 of these vectors, so that the matrix is positive semidefinite and its diagonal
-holds the squared standard errors of the fit. Estimates whose windows do not
-overlap are uncorrelated. For regression, these are the covariances of nprobust's
-`covgrid` with HC variances; nprobust recomputes nearest-neighbour residuals on the
-union of two windows, which changes them slightly near the edges.
+holds the squared standard errors of the fit. Regression estimates whose windows do
+not overlap are uncorrelated; density estimates are then slightly negatively
+correlated, since every observation counts towards the total weight. For
+regression, these are the covariances of nprobust's `covgrid` with HC variances;
+nprobust recomputes nearest-neighbour residuals on the union of two windows, which
+changes them slightly near the edges.
 """
 function StatsAPI.vcov(m::LocalPolynomialRegression; method::InferenceMethod = Conventional())
   vs = _pointwise(j -> _localfit(m.data, m.kernel, m.points[j], m.h[j], m.b[j], m.degree, m.derivative,
@@ -90,9 +92,10 @@ A uniform confidence band over the points of a pointwise fit `m`
 cover the curve at all points at once with probability `level`. As in the sup-t
 bands of Chernozhukov, Chetverikov and Kato (2014) and lpdensity, `c` is the
 `level` quantile of `maxⱼ |Zⱼ|` for a Gaussian vector `Z` with the correlations of
-[`vcov`](@ref)`(m; method)`, from `draws` simulated draws. The critical value lies
-between the pointwise one and the Bonferroni one, and is close to the pointwise
-one when neighbouring estimates are highly correlated.
+[`vcov`](@ref)`(m; method)`, from `draws` simulated draws, and at least the
+pointwise critical value, which the simulated quantile can fall below. The critical
+value lies between the pointwise one and the Bonferroni one, and is close to the
+pointwise one when neighbouring estimates are highly correlated.
 
 Returns a named tuple with the `lower` and `upper` ends of the band and the
 critical value `critical`. By default the band is robust bias-corrected, centred at
@@ -124,11 +127,13 @@ function confband(f::KDE, x::AbstractVector{<:Real}; kwargs...)
   return confband(m; kwargs...)
 end
 
-# the level quantile of maxⱼ |Zⱼ| for Z with the correlations of C, by simulation;
-# points with zero variance are left out
+# the level quantile of maxⱼ |Zⱼ| for Z with the correlations of C, by simulation,
+# and at least the pointwise critical value, which a simulated quantile can fall
+# below with few or highly correlated points; points with zero variance are left out
 function _supt(C, se, level, draws, rng)
+  zp = Distributions.quantile(Distributions.Normal(), (1 + level) / 2)
   keep = findall(>(0), se)
-  isempty(keep) && return Distributions.quantile(Distributions.Normal(), (1 + level) / 2)
+  isempty(keep) && return zp
   R = C[keep, keep] ./ (se[keep] * se[keep]')
   E = LinearAlgebra.eigen(LinearAlgebra.Symmetric(R))
   L = E.vectors .* sqrt.(max.(E.values, 0.0))'   # R = L L'
@@ -140,5 +145,5 @@ function _supt(C, se, level, draws, rng)
     LinearAlgebra.mul!(z, L, ξ)
     maxima[t] = maximum(abs, z)
   end
-  return Distributions.quantile(maxima, level)
+  return max(Distributions.quantile(maxima, level), zp)
 end

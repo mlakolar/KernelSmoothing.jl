@@ -222,6 +222,9 @@ end
   @test endswith(sprint(show, f), "EpanechnikovKernel(), bandwidth = 0.9, 7 observations, weighted)")
   @test occursin("derivative of order 1", sprint(show, derivative(f)))
   @test_throws ArgumentError fit(KDE, XQ; bandwidth = -1.0)
+  # an engine that cannot sum the kernel is refused when fitting, not at each broadcast
+  @test_throws ArgumentError fit(KDE, XQ; kernel = GaussianKernel(), bandwidth = 0.8, engine = FastSums())
+  @test_throws ArgumentError fit(KDE, XQ; kernel = GaussianKernel(), bandwidth = 0.8, engine = WindowSums())
   @test_throws ArgumentError fit(KDE, XQ; bandwidth = "wide")
   d = SmoothingData(XQ, ones(7))
   @test pdf(fit(KDE, d; bandwidth = 0.8), 0.5) == pdf(fit(KDE, XQ; bandwidth = 0.8), 0.5)   # responses are ignored

@@ -56,49 +56,54 @@ function selectbandwidth(rule::SheatherJones, d::SmoothingData, k::AbstractKerne
   σ = _robustscale(sd, iqr / 1.349)
   _check_scale(σ, rule)
   n = effective_nobs(d)
-  c1 = roughness(k) / (_mu2(k)^2 * n)
+  μ2 = _mu2centred(k)
+  c1 = roughness(k) / (μ2^2 * n)
   exact = nobs(d) <= rule.exact
   # normal-reference pilot bandwidths for ψ₄ and ψ₆ (Sheather and Jones 1991)
   a, b = 1.24 * σ * n^(-1 / 7), 1.23 * σ * n^(-1 / 9)
+  # the details have one shape in every case, so that the selection is inferable
+  details(; pilot = NaN, alpha2 = NaN, psi4 = NaN, psi6 = NaN, iterations = 0, fallback = false) =
+    (scale = σ, pilots = (a, b), pilot = Float64(pilot), alpha2 = Float64(alpha2), psi4 = Float64(psi4),
+     psi6 = Float64(psi6), exact = exact, iterations = iterations, fallback = fallback)
   # the root finding evaluates ψ₄ at bandwidths down to about a / 5, and rarely above
   # a few times the larger pilot
   ψ = _psievaluator(d, min(a, b) / 500, exact, 4 * max(a, b))
   TD = -ψ(6, b)
-  TD > 0 || return _sparse(rule, d, k, "the estimate of ψ₆ is not negative")
+  TD > 0 || return _sparse(rule, d, k, "the estimate of ψ₆ is not negative", details(psi6 = -TD, fallback = true))
   if rule.method == :dpi
     g = (2 * 3 * INV_SQRT_2PI / (n * TD))^(1 / 7)   # 2 φ⁽⁴⁾(0) / (n (-ψ̂₆))
     ψ4 = ψ(4, g)
-    ψ4 > 0 || return _sparse(rule, d, k, "the estimate of ψ₄ is not positive")
-    return BandwidthSelection((c1 / ψ4)^(1 / 5), rule,
-      (scale = σ, pilot = g, psi4 = ψ4, psi6 = -TD, exact = exact, fallback = false))
+    ψ4 > 0 || return _sparse(rule, d, k, "the estimate of ψ₄ is not positive",
+                             details(pilot = g, psi4 = ψ4, psi6 = -TD, fallback = true))
+    return BandwidthSelection((c1 / ψ4)^(1 / 5), rule, details(pilot = g, psi4 = ψ4, psi6 = -TD))
   end
   SD = ψ(4, a)
-  SD > 0 || return _sparse(rule, d, k, "the estimate of ψ₄ is not positive")
+  SD > 0 || return _sparse(rule, d, k, "the estimate of ψ₄ is not positive",
+                           details(psi4 = SD, psi6 = -TD, fallback = true))
   # g(h) = α₂ h^(5/7) balances the bias and variance of ψ̂₄ at the optimal h
-  α2 = (2 * 3 * INV_SQRT_2PI * _mu2(k)^2 / roughness(k))^(1 / 7) * (SD / TD)^(1 / 7)
-  hmax = (243 * roughness(k) / (35 * _mu2(k)^2 * n))^(1 / 5) * σ   # Terrell's oversmoothed bandwidth
+  α2 = (2 * 3 * INV_SQRT_2PI * μ2^2 / roughness(k))^(1 / 7) * (SD / TD)^(1 / 7)
+  hmax = (243 * roughness(k) / (35 * μ2^2 * n))^(1 / 5) * σ   # Terrell's oversmoothed bandwidth
   lower, upper = 0.1 * hmax, hmax
   f(h) = (c1 / max(ψ(4, α2 * h^(5 / 7)), floatmin()))^(1 / 5) - h
   tries = 0
   while f(lower) * f(upper) > 0   # widen the bracket, as R's bw.SJ does
-    tries < 100 || return _sparse(rule, d, k, "its equation has no solution")
+    tries < 100 || return _sparse(rule, d, k, "its equation has no solution",
+                                  details(alpha2 = α2, psi6 = -TD, fallback = true))
     isodd(tries) ? (lower /= 1.2) : (upper *= 1.2)
     tries += 1
   end
   # with binned data, ψ̂₄ jitters slightly as the grid changes with g, so the
   # bracket stops earlier
   h, iterations = _findroot(f, lower, upper; rtol = exact ? 1e-10 : 1e-8)
-  return BandwidthSelection(h, rule, (scale = σ, pilots = (a, b), alpha2 = α2,
-    psi4 = ψ(4, α2 * h^(5 / 7)), psi6 = -TD, exact = exact,
-    iterations = iterations, fallback = false))
+  g = α2 * h^(5 / 7)
+  return BandwidthSelection(h, rule, details(; pilot = g, alpha2 = α2, psi4 = ψ(4, g), psi6 = -TD, iterations))
 end
 
 # For a sample too sparse for the estimates of Sheather and Jones: the normal-reference
 # bandwidth, with a warning
-function _sparse(rule, d, k, why)
+function _sparse(rule, d, k, why, details)
   @warn "SheatherJones: $why, so the normal-reference bandwidth is used instead"
-  s = selectbandwidth(NormalReference(), d, k)
-  return BandwidthSelection(s.h, rule, (s.details..., fallback = true))
+  return BandwidthSelection(bandwidth(NormalReference(), d, k), rule, details)
 end
 
 # Points and weights for double sums ∑ᵢ ∑ⱼ wᵢ wⱼ k((xⱼ - xᵢ) / g): the observations
