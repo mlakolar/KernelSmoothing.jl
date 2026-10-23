@@ -30,8 +30,10 @@ changes the estimates by about `1e-5` and the bandwidth by about `1e-6` relative
 far below its statistical error, and makes the selection take a few milliseconds
 for up to `10^6` observations. Data that would need more than `2^20` grid points,
 because of far outliers or heavy tails, are split at gaps across which the pilot
-kernels are negligible, only the densest part of each run is binned, and the pairs
-with the other observations, which are sparse, are summed exactly. R's `bw.SJ` bins differences of
+kernels are negligible, and each run into stretches of at most `2^18` grid points,
+of which the densest one and the others that are dense enough are binned; the pairs
+with the other observations, which are sparse, and the pairs across the boundaries
+of binned stretches are summed exactly. R's `bw.SJ` bins differences of
 pairs of observations coarsely and stops its search early, so by default it agrees
 with this rule to two or three digits only. With fine bins it agrees to about
 `1e-6` for `method = :dpi` and `4e-5` for `:ste`, where R rounds the constant
