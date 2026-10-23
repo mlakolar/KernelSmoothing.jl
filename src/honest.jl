@@ -84,13 +84,13 @@ function _honestM(d::SmoothingData, p)
   return maximum(abs ∘ deriv, zs)
 end
 
-# the level quantile of |N(t, 1)|: the c with Φ(c - t) - Φ(-c - t) = level
+# the level quantile of |N(t, 1)|: the c with Φ(c - t) - Φ(-c - t) = level, which
+# increases in c from -level at 0; for levels below 1/2 it can be below t
 function _cvb(t, level)
   N = Distributions.Normal()
   t = abs(t)
   F(c) = Distributions.cdf(N, c - t) - Distributions.cdf(N, -c - t) - level
-  lo, hi = t, t + Distributions.quantile(N, (1 + level) / 2) + 1
-  return _findroot(F, lo, hi; rtol = 1e-12)[1]
+  return _findroot(F, 0.0, t + Distributions.quantile(N, (1 + level) / 2) + 1; rtol = 1e-12)[1]
 end
 
 function _honestconfint(m::LocalPolynomialRegression, level, method::Honest)
@@ -109,8 +109,11 @@ The bandwidth at each point that minimizes the length of the [`Honest`](@ref)
 interval with bound `M`, `cv(B(h) / se(h)) se(h)`, as Armstrong and Kolesár (2020)
 recommend for honest inference. The length is evaluated with the standard errors
 of the fit's variance estimator on a grid of bandwidths spaced evenly on the log
-scale, from the distance of the `minobs`-th nearest observation to the range of
-the data, and the best one is refined by golden-section search.
+scale, from the distance of the `max(minobs, 21)`-th nearest observation to the
+range of the data, and the best one is refined by golden-section search. The lower
+end does not go below 21 observations, since residual-based standard errors shrink
+with the window: with HC0 variances and no floor, the search ended at windows of
+about three observations, where the intervals covered 3% of the time.
 """
 struct FLCIOptimal <: BandwidthSelector
   M::Union{Float64,Symbol}
@@ -134,7 +137,7 @@ function selectbandwidth(rule::FLCIOptimal, d::SmoothingData, k::AbstractKernel;
   M = rule.M === :rot ? _honestM(d, p) : rule.M
   hmax = d.x[end] - d.x[1]
   hs = _pointwise(pts) do c
-    hmin = max(knn_distance(d, c, min(max(minobs, p + 2), nobs(d))), hmax / 1e4)
+    hmin = max(knn_distance(d, c, min(max(minobs, 21, p + 2), nobs(d))), hmax / 1e4)
     function halflength(h)
       f = _localfit(d, k, c, h, h, p, ν, vce)
       isfinite(f.se) && f.se > 0 || return Inf
