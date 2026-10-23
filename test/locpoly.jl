@@ -118,7 +118,7 @@ end
   @test bandwidth(RuleOfThumb(), SmoothingData(XS, sin.(11.1 .* (1:500))), EpanechnikovKernel()) <= R
   # local constant fits (p - ν even) use the rule of order 1
   @test selectbandwidth(RuleOfThumb(), d, EpanechnikovKernel(); degree = 0).h ≈ sel.h
-  m = fit(LocalPolynomialRegression, XS, YS; points = [0.5])
+  m = fit(LocalPolynomialRegression, XS, YS; bandwidth = RuleOfThumb(), points = [0.5])
   @test m.selection.rule == RuleOfThumb() && m.h == [sel.h]
 end
 

@@ -124,7 +124,7 @@ end
 
 """
     fit(LocalPolynomialRegression, x, y; degree = 1, derivative = 0, kernel = EpanechnikovKernel(),
-        bandwidth = RuleOfThumb(), pilot = nothing, rho = 1, points = nothing,
+        bandwidth = nothing, pilot = nothing, rho = 1, points = nothing,
         vce = NNVariance(), minobs = 21, weights = nothing)
     fit(LocalPolynomialRegression, d::SmoothingData; kwargs...)
 
@@ -133,10 +133,12 @@ default 30 equally spaced points between the smallest and the largest `x`, and
 estimates the regression function or its derivative of order `derivative`.
 
 - `bandwidth` is a number, a vector with one bandwidth per point, or a
-  [`BandwidthSelector`](@ref) for regression, by default [`RuleOfThumb`](@ref).
+  [`BandwidthSelector`](@ref) for regression. By default it is nprobust's choice:
+  [`MSEOptimal`](@ref) at a single point and [`IMSEOptimal`](@ref) at several.
 - `pilot` is the bandwidth `b` of the fit of order `degree + 1` that estimates the
   bias; by default `b = h / rho`, so that `rho = 1` uses the same bandwidth for
-  both, as nprobust does.
+  both, as nprobust does. With `pilot = :selected`, the fit uses the pilot
+  bandwidths that the bandwidth selector estimated.
 - `vce` estimates the conditional variances: [`NNVariance`](@ref) (default) or
   [`HCVariance`](@ref).
 - `minobs` raises `h` and `b` at each point, where needed, to the distance of the
@@ -165,7 +167,7 @@ end
 
 function fit(::Type{LocalPolynomialRegression}, d::SmoothingData; degree::Integer = 1,
              derivative::Integer = 0, kernel::AbstractKernel = EpanechnikovKernel(),
-             bandwidth = RuleOfThumb(), pilot = nothing, rho::Real = 1, points = nothing,
+             bandwidth = nothing, pilot = nothing, rho::Real = 1, points = nothing,
              vce::VarianceEstimator = NNVariance(), minobs::Integer = 21)
   d.y === nothing && throw(ArgumentError(
     "local polynomial regression needs responses; prepare the data as SmoothingData(x, y)"))
@@ -174,21 +176,19 @@ function fit(::Type{LocalPolynomialRegression}, d::SmoothingData; degree::Intege
   0 <= ν <= p || throw(ArgumentError("derivative must be between 0 and the degree $p, got $ν"))
   minobs >= 0 || throw(ArgumentError("minobs must be nonnegative, got $minobs"))
   pts = points === nothing ? collect(range(d.x[1], d.x[end]; length = 30)) : _checkpoints(points)
-  sel = _regression_selection(bandwidth, d, kernel, p, ν, pts)
+  sel = _regression_selection(bandwidth, d, kernel, p, ν, pts, vce, minobs)
   h = _pointbandwidths(sel.h, length(pts))
-  b = if pilot !== nothing
+  b = if pilot === :selected
+    haskey(sel.details, :b) || throw(ArgumentError("pilot = :selected needs a rule that selects b, such as MSEOptimal()"))
+    _pointbandwidths(sel.details.b, length(pts))
+  elseif pilot !== nothing
     _pointbandwidths(pilot, length(pts))
   else
     rho > 0 || throw(ArgumentError("rho must be positive, or pass the pilot bandwidth"))
     h ./ rho
   end
   floored = _floor!(h, b, d, pts, minobs)
-  fits = Vector{_LocalFit}(undef, length(pts))
-  _foreachchunk(eachindex(pts)) do chunk
-    for j in chunk
-      fits[j] = _localfit(d, kernel, pts[j], h[j], b[j], p, ν, vce)
-    end
-  end
+  fits = _pointwise(j -> _localfit(d, kernel, pts[j], h[j], b[j], p, ν, vce), eachindex(pts))
   return LocalPolynomialRegression(d, kernel, p, ν, vce, sel, Int(minobs), pts, h, b,
     [f.estimate for f in fits], [f.se for f in fits], [f.estimate_bc for f in fits],
     [f.se_rbc for f in fits], [f.nwindow for f in fits], [f.nunique for f in fits], floored)
@@ -205,13 +205,15 @@ _pointbandwidths(h::Real, m) = fill(_bandwidths(h, m), m)
 _pointbandwidths(h::AbstractVector{<:Real}, m) = copy(_bandwidths(h, m))
 _pointbandwidths(h, m) = throw(ArgumentError("a bandwidth must be a number or a vector, got $(repr(h))"))
 
-_regression_selection(h::Union{Real,AbstractVector{<:Real}}, d, k, p, ν, pts) =
+_regression_selection(h::Union{Real,AbstractVector{<:Real}}, d, k, p, ν, pts, vce, minobs) =
   BandwidthSelection(h isa Real ? _bandwidths(h, 1) : _bandwidths(h, length(pts)), nothing, NamedTuple())
-_regression_selection(rule::Union{NormalReference,SilvermanRule,SheatherJones,LSCV}, d, k, p, ν, pts) =
+_regression_selection(rule::Union{NormalReference,SilvermanRule,SheatherJones,LSCV}, d, k, p, ν, pts, vce, minobs) =
   throw(ArgumentError("$rule chooses bandwidths for densities; use a regression rule such as RuleOfThumb()"))
-_regression_selection(rule::BandwidthSelector, d, k, p, ν, pts) =
-  selectbandwidth(rule, d, k; degree = p, derivative = ν, points = pts)
-_regression_selection(h, d, k, p, ν, pts) = throw(ArgumentError(
+_regression_selection(rule::BandwidthSelector, d, k, p, ν, pts, vce, minobs) =
+  selectbandwidth(rule, d, k; degree = p, derivative = ν, points = pts, vce, minobs)
+_regression_selection(::Nothing, d, k, p, ν, pts, vce, minobs) =   # nprobust's default
+  _regression_selection(length(pts) == 1 ? MSEOptimal() : IMSEOptimal(), d, k, p, ν, pts, vce, minobs)
+_regression_selection(h, d, k, p, ν, pts, vce, minobs) = throw(ArgumentError(
   "bandwidth must be a positive number, a vector or a BandwidthSelector, got $(repr(h))"))
 
 # raises h[j] and b[j] to the distance of the minobs-th nearest observation of the
@@ -245,8 +247,10 @@ end
 # Gram matrices, Λ = ∑ wᵢ k(uᵢ) uᵢ^(p+1) r_p(uᵢ), g = Γ_p⁻¹ e_ν and c = Γ_q⁻¹ e_(p+1),
 # the estimate is ∑ ℓᵢ yᵢ with ℓᵢ = wᵢ k(uᵢ) g'r_p(uᵢ), and the bias-corrected one
 # ∑ ℓᵢᵇᶜ yᵢ with ℓᵢᵇᶜ = ℓᵢ - (h/b)^(p+1) g'Λ wᵢ k(vᵢ) c'r_q(vᵢ), the modified design of
-# nprobust in these variables. The variances are ∑ ℓᵢ² σ̂ᵢ² and ∑ (ℓᵢᵇᶜ)² σ̂ᵢ².
-function _localfit(d::SmoothingData, k::AbstractKernel, x0, h, b, p, ν, vce)
+# nprobust in these variables. With residuals ε̂ᵢ from the variance estimator, the
+# variances are ∑ (ℓᵢ ε̂ᵢ)² and ∑ (ℓᵢᵇᶜ ε̂ᵢᵇ)², and these products are also the
+# vectors whose inner products give the covariances between points.
+function _localsetup(d::SmoothingData, k::AbstractKernel, x0, h, b, p, ν)
   xs, ys, n = d.x, d.y, nobs(d)
   q = p + 1
   # the observations with positive weight for the larger bandwidth, as in nprobust
@@ -260,9 +264,7 @@ function _localfit(d::SmoothingData, k::AbstractKernel, x0, h, b, p, ν, vce)
   while e >= a && k((xs[e] - x0) / hb) == 0
     e -= 1
   end
-  nwin = e - a + 1
-  nan = _LocalFit(NaN, NaN, NaN, NaN, nwin, 0)
-  nwin >= 1 || return nan
+  e >= a || return (a = a, e = e, ok = false, nuniq = 0)
   # power sums: sh[j+1] = ∑ wk(u) u^j, th[j+1] = ∑ wk(u) u^j y, and the same in v
   sh, th = zeros(2p + 2), zeros(p + 1)
   sb, tb = zeros(2q + 1), zeros(q + 1)
@@ -279,22 +281,29 @@ function _localfit(d::SmoothingData, k::AbstractKernel, x0, h, b, p, ν, vce)
     _powersums!(sb, tb, kb, v, ys[i])
   end
   nuniq = nunique(d, ah:eh)
-  Gp = LinearAlgebra.Symmetric([sh[i + j + 1] for i in 0:p, j in 0:p])
-  Gq = LinearAlgebra.Symmetric([sb[i + j + 1] for i in 0:q, j in 0:q])
-  Cp = LinearAlgebra.cholesky(Gp; check = false)
-  Cq = LinearAlgebra.cholesky(Gq; check = false)
-  LinearAlgebra.issuccess(Cp) && LinearAlgebra.issuccess(Cq) ||
-    return _LocalFit(NaN, NaN, NaN, NaN, nwin, nuniq)
-  βp, γ = Cp \ th, Cq \ tb
+  Cp = LinearAlgebra.cholesky(LinearAlgebra.Symmetric([sh[i + j + 1] for i in 0:p, j in 0:p]); check = false)
+  Cq = LinearAlgebra.cholesky(LinearAlgebra.Symmetric([sb[i + j + 1] for i in 0:q, j in 0:q]); check = false)
+  LinearAlgebra.issuccess(Cp) && LinearAlgebra.issuccess(Cq) || return (a = a, e = e, ok = false, nuniq = nuniq)
   g = Cp \ [i == ν ? 1.0 : 0.0 for i in 0:p]
-  c = Cq \ [i == p + 1 ? 1.0 : 0.0 for i in 0:q]
-  ρ = (h / b)^(p + 1)
-  s = sum(g[i + 1] * sh[p + i + 2] for i in 0:p)   # g'Λ
-  scale = factorial(ν) / h^ν
-  estimate = scale * βp[ν + 1]
-  estimate_bc = scale * (βp[ν + 1] - ρ * s * γ[p + 2])
-  # the variances
-  σ2 = vce isa NNVariance ? _nnvariances(d, a, e, vce.matches) : nothing
+  return (a = a, e = e, ok = true, nuniq = nuniq, Cp = Cp, βp = Cp \ th, γ = Cq \ tb, g = g,
+          c = Cq \ [i == p + 1 ? 1.0 : 0.0 for i in 0:q], ρ = (h / b)^(p + 1),
+          s = sum(g[i + 1] * sh[p + i + 2] for i in 0:p), scale = factorial(ν) / h^ν)
+end
+
+# The estimates and standard errors at x0; with `vectors = true` also the vectors
+# scale ℓᵢ ε̂ᵢ and scale ℓᵢᵇᶜ ε̂ᵢᵇ over the window
+function _localfit(d::SmoothingData, k::AbstractKernel, x0, h, b, p, ν, vce; vectors::Bool = false)
+  f = _localsetup(d, k, x0, h, b, p, ν)
+  nwin = f.e - f.a + 1
+  if !f.ok
+    fit = _LocalFit(NaN, NaN, NaN, NaN, nwin, f.nuniq)
+    return vectors ? (fit = fit, range = f.a:f.e, aus = fill(NaN, nwin), arb = fill(NaN, nwin)) : fit
+  end
+  xs, ys = d.x, d.y
+  a, e, βp, γ, g, c, ρ, s, scale = f.a, f.e, f.βp, f.γ, f.g, f.c, f.ρ, f.s, f.scale
+  r = vce isa NNVariance ? _nnresiduals(d, a, e, vce.matches) : nothing
+  aus = vectors ? Vector{Float64}(undef, nwin) : Float64[]
+  arb = vectors ? Vector{Float64}(undef, nwin) : Float64[]
   vh = vb = 0.0
   for i in a:e
     t = xs[i] - x0
@@ -303,12 +312,18 @@ function _localfit(d::SmoothingData, k::AbstractKernel, x0, h, b, p, ν, vce)
     kh, kb = wi * k(u), wi * k(v)
     ℓ = kh * evalpoly(u, g)
     ℓbc = ℓ - ρ * s * kb * evalpoly(v, c)
-    s2h, s2b = _variances(vce, σ2, i - a + 1, ys[i] - evalpoly(u, βp), ys[i] - evalpoly(v, γ),
-                          kh, u, Cp, nwin, p)
-    vh += ℓ^2 * s2h
-    vb += ℓbc^2 * s2b
+    rh, rb = _residuals(vce, r, i - a + 1, ys[i] - evalpoly(u, βp), ys[i] - evalpoly(v, γ),
+                        kh, u, f.Cp, nwin, p)
+    vh += (ℓ * rh)^2
+    vb += (ℓbc * rb)^2
+    if vectors
+      aus[i - a + 1] = scale * ℓ * rh
+      arb[i - a + 1] = scale * ℓbc * rb
+    end
   end
-  return _LocalFit(estimate, scale * sqrt(vh), estimate_bc, scale * sqrt(vb), nwin, nuniq)
+  fit = _LocalFit(scale * βp[ν + 1], scale * sqrt(vh), scale * (βp[ν + 1] - ρ * s * γ[p + 2]),
+                  scale * sqrt(vb), nwin, f.nuniq)
+  return vectors ? (fit = fit, range = a:e, aus = aus, arb = arb) : fit
 end
 
 # adds kw u^j to s[j+1] for j = 0, …, length(s) - 1 and kw u^j y to t[j+1]
@@ -323,23 +338,26 @@ function _powersums!(s, t, kw, u, y)
   return
 end
 
-# the variance estimates for the conventional and the bias-corrected standard error
-_variances(::NNVariance, σ2, l, εh, εb, kh, u, Cp, n, p) = (σ2[l], σ2[l])
+# the residuals for the conventional and the bias-corrected standard error, scaled
+# so that their squares are the variance estimates
+_residuals(::NNVariance, r, l, εh, εb, kh, u, Cp, n, p) = (r[l], r[l])
 
-function _variances(vce::HCVariance, σ2, l, εh, εb, kh, u, Cp, n, p)
-  vce.type == 0 && return (εh^2, εb^2)
-  vce.type == 1 && return (εh^2 * n / (n - p - 1), εb^2 * n / (n - p - 2))
-  r = [u^j for j in 0:p]
-  hii = kh * LinearAlgebra.dot(r, Cp \ r)   # the leverage in the fit of order p
-  f = vce.type == 2 ? 1 / (1 - hii) : 1 / (1 - hii)^2
-  return (εh^2 * f, εb^2 * f)
+function _residuals(vce::HCVariance, r, l, εh, εb, kh, u, Cp, n, p)
+  vce.type == 0 && return (εh, εb)
+  vce.type == 1 && return (εh * sqrt(n / (n - p - 1)), εb * sqrt(n / (n - p - 2)))
+  x = [u^j for j in 0:p]
+  hii = kh * LinearAlgebra.dot(x, Cp \ x)   # the leverage in the fit of order p
+  f = vce.type == 2 ? 1 / sqrt(1 - hii) : 1 / (1 - hii)
+  return (εh * f, εb * f)
 end
 
-# Nearest-neighbour variance estimates for the observations a:e, with the
+_nnvariances(d::SmoothingData, a, e, J) = _nnresiduals(d, a, e, J) .^ 2
+
+# Nearest-neighbour residuals √(J/(J+1)) (yᵢ - ȳᵢ) for the observations a:e, with the
 # neighbours taken among a:e: all observations tied with xᵢ, and then whole groups
 # of tied observations, nearest first and both sides at equal distances, until
 # there are at least J.
-function _nnvariances(d::SmoothingData, a, e, J)
+function _nnresiduals(d::SmoothingData, a, e, J)
   xs, ys = d.x, d.y
   n = e - a + 1
   σ2 = Vector{Float64}(undef, n)
@@ -367,7 +385,7 @@ function _nnvariances(d::SmoothingData, a, e, J)
     for i in lo:hi
       i == pos || (s += ys[i])
     end
-    σ2[pos - a + 1] = m == 0 ? NaN : m / (m + 1) * (ys[pos] - s / m)^2
+    σ2[pos - a + 1] = m == 0 ? NaN : sqrt(m / (m + 1)) * (ys[pos] - s / m)
   end
   return σ2
 end
@@ -397,13 +415,8 @@ bias-corrected intervals, centred at the bias-corrected estimates; with
 `method = Conventional()`, the intervals around the estimates, which cover only
 when the bias is negligible.
 """
-function StatsAPI.confint(m::LocalPolynomialRegression; level::Real = 0.95,
-                          method::InferenceMethod = RobustBiasCorrected())
-  0 < level < 1 || throw(ArgumentError("level must be between 0 and 1, got $level"))
-  z = Distributions.quantile(Distributions.Normal(), (1 + level) / 2)
-  est, se = method isa Conventional ? (m.estimate, m.se) : (m.estimate_bc, m.se_rbc)
-  return hcat(est .- z .* se, est .+ z .* se)
-end
+StatsAPI.confint(m::LocalPolynomialRegression; level::Real = 0.95,
+                 method::InferenceMethod = RobustBiasCorrected()) = _confint(m, level, method)
 
 """
     coeftable(m::LocalPolynomialRegression; level = 0.95)
@@ -490,18 +503,7 @@ function Base.show(io::IO, ::MIME"text/plain", m::LocalPolynomialRegression)
   m.selection.rule === nothing || println(io, "  bandwidth: ", m.selection.rule)
   any(m.floored) && println(io, "  the floor of ", m.minobs, " observations raised the bandwidth at ",
                             count(m.floored), " of ", length(m.points), " points")
-  # each estimate next to its own standard error, and the robust interval next to the
-  # bias-corrected estimate it is centred at
-  r = confint(m)
-  println(io, rpad("  point", 12), rpad("h", 10), rpad("n", 7), rpad("estimate", 11), rpad("se", 11),
-          rpad("bias-corr.", 11), rpad("robust se", 11), "95% robust interval")
-  rows = length(m.points) <= 12 ? eachindex(m.points) : [1:6; length(m.points)-5:length(m.points)]
-  for j in rows
-    length(m.points) > 12 && j == length(m.points) - 5 && println(io, "  ⋮")
-    println(io, "  ", rpad(_fmt(m.points[j]), 10), rpad(_fmt(m.h[j]), 10), rpad(m.nwindow[j], 7),
-            rpad(_fmt(m.estimate[j]), 11), rpad(_fmt(m.se[j]), 11), rpad(_fmt(m.estimate_bc[j]), 11),
-            rpad(_fmt(m.se_rbc[j]), 11), "[", _fmt(r[j, 1]), ", ", _fmt(r[j, 2]), "]")
-  end
+  _showtable(io, m)
 end
 
 _fmt(x) = string(round(x; sigdigits = 4))
@@ -531,7 +533,7 @@ _selection(rule::Union{RuleOfThumb,CrossValidation}, d, k) =
   throw(ArgumentError("$rule chooses bandwidths for regression; use a density rule such as SheatherJones()"))
 
 function selectbandwidth(rule::RuleOfThumb, d::SmoothingData, k::AbstractKernel;
-                         degree::Integer = 1, derivative::Integer = 0, points = nothing)
+                         degree::Integer = 1, derivative::Integer = 0, points = nothing, kwargs...)
   d.y === nothing && throw(ArgumentError("RuleOfThumb needs responses; use SmoothingData(x, y)"))
   ν = Int(derivative)
   p = iseven(degree - ν) ? Int(degree) + 1 : Int(degree)   # p - ν odd

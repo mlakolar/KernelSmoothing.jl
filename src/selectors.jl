@@ -308,7 +308,7 @@ end
 CrossValidation(; gridsize::Integer = 40) = CrossValidation(gridsize)
 
 function selectbandwidth(rule::CrossValidation, d::SmoothingData, k::AbstractKernel;
-                         degree::Integer = 1, derivative::Integer = 0, points = nothing)
+                         degree::Integer = 1, derivative::Integer = 0, points = nothing, kwargs...)
   d.y === nothing && throw(ArgumentError("CrossValidation needs responses; use SmoothingData(x, y)"))
   derivative == 0 || throw(ArgumentError(
     "CrossValidation chooses bandwidths for the regression function, derivative = 0"))

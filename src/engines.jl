@@ -257,6 +257,10 @@ function _foreachchunk(f, order)
   return nothing
 end
 
+# [f(p) for p in points] for an f that is expensive at each point, one task per point,
+# which run in parallel when Julia runs with several threads
+_pointwise(f, points) = fetch.([Threads.@spawn f(p) for p in points])
+
 # The first i with pred(i), or n + 1, for a predicate that is false and then true on
 # 1:n, starting from the answer for the previous point. With one bandwidth the
 # answers never decrease as the points increase; with a bandwidth per point they can.
