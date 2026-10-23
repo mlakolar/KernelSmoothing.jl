@@ -16,8 +16,11 @@ distribution. The density is
 computed exactly from the observations, without a grid. A point costs a binary
 search in the sorted data and a sum over the observations within ``h`` of it, and
 broadcasting `pdf.(f, xs)` over many points uses the engines of
-[`kernelsums`](@ref). Bandwidths are numbers or [`BandwidthSelector`](@ref)s, by
-default [`SheatherJones`](@ref); see [Bandwidth selection](@ref bandwidths-page).
+[`kernelsums`](@ref), also inside fused broadcasts such as `pdf.(f, xs .+ 1)`.
+Points that are not plain numbers, such as the dual numbers of ForwardDiff.jl, go
+through the scalar methods, so that the estimate can be differentiated
+automatically. Bandwidths are numbers or [`BandwidthSelector`](@ref)s, by default
+[`SheatherJones`](@ref); see [Bandwidth selection](@ref bandwidths-page).
 
 The distribution function is ``\hat F(x) = W^{-1} \sum_i w_i \mathcal{K}((x - x_i)/h)``,
 where ``\mathcal{K}`` is the distribution function of the kernel, and

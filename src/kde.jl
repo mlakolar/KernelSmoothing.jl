@@ -13,7 +13,9 @@ exactly from the observations, without a grid; `ccdf` and `cquantile` sum the up
 tail directly, so that they keep their relative accuracy far above the data.
 Broadcasting `pdf.(f, xs)`, `logpdf.(f, xs)`, `cdf.(f, xs)`, `ccdf.(f, xs)` or
 `stderror.(f, xs)` over many points computes them with [`kernelsums`](@ref), which
-is much faster than evaluating point by point.
+is much faster than evaluating point by point, also inside fused broadcasts; points
+that are not plain numbers, such as dual numbers, use the scalar methods, so that
+automatic differentiation works.
 
 [`derivative`](@ref)`(f, r)` estimates the `r`-th derivative of the density,
 [`stderror`](@ref)`(f, x)` gives the standard error of `f̂(x)` and
@@ -340,15 +342,25 @@ const _KDELike = Union{KDE,Base.RefValue{<:KDE}}
 _unref(f::KDE) = f
 _unref(f::Base.RefValue{<:KDE}) = f[]
 
-# broadcasting over many points sums with an engine
-Base.broadcasted(::typeof(pdf), f::_KDELike, x::AbstractArray{<:Real}) = _pdf(_unref(f), x)
-Base.broadcasted(::typeof(logpdf), f::_KDELike, x::AbstractArray{<:Real}) = log.(_pdf(_unref(f), x))
-Base.broadcasted(::typeof(cdf), f::_KDELike, x::AbstractArray{<:Real}) = _cdf(_unref(f), x)
-Base.broadcasted(::typeof(ccdf), f::_KDELike, x::AbstractArray{<:Real}) = _ccdf(_unref(f), x)
-Base.broadcasted(::typeof(stderror), f::_KDELike, x::AbstractArray{<:Real}) =
-  _stderror(_unref(f), x)
+# Broadcasting over many points sums with an engine, for points that are plain
+# numbers; other real numbers, such as the dual numbers of automatic differentiation,
+# fall back to the scalar methods. A fused argument, as in pdf.(f, xs .+ 1), is
+# materialized first, so that it takes the same route.
+const _PlainPoints = AbstractArray{<:Union{AbstractFloat,Integer}}
 
-function Base.broadcasted(g::KDEDerivative, x::AbstractArray{<:Real})
+Base.broadcasted(::typeof(pdf), f::_KDELike, x::_PlainPoints) = _pdf(_unref(f), x)
+Base.broadcasted(::typeof(logpdf), f::_KDELike, x::_PlainPoints) = log.(_pdf(_unref(f), x))
+Base.broadcasted(::typeof(cdf), f::_KDELike, x::_PlainPoints) = _cdf(_unref(f), x)
+Base.broadcasted(::typeof(ccdf), f::_KDELike, x::_PlainPoints) = _ccdf(_unref(f), x)
+Base.broadcasted(::typeof(stderror), f::_KDELike, x::_PlainPoints) = _stderror(_unref(f), x)
+
+function Base.broadcasted(g::KDEDerivative, x::_PlainPoints)
   f = g.kde
   return _evaluate(p -> _sums(f, g.reflected, p) ./ (f.h^(g.r + 1) * f.data.sumw), g, x)
 end
+
+for F in (:pdf, :logpdf, :cdf, :ccdf, :stderror)
+  @eval Base.broadcasted(::typeof($F), f::_KDELike, x::Broadcast.Broadcasted) =
+    Base.broadcasted($F, f, Base.materialize(x))
+end
+Base.broadcasted(g::KDEDerivative, x::Broadcast.Broadcasted) = Base.broadcasted(g, Base.materialize(x))

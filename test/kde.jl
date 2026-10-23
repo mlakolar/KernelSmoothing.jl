@@ -193,6 +193,14 @@ end
   @test pdf.(f, Float64[]) == Float64[]
   g = derivative(f)
   @test isnan(g(NaN)) && g(Inf) == 0 && g.([Inf, 0.5]) ≈ [0, g(0.5)]
+  # fused arguments take the route of arrays; dual numbers that of the scalar methods
+  ts = collect(-3:0.5:3)
+  @test pdf.(f, ts .+ 0.25) == pdf.(f, ts .+ 0.25 .+ 0.0)
+  @test cdf.(f, 2 .* ts) ≈ [cdf(f, 2t) for t in ts] && ccdf.(f, ts .- 1) ≈ [ccdf(f, t - 1) for t in ts]
+  @test g.(ts .+ 0.25) ≈ [g(t + 0.25) for t in ts]
+  @test ForwardDiff.derivative(t -> sum(pdf.(f, [t, t + 1])), 0.3) ≈ g(0.3) + g(1.3)
+  @test ForwardDiff.derivative(t -> sum(cdf.(f, [t, 2t])), 0.3) ≈ pdf(f, 0.3) + 2pdf(f, 0.6)
+  @test ForwardDiff.derivative(t -> sum(logpdf.(f, [t])), 0.3) ≈ g(0.3) / pdf(f, 0.3)
 end
 
 @testset "engines" begin
