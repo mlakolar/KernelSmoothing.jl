@@ -388,4 +388,17 @@ KernelSmoothing.moment(::LaplaceTailKernel, j::Integer) = iseven(j) ? Float64(fa
   end
 end
 
+@testset "standard errors at tiny bandwidths and incomplete data" begin
+  x = [sin(1.618i) for i in 1:100]
+  f, g = fit(KDE, x; bandwidth = 1e-160), fit(KDE, x .* 1e160; bandwidth = 1.0)
+  # the standard error scales as 1 / h, also where h² underflows
+  @test stderror(f, x[50]) * 1e-160 ≈ stderror(g, x[50] * 1e160) rtol = 1e-12
+  @test stderror.(f, [x[50]]) == [stderror(f, x[50])]
+  @test_throws "missing values" fit(KDE, [1.0, missing, 2.0])
+  @test_throws "missing values" fit(PointwiseDensity, [1.0, missing, 2.0])
+  @test_throws "missing values" fit(LocalPolynomialDensity, [1.0, missing, 2.0])
+  @test_throws "missing values" fit(LocalPolynomialRegression, [1.0, missing, 2.0], [1.0, 2.0, 3.0])
+  @test_throws "missing values" fit(LocalPolynomialRegression, [1.0, 2.0, 3.0], [1.0, missing, 3.0])
+end
+
 end

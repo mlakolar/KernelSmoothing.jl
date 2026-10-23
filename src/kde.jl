@@ -61,7 +61,7 @@ julia> quantile(f, 0.5)
 1.25
 ```
 """
-function fit(::Type{KDE}, x::AbstractVector{<:Real}; weights = nothing, kwargs...)
+function fit(::Type{KDE}, x::AbstractVector; weights = nothing, kwargs...)
   return fit(KDE, SmoothingData(x; weights); kwargs...)
 end
 
@@ -346,12 +346,14 @@ function stderror(f::KDE, x::Real)
   return _kdese(f, s0, s1, s2)
 end
 
-# ∑ wᵢ² (gᵢ - f̂)² = ∑ wᵢ² gᵢ² - 2 f̂ ∑ wᵢ² gᵢ + f̂² ∑ wᵢ², with ∑ wᵢ² = W² / neff
-function _kdese(f::KDE, s0, s1, s2)
-  d, h, W = f.data, f.h, f.data.sumw
-  fx = s0 / (h * W)
-  v = s2 / h^2 - 2 * fx * s1 / h + fx^2 * W^2 / d.neff
-  return sqrt(max(v, 0.0)) / W
+# ∑ wᵢ² (gᵢ - f̂)² = ∑ wᵢ² gᵢ² - 2 f̂ ∑ wᵢ² gᵢ + f̂² ∑ wᵢ², with ∑ wᵢ² = W² / neff and
+# gᵢ = kᵢ / h, in sums of the kᵢ divided by h once at the end, since h² underflows
+# for bandwidths below 1e-154
+_kdese(f::KDE, s0, s1, s2) = _densityse(s0, s1, s2, f.h, f.data.sumw, f.data.neff)
+
+function _densityse(s0, s1, s2, h, W, neff)
+  m = s0 / W
+  return sqrt(max(s2 - 2 * m * s1 + m^2 * W^2 / neff, 0.0)) / (h * W)
 end
 
 # The variance is a small difference of sums where the estimate is nearly zero, and
