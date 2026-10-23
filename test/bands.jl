@@ -84,4 +84,18 @@ end
   @test all(confband(md1; rng = MersenneTwister(s)).critical >= 1.959963984540054 for s in 1:30)
 end
 
+@testset "the critical value lies between the pointwise and Bonferroni values" begin
+  x = collect(range(0, 1; length = 400))
+  zp = quantile(Normal(), 0.975)
+  # one point: the pointwise value, exactly
+  m1 = fit(LocalPolynomialRegression, x, sin.(2π .* x); bandwidth = 0.1, points = [0.5])
+  @test all(confband(m1; rng = MersenneTwister(s)).critical == zp for s in 1:5)
+  # two independent points and few draws: the simulated quantile is clamped
+  m2 = fit(LocalPolynomialRegression, x, sin.(2π .* x); bandwidth = 0.1, points = [0.2, 0.8])
+  zb = quantile(Normal(), 1 - 0.05 / 4)
+  cs = [confband(m2; draws = 100, rng = MersenneTwister(s)).critical for s in 1:100]
+  @test all(zp .<= cs .<= zb)
+  @test any(==(zb), cs)
+end
+
 end

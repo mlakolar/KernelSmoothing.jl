@@ -241,4 +241,16 @@ end
   @test m.b == [0.2] && m.points == [0.5]
 end
 
+@testset "HC2 and HC3 at a leverage of one" begin
+  # the window holds two distinct values, one of them a single observation, whose
+  # leverage in the local linear fit is one
+  x = [fill(0.0, 30); 1.0; fill(3.0, 30)]
+  y = [0.1 .* sin.(1:30); 2.0; 0.1 .* sin.(1:30)]
+  for type in (2, 3)
+    m = fit(LocalPolynomialRegression, x, y; bandwidth = 0.6, points = [0.5], vce = HCVariance(type))
+    @test isnan(only(m.se))
+    @test isfinite(only(m.estimate))
+  end
+end
+
 end

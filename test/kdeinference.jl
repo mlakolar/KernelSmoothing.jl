@@ -168,4 +168,24 @@ end
   @test_throws ArgumentError confint(fit(PointwiseDensity, d; bandwidth = 0.3); level = 2)
 end
 
+@testset "the window holds every observation that a kernel weights" begin
+  # Gridded data, the uniform kernel and b > h: at the edge of the window ρu rounds
+  # to -1, where the kernel is 1/2, for 146 observations that a window of
+  # (xᵢ - x₀)/b left out
+  x = round.([nquantile(Normal(), mod(i * 0.7548776662466927, 1)) for i in 1:3000]; digits = 1)
+  k = UniformKernel()
+  c0, c2 = _secondderivative(k)
+  for compat in (true, false)
+    m = fit(PointwiseDensity, x; points = [0.7], kernel = k, bandwidth = 0.4, pilot = 0.9, compat)
+    κ = compat ? (c0 * moment(k, 4) + c2 * moment(k, 6)) / 24 : moment(k, 2) / 2
+    ρ = 0.4 / 0.9
+    bf = sum(begin
+               u = (0.7 - xi) / 0.4
+               k(u) - ρ^3 * κ * k(ρ * u) * (c0 + c2 * (ρ * u)^2)
+             end for xi in x) / (0.4 * 3000)
+    @test only(m.estimate_bc) ≈ bf rtol = 1e-13
+    @test vcov(m; method = RobustBiasCorrected())[1, 1] ≈ only(m.se_rbc)^2 rtol = 1e-12
+  end
+end
+
 end

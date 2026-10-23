@@ -91,4 +91,14 @@ end
   @test_throws ArgumentError _honestM(SmoothingData(repeat([1.0, 2.0], 50), rand(100)), 1)
 end
 
+@testset "honest intervals with a standard error of zero" begin
+  # constant responses: the standard error vanishes and the interval is the estimate
+  # plus or minus the worst-case bias
+  x = [mod(0.7548776662466927i, 1.0) for i in 1:300]
+  m = fit(LocalPolynomialRegression, x, fill(2.0, 300); bandwidth = 0.1, points = [0.5])
+  @test m.se == [0.0]
+  B = worstcasebias(m, 1.0)
+  @test confint(m; method = Honest(1.0)) ≈ [2 - B[1] 2 + B[1]]
+end
+
 end

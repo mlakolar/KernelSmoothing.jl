@@ -117,6 +117,19 @@ _density_selection(rule::BandwidthSelector, d, k, pts, minobs, compat) = selectb
 _density_selection(h, d, k, pts, minobs, compat) =
   throw(ArgumentError("bandwidth must be a positive number, a vector or a BandwidthSelector, got $(repr(h))"))
 
+# The observations where k(u) or k(ρu) can be nonzero, u = (x₀ - xᵢ)/h. The test
+# computes the larger of the two arguments as the kernels get them, as nprobust does,
+# so that rounding cannot leave out an observation that one of them weights at the
+# edge of its support: a window of (xᵢ - x₀)/b put 146 observations of gridded data
+# just outside, where ρu = -1 and the uniform kernel is 1/2.
+function _densitywindow(d::SmoothingData, k, x0, h, ρ)
+  xs, n = d.x, nobs(d)
+  rad = maximum(abs, support(k))
+  isfinite(rad) || return 1:n
+  arg(i) = (t = (xs[i] - x0) / h; ρ < 1 ? ρ * t : t)
+  return _firsttrue(i -> arg(i) >= -rad, n):_firsttrue(i -> arg(i) > rad, n)-1
+end
+
 # c₀, c₂ with ∫ k(u)(c₀ + c₂u²) u^j du = 2 δⱼ₂ for j = 0, 1, 2, 3: the kernel of the
 # second derivative in a local quadratic fit with the symmetric kernel k
 function _secondderivative(k)
@@ -131,12 +144,10 @@ function _densityfit(d::SmoothingData, k, x0, h, b, c0, c2, κ)
   xs, n = d.x, nobs(d)
   ρ = h / b
   hb = max(h, b)
-  lo, hi = support(k)
-  rad = max(abs(lo), abs(hi))
-  a = isfinite(rad) ? _firsttrue(i -> (xs[i] - x0) / hb >= -rad, n) : 1
-  e = isfinite(rad) ? _firsttrue(i -> (xs[i] - x0) / hb > rad, n) - 1 : n
+  r = _densitywindow(d, k, x0, h, ρ)
+  rad = maximum(abs, support(k))
   s0 = s1 = s2 = t0 = t1 = t2 = 0.0
-  for i in a:e
+  for i in r
     u = (x0 - xs[i]) / h
     kv = k(u)
     v = ρ * u

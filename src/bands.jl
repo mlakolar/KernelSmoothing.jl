@@ -63,16 +63,13 @@ end
 
 # wᵢ gᵢⱼ over the window of point j, and s1 = ∑ wᵢ² gᵢⱼ
 function _densityvector(d, k, x0, h, b, c0, c2, κ, bc)
-  xs, n = d.x, nobs(d)
+  xs = d.x
   ρ = h / b
-  hb = bc ? max(h, b) : h
-  lo, hi = support(k)
-  rad = max(abs(lo), abs(hi))
-  a = isfinite(rad) ? _firsttrue(i -> (xs[i] - x0) / hb >= -rad, n) : 1
-  e = isfinite(rad) ? _firsttrue(i -> (xs[i] - x0) / hb > rad, n) - 1 : n
-  wg = Vector{Float64}(undef, max(e - a + 1, 0))
+  r = _densitywindow(d, k, x0, h, bc ? ρ : 1.0)
+  a, e = first(r), last(r)
+  wg = Vector{Float64}(undef, length(r))
   s1 = 0.0
-  for i in a:e
+  for i in r
     u = (x0 - xs[i]) / h
     v = ρ * u
     g = (bc ? k(u) - ρ^3 * κ * k(v) * (c0 + c2 * v^2) : k(u)) / h
@@ -92,10 +89,10 @@ A uniform confidence band over the points of a pointwise fit `m`
 cover the curve at all points at once with probability `level`. As in the sup-t
 bands of Chernozhukov, Chetverikov and Kato (2014) and lpdensity, `c` is the
 `level` quantile of `maxⱼ |Zⱼ|` for a Gaussian vector `Z` with the correlations of
-[`vcov`](@ref)`(m; method)`, from `draws` simulated draws, and at least the
-pointwise critical value, which the simulated quantile can fall below. The critical
-value lies between the pointwise one and the Bonferroni one, and is close to the
-pointwise one when neighbouring estimates are highly correlated.
+[`vcov`](@ref)`(m; method)`, from `draws` simulated draws. The critical value lies
+between the pointwise one and the Bonferroni one, and the simulated quantile is
+kept between them, since it can cross them by chance; it is close to the pointwise
+one when neighbouring estimates are highly correlated, and equals it at one point.
 
 Returns a named tuple with the `lower` and `upper` ends of the band and the
 critical value `critical`. By default the band is robust bias-corrected, centred at
@@ -127,13 +124,15 @@ function confband(f::KDE, x::AbstractVector{<:Real}; kwargs...)
   return confband(m; kwargs...)
 end
 
-# the level quantile of maxⱼ |Zⱼ| for Z with the correlations of C, by simulation,
-# and at least the pointwise critical value, which a simulated quantile can fall
-# below with few or highly correlated points; points with zero variance are left out
+# The level quantile of maxⱼ |Zⱼ| for Z with the correlations of C, by simulation,
+# kept between the pointwise and the Bonferroni critical values, between which the
+# exact one lies and which a simulated quantile can cross with few or highly
+# correlated points; clamping can only bring it closer. Points with zero variance
+# are left out, and with one point the pointwise value is exact.
 function _supt(C, se, level, draws, rng)
   zp = Distributions.quantile(Distributions.Normal(), (1 + level) / 2)
   keep = findall(>(0), se)
-  isempty(keep) && return zp
+  length(keep) <= 1 && return zp
   R = C[keep, keep] ./ (se[keep] * se[keep]')
   E = LinearAlgebra.eigen(LinearAlgebra.Symmetric(R))
   L = E.vectors .* sqrt.(max.(E.values, 0.0))'   # R = L L'
@@ -145,5 +144,6 @@ function _supt(C, se, level, draws, rng)
     LinearAlgebra.mul!(z, L, ξ)
     maxima[t] = maximum(abs, z)
   end
-  return max(Distributions.quantile(maxima, level), zp)
+  zb = Distributions.quantile(Distributions.Normal(), 1 - (1 - level) / (2G))
+  return clamp(Distributions.quantile(maxima, level), zp, zb)
 end
