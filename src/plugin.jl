@@ -40,6 +40,15 @@ multimodal densities, and `f̂` uses the Sheather–Jones bandwidth. With
 `compat = true`, it gives nprobust's `kdbwselect` instead, whose rule-of-thumb
 pilots assume a normal density, for the Epanechnikov and uniform kernels; for a
 bimodal density they can make the bandwidth in the valley ten times too large.
+
+For [`LocalPolynomialDensity`](@ref), the rule is the plug-in bandwidth of R's
+lpdensity (`bwselect = "mse-dpi"`), which minimizes the estimated asymptotic mean
+squared error `a^(2p+2-2v) (B₁ + a B₂)² + σ²/a^(2v-1)` at each point, where
+`v = derivative + 1` is the order of the derivative of the distribution function.
+The derivatives of orders `p + 1` and `p + 2` in `B₁` and `B₂` come from local fits
+of orders `p + 2` and `p + 3` at rule-of-thumb bandwidths for the whole set of
+points, and the constants of the bias and the variance from the data at a third
+such bandwidth. The options `regularization` and `interior` do not apply there.
 """
 struct MSEOptimal <: BandwidthSelector
   regularization::Float64
@@ -61,7 +70,10 @@ the fit. The pilot bandwidth `b` is in `details.b`.
 For a sample without responses, the rule gives the integrated plug-in bandwidth
 for densities, with the constants of [`MSEOptimal`](@ref) averaged over the
 quantiles of order 0.1 to 0.9 (or the evaluation points with `grid = :points`), or
-with `compat = true` nprobust's `kdbwselect`.
+with `compat = true` nprobust's `kdbwselect`. For [`LocalPolynomialDensity`](@ref),
+it is lpdensity's `imse-dpi`, which sums the terms of [`MSEOptimal`](@ref) over the
+evaluation points with `grid = :points`, as lpdensity does, or over `grid` equally
+spaced points between the smallest and the largest observation.
 """
 struct IMSEOptimal <: BandwidthSelector
   grid::Union{Int,Symbol}

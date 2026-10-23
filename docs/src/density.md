@@ -37,7 +37,8 @@ Pages = ["kdeinference.jl"]
 [`LocalPolynomialDensity`](@ref) is the estimator of Cattaneo, Jansson and Ma
 (2020), as R's lpdensity computes it: a local polynomial fit to the empirical
 distribution function, whose slope estimates the density. It needs no knowledge of
-where a boundary lies and keeps its rate there.
+where a boundary lies and keeps its rate there. By default, the bandwidth at each
+point is lpdensity's plug-in estimate, [`MSEOptimal`](@ref).
 
 ```julia
 x = randexp(5000)

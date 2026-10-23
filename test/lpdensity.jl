@@ -15,15 +15,18 @@ const XN = round.(nquantile.(Normal(), mod.(I .* 0.6180339887498949, 1)) .+ 0.3 
 const XE = -log.(1 .- mod.(I .* 0.7548776662466927, 1))
 const W = 1.0 .+ mod.(I, 3)
 const K = Dict("triangular" => TriangularKernel(), "epanechnikov" => EpanechnikovKernel(), "uniform" => UniformKernel())
+const SELECTION = Dict("mse-rot" => NormalReference(), "mse-dpi" => MSEOptimal(), "imse-dpi" => IMSEOptimal(grid = :points))
 
 @testset "agrees with lpdensity" begin
   for c in LPDENSITY
     x = c.data == :xn ? XN : XE
+    selected = !isempty(c.selection)
     m = fit(LocalPolynomialDensity, x; weights = c.weighted ? W : nothing, points = c.grid, degree = c.p,
-            derivative = c.v - 1, kernel = K[c.kernel], bandwidth = c.rot ? NormalReference() : c.bw[1],
-            minobs = c.rot ? c.p + 21 : 0)
-    # R integrates the kernel constants of the rule of thumb numerically, to about 1e-7
-    tol = c.rot ? 1e-6 : 1e-10
+            derivative = c.v - 1, kernel = K[c.kernel], bandwidth = selected ? SELECTION[c.selection] : c.bw[1],
+            minobs = selected ? c.p + 21 : 0)
+    # R integrates the kernel constants numerically, to about 1e-7 for the triangular kernel,
+    # which the minimizations of the plug-in rules can amplify to 1e-5
+    tol = selected ? (c.kernel == "triangular" ? 1e-4 : 1e-6) : 1e-10
     @test m.h ≈ c.bw rtol = tol
     @test m.nwindow == c.nh
     @test m.nunique == c.nhu
@@ -50,6 +53,32 @@ end
   @test mu.estimate_bc ≈ [1, 1, 1] rtol = 1e-3
 end
 
+@testset "plug-in bandwidths" begin
+  pts = [0.0, 0.5, 2.0]
+  m = fit(LocalPolynomialDensity, XE; points = pts)
+  @test m.selection.rule == MSEOptimal()
+  @test keys(m.selection.details.pilots) == (:h1, :hp1, :hp2)
+  # at a single point, the integrated rule is the pointwise one
+  @test fit(LocalPolynomialDensity, XE; points = [0.5], bandwidth = IMSEOptimal(grid = :points)).h ≈
+        fit(LocalPolynomialDensity, XE; points = [0.5]).h rtol = 1e-12
+  # the standardization makes the rules equivariant under scaling
+  @test fit(LocalPolynomialDensity, 3 .* XE; points = 3 .* pts).h ≈ 3 .* m.h rtol = 1e-8
+  mi = fit(LocalPolynomialDensity, XE; points = pts, bandwidth = IMSEOptimal(grid = 10))
+  @test length(mi.selection.details.grid) == 10 && all(==(mi.h[1]), mi.h)
+  # in the tail of a small sample, the floor of minobs observations and distinct values decides
+  x = XE[1:60]
+  ms = fit(LocalPolynomialDensity, x; points = [0.5, 3.0])
+  d = SmoothingData(x)
+  @test ms.floored[2] && ms.h[2] == max(knn_distance(d, 3.0, 23), knn_distance(d, 3.0, 23; distinct = true))
+  # with five distinct values the pilot fits are singular, and the rules fall back on the floors
+  y = repeat(1.0:5.0, 20)
+  @test fit(LocalPolynomialDensity, y; points = [3.0]).h == [2.0]
+  @test fit(LocalPolynomialDensity, y; points = [3.0], bandwidth = IMSEOptimal(grid = :points)).h == [2.0]
+  @test_throws ArgumentError fit(LocalPolynomialDensity, XE; bandwidth = MSEOptimal(regularization = 2))
+  @test_throws ArgumentError fit(LocalPolynomialDensity, XE; bandwidth = IMSEOptimal(interior = true))
+  @test_throws ArgumentError fit(LocalPolynomialDensity, XE; bandwidth = CoverageOptimal())
+end
+
 @testset "kernel constants" begin
   # G of lpdensity for the triangular kernel, exactly (R integrates numerically)
   G = _cjmG(TriangularKernel(), 2)
@@ -60,7 +89,7 @@ end
 @testset "interface" begin
   m = fit(LocalPolynomialDensity, XN)
   @test length(m.points) == 19 && m.points[1] ≈ nquantile(XN, 0.05)
-  @test m.selection.rule == NormalReference()
+  @test m.selection.rule == MSEOptimal()
   C = vcov(m; method = RobustBiasCorrected())
   @test sqrt.(diag(C)) ≈ m.se_rbc rtol = 1e-10
   @test minimum(eigvals(Symmetric(C))) >= -1e-12 * maximum(diag(C))
