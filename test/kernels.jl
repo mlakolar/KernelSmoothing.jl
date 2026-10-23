@@ -380,4 +380,26 @@ end
   end
 end
 
+# a kernel without closed forms for the moments of its square
+struct CosKernel <: AbstractKernel end
+(::CosKernel)(u::Real) = abs(u) <= 1 ? π / 4 * cos(π * u / 2) : 0.0
+KernelSmoothing.support(::CosKernel) = (-1.0, 1.0)
+KernelSmoothing.moment(::CosKernel, j::Integer) = quadgk(u -> u^j * CosKernel()(u), -1, 1)[1]
+struct LapKernel <: AbstractKernel end
+(::LapKernel)(u::Real) = exp(-abs(u)) / 2
+KernelSmoothing.support(::LapKernel) = (-Inf, Inf)
+
+@testset "moments of squared kernels by quadrature, and of high order" begin
+  for j in 0:6
+    @test moment(KernelSmoothing._square(CosKernel()), j) ≈ quadgk(u -> u^j * CosKernel()(u)^2, -1, 1)[1] rtol = 1e-12 atol = 1e-15
+    # ∫ u^j e^(-2|u|) / 4 du = j! / (4 2^j) for even j
+    @test moment(KernelSmoothing._square(LapKernel()), j) ≈ (iseven(j) ? factorial(j) / (4 * 2^j) : 0.0) atol = 1e-12
+  end
+  @test roughness(CosKernel()) ≈ π^2 / 16 rtol = 1e-12
+  @test roughness(LapKernel()) ≈ 1 / 4 rtol = 1e-12
+  # the binomial coefficients of high orders overflowed integers
+  @test moment(EpanechnikovKernel(), 70) ≈ 0.75 * (2 / 71 - 2 / 73) rtol = 1e-12
+  @test moment(TriangularKernel(), 80) ≈ 2 / (81 * 82) rtol = 1e-10
+end
+
 end
