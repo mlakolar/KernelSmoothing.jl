@@ -41,7 +41,7 @@ end
 
 """
     fit(LocalPolynomialDensity, x; points = nothing, degree = 2, derivative = 0,
-        kernel = TriangularKernel(), bandwidth = NormalReference(), minobs = degree + 21, weights = nothing)
+        kernel = TriangularKernel(), bandwidth = MSEOptimal(), minobs = degree + 21, weights = nothing)
     fit(LocalPolynomialDensity, d::SmoothingData; kwargs...)
 
 Estimates the density of `x`, or its derivative of order `derivative`, at `points`
@@ -49,13 +49,23 @@ Estimates the density of `x`, or its derivative of order `derivative`, at `point
 of order `degree` to the empirical distribution function, and the robust
 bias-corrected estimates of order `degree + 1`.
 
-- `bandwidth` is a number, a vector with one bandwidth per point, or
-  `NormalReference()`, the rule of thumb of lpdensity (`bwselect = "mse-rot"`): the
-  bandwidth that minimizes the asymptotic mean squared error at each point when
-  the density is normal.
+- `bandwidth` is a number, a vector with one bandwidth per point, or a rule of
+  lpdensity: `MSEOptimal()`, its plug-in estimate of the bandwidth that minimizes
+  the asymptotic mean squared error at each point (`bwselect = "mse-dpi"`, the
+  default); `IMSEOptimal(grid = :points)`, one plug-in bandwidth for all points
+  that minimizes the sum of these errors over the points (`"imse-dpi"`); or
+  `NormalReference()`, the rule of thumb for normal data (`"mse-rot"`). The plug-in
+  rules estimate the derivatives of orders `degree + 1` and `degree + 2` of the
+  distribution function with local fits at rule-of-thumb bandwidths for the whole
+  set of points, and the constants of the bias and the variance from the data.
+  `IMSEOptimal(grid = m)` sums over `m` equally spaced points between the smallest
+  and the largest observation instead.
 - `minobs` raises the bandwidth at each point, where needed, so that the window
   holds `minobs` observations and `minobs` distinct values, as lpdensity's
-  `nLocalMin` and `nUniqueMin`; `minobs = 0` turns this off.
+  `nLocalMin` and `nUniqueMin`; `minobs = 0` turns this off. The rules apply the
+  floor before they cap the bandwidth at the distance to the farthest distinct
+  value, as lpdensity does, and `IMSEOptimal` applies the largest floor over the
+  points to its single bandwidth.
 
 The kernel must be compactly supported; lpdensity uses the triangular,
 Epanechnikov and uniform kernels. The estimates agree with lpdensity 3.0.1 with
@@ -66,7 +76,7 @@ function fit(::Type{LocalPolynomialDensity}, x::AbstractVector{<:Real}; weights 
 end
 
 function fit(::Type{LocalPolynomialDensity}, d::SmoothingData; points = nothing, degree::Integer = 2,
-             derivative::Integer = 0, kernel::AbstractKernel = TriangularKernel(), bandwidth = NormalReference(),
+             derivative::Integer = 0, kernel::AbstractKernel = TriangularKernel(), bandwidth = MSEOptimal(),
              minobs::Integer = degree + 21)
   p, v = Int(degree), Int(derivative) + 1
   derivative >= 0 || throw(ArgumentError("derivative must be nonnegative, got $derivative"))
@@ -76,11 +86,12 @@ function fit(::Type{LocalPolynomialDensity}, d::SmoothingData; points = nothing,
   pts = points === nothing ? [_quantile(d, q) for q in 0.05:0.05:0.95] : _checkpoints(points)
   sel = _lpdensity_selection(bandwidth, d, kernel, pts, p, v, minobs)
   h = _pointbandwidths(sel.h, length(pts))
-  floored = _floor!(h, copy(h), d, pts, minobs)
-  if minobs > 0   # also enough distinct values
+  # the flags also mark the points where the floor decided a selected bandwidth
+  floored = falses(length(pts))
+  if minobs > 0
     for j in eachindex(pts)
-      δ = knn_distance(d, pts[j], min(minobs, nunique(d)); distinct = true)
-      δ > h[j] && (h[j] = δ; floored[j] = true)
+      δ = _lpdfloor(d, pts[j], minobs)
+      δ >= h[j] && (h[j] = δ; floored[j] = true)
     end
   end
   aux = _lpdaux(d)
@@ -93,8 +104,15 @@ end
 _lpdensity_selection(h::Union{Real,AbstractVector{<:Real}}, d, k, pts, p, v, minobs) =
   _regression_selection(h, d, k, 0, 0, pts, nothing, minobs)
 _lpdensity_selection(rule::NormalReference, d, k, pts, p, v, minobs) = _lpdensity_rot(rule, d, k, pts, p, v, minobs)
+_lpdensity_selection(rule::Union{MSEOptimal,IMSEOptimal}, d, k, pts, p, v, minobs) =
+  _lpdensity_dpi(rule, d, k, pts, p, v, minobs)
 _lpdensity_selection(rule, d, k, pts, p, v, minobs) = throw(ArgumentError(
-  "LocalPolynomialDensity takes a number, a vector or NormalReference() as bandwidth, got $(repr(rule))"))
+  "LocalPolynomialDensity takes a number, a vector, MSEOptimal(), IMSEOptimal() or NormalReference() as " *
+  "bandwidth, got $(repr(rule))"))
+
+# the smallest bandwidth whose window at x0 holds minobs observations and minobs distinct values
+_lpdfloor(d, x0, minobs) = max(knn_distance(d, x0, min(minobs, nobs(d))),
+                               knn_distance(d, x0, min(minobs, nunique(d)); distinct = true))
 
 # For each distinct value g: its total weight Pg normalized so that all weights sum
 # to n, the empirical distribution function at it, and the sum of the squared
@@ -155,7 +173,7 @@ function _lpdfit(d::SmoothingData, k, aux, x0, h, p, v; values::Bool = false)
   fp, fq = order(p), order(q)
   r = (estimate = fp.est, se = fp.se, estimate_bc = fq.est, se_rbc = fq.se, nwin = nwin, nuniq = nuniq)
   values || return r
-  return (r..., ga = ga, gb = gb, p = fp, q = fq)
+  return (r..., ga = ga, gb = gb, p = fp, q = fq, s = s)
 end
 
 nobs(m::LocalPolynomialDensity) = nobs(m.data)
@@ -213,13 +231,15 @@ function Base.show(io::IO, ::MIME"text/plain", m::LocalPolynomialDensity)
 end
 
 
-## lpdensity's rule of thumb
+## lpdensity's bandwidth selectors
 
-# The bandwidth that minimizes a^(2p+2-2ν) (B₁ + a B₂)² + σ²/a^(2ν-1) at each point
-# when the data are normal with their mean and standard deviation, with the
-# constants of the equivalent kernel on [-1, 1] (lpdensity's bw_ROT).
-function _lpdensity_rot(rule, d::SmoothingData, k, pts, p, v, minobs)
-  k isa PolynomialKernel || throw(ArgumentError("the rule of thumb needs a polynomial kernel, got $k"))
+# The terms of lpdensity's rules of thumb (bw_ROT and bw_IROT) at x0, for the data
+# standardized with their unweighted mean and standard deviation and a normal
+# density with their weighted mean and standard deviation: B₁, B₂ and σ² of the
+# asymptotic mean squared error a^(2p+2-2ν) (B₁ + a B₂)² + σ²/a^(2ν-1), with the
+# constants of the equivalent kernel on [-1, 1]
+function _lpdensity_nr(d::SmoothingData, k, p, v)
+  k isa PolynomialKernel || throw(ArgumentError("lpdensity's bandwidths need a polynomial kernel, got $k"))
   n = nobs(d)
   x̄ = sum(d.x) / n
   sdx = sqrt(sum(abs2, d.x .- x̄) / (n - 1))
@@ -230,29 +250,110 @@ function _lpdensity_rot(rule, d::SmoothingData, k, pts, p, v, minobs)
   S = [moment(k, i + j) for i in 0:p, j in 0:p]
   C1 = [moment(k, i + p + 1) for i in 0:p]
   C2 = [moment(k, i + p + 2) for i in 0:p]
-  G = _cjmG(k, p)
   Si = inv(S)
   e = v + 1
   c1, c2 = (Si * C1)[e], (Si * C2)[e]
   vfac = factorial(v)
-  sdconst = sqrt(abs((Si * G * Si)[e, e]))
+  sdconst = sqrt(abs((Si * _cjmG(k, p) * Si)[e, e]))
   # derivatives of the normal density with mean μ and standard deviation σ
   φr(x, r) = (-1)^r * _hermite(r, (x - μ) / σ) * exp(-((x - μ) / σ)^2 / 2) / (sqrt(2π) * σ^(r + 1))
-  range_z = z[end] - z[1]
-  h = map(pts) do x0
+  function terms(x0)
     z0 = (x0 - x̄) / sdx
     b1 = φr(z0, p) / factorial(p + 1) * vfac
     b2 = (φr(z0, p + 1) / factorial(p + 2) * vfac + b1 * φr(z0, 1) / φr(z0, 0)) * c2
-    b1 *= c1
-    sd2 = (vfac * sqrt(φr(z0, 0) / n) * sdconst)^2
-    hz = _fmin(a -> a^(2p + 2 - 2v) * (b1 + a * b2)^2 + sd2 / a^(2v - 1), eps(), range_z)
-    hx = hz * sdx
-    if minobs > 0
-      hx = max(hx, knn_distance(d, x0, min(minobs, n)), knn_distance(d, x0, min(minobs, nunique(d)); distinct = true))
-    end
+    return (B1 = b1 * c1, B2 = b2, V = (vfac * sqrt(φr(z0, 0) / n) * sdconst)^2)
+  end
+  return (terms = terms, sdx = sdx, range = z[end] - z[1])
+end
+
+# the asymptotic mean squared error at the standardized bandwidth a
+_lpdmse(a, p, v, t) = a^(2p + 2 - 2v) * (t.B1 + a * t.B2)^2 + t.V / a^(2v - 1)
+
+# lpdensity's bw_ROT: the bandwidth that minimizes the asymptotic mean squared
+# error at each point when the data are normal
+function _lpdensity_rot(rule, d::SmoothingData, k, pts, p, v, minobs)
+  nr = _lpdensity_nr(d, k, p, v)
+  h = map(pts) do x0
+    t = nr.terms(x0)
+    hx = _fmin(a -> _lpdmse(a, p, v, t), eps(), nr.range) * nr.sdx
+    minobs > 0 && (hx = max(hx, _lpdfloor(d, x0, minobs)))
     min(hx, max(abs(d.values[1] - x0), abs(d.values[end] - x0)))
   end
   return BandwidthSelection(h, rule, (points = pts,))
+end
+
+# lpdensity's bw_IROT: one bandwidth that minimizes the sum of the asymptotic mean
+# squared errors at the points of grid when the data are normal
+function _lpdensity_irot(d::SmoothingData, k, grid, p, v, minobs)
+  nr = _lpdensity_nr(d, k, p, v)
+  ts = map(nr.terms, grid)
+  h = _fmin(a -> sum(t -> _lpdmse(a, p, v, t), ts), eps(), nr.range) * nr.sdx
+  isfinite(h) || (h = maximum(x0 -> knn_distance(d, x0, min(nobs(d), max(minobs, p + 21))), grid))
+  minobs > 0 && (h = max(h, maximum(x0 -> _lpdfloor(d, x0, minobs), grid)))
+  return min(h, max(abs(d.values[end] - minimum(grid)), abs(d.values[1] - maximum(grid))))
+end
+
+# lpdensity's bw_MSE and bw_IMSE. On the standardized data, fits of orders p + 2 and
+# p + 3 at rule-of-thumb bandwidths for the grid estimate F⁽ᵖ⁺¹⁾/(p + 1)! and
+# F⁽ᵖ⁺²⁾/(p + 2)!, the moments of the data at a third such bandwidth h₁ give the
+# constants of the bias, and the standard error of the fit of order p at h₁ gives
+# the variance.
+function _lpdensity_dpi(rule, d::SmoothingData, k, pts, p, v, minobs)
+  rule.regularization == 1 && !rule.interior || throw(ArgumentError(
+    "lpdensity's plug-in bandwidths have no regularization or interior option, got $rule"))
+  k isa PolynomialKernel || throw(ArgumentError("lpdensity's bandwidths need a polynomial kernel, got $k"))
+  imse = rule isa IMSEOptimal
+  grid = imse && rule.grid isa Integer ? collect(range(d.x[1], d.x[end]; length = rule.grid)) : pts
+  n = nobs(d)
+  x̄ = sum(d.x) / n
+  sdx = sqrt(sum(abs2, d.x .- x̄) / (n - 1))
+  dz = SmoothingData((d.x .- x̄) ./ sdx; weights = d.w)
+  zs = (grid .- x̄) ./ sdx
+  h1 = _lpdensity_irot(dz, k, zs, 2, 1, 23)
+  hp1 = _lpdensity_irot(dz, k, zs, p + 2, p + 1, p + 23)
+  hp2 = _lpdensity_irot(dz, k, zs, p + 3, p + 2, p + 24)
+  aux = _lpdaux(dz)
+  vfac = factorial(v)
+  ts = _pointwise(zs) do z0
+    f = _lpdfit(dz, k, aux, z0, h1, p, v; values = true)
+    C = LinearAlgebra.cholesky(LinearAlgebra.Symmetric([f.s[i + j + 1] for i in 0:p, j in 0:p]); check = false)
+    LinearAlgebra.issuccess(C) || return (B1 = NaN, B2 = NaN, V = NaN)
+    c1 = vfac * (C \ f.s[p+2:2p+2])[v + 1]
+    c2 = vfac * (C \ f.s[p+3:2p+3])[v + 1]
+    (B1 = _lpdcoef(dz, k, aux, z0, hp1, p + 2, p + 1) * c1, B2 = _lpdcoef(dz, k, aux, z0, hp2, p + 3, p + 2) * c2,
+     V = f.p.se^2 * h1^(2v - 1))
+  end
+  ok(t) = isfinite(t.B1) && isfinite(t.B2) && isfinite(t.V)
+  fallback(x0) = knn_distance(d, x0, min(n, max(minobs, p + 21)))
+  rz = dz.x[end] - dz.x[1]
+  pilots = (h1 = h1 * sdx, hp1 = hp1 * sdx, hp2 = hp2 * sdx)
+  if imse
+    good = filter(ok, ts)
+    h = isempty(good) ? maximum(fallback, grid) : _fmin(a -> sum(t -> _lpdmse(a, p, v, t), good), eps(), rz) * sdx
+    minobs > 0 && (h = max(h, maximum(x0 -> _lpdfloor(d, x0, minobs), grid)))
+    h = min(h, max(abs(d.values[end] - minimum(grid)), abs(d.values[1] - maximum(grid))))
+    return BandwidthSelection(h, rule, (grid = grid, pilots = pilots))
+  end
+  h = map(pts, ts) do x0, t
+    hx = ok(t) ? _fmin(a -> _lpdmse(a, p, v, t), eps(), rz) * sdx : fallback(x0)
+    minobs > 0 && (hx = max(hx, _lpdfloor(d, x0, minobs)))
+    min(hx, max(abs(d.values[1] - x0), abs(d.values[end] - x0)))
+  end
+  return BandwidthSelection(h, rule, (points = pts, pilots = pilots))
+end
+
+# β_j / hʲ of the local polynomial fit of order o to F̂ at x0 over the distinct
+# values within h, or NaN if the fit is singular
+function _lpdcoef(d::SmoothingData, k, aux, x0, h, o, j)
+  u, U = d.values, nunique(d)
+  s, t = zeros(2o + 1), zeros(o + 1)
+  for g in _firsttrue(g -> u[g] - x0 >= -h, U):_firsttrue(g -> u[g] - x0 > h, U)-1
+    tg = (u[g] - x0) / h
+    _powersums!(s, t, aux.P[g] * k(tg), tg, aux.F[g])
+  end
+  C = LinearAlgebra.cholesky(LinearAlgebra.Symmetric([s[a + b + 1] for a in 0:o, b in 0:o]); check = false)
+  LinearAlgebra.issuccess(C) || return NaN
+  return (C \ t)[j + 1] / h^j
 end
 
 # G[i, j] = ∫∫_{x<y} x^i y^(j-1) k(x) k(y) + ∫∫_{x>y} x^(i-1) y^j k(x) k(y), i, j = 1, …, p + 1,
