@@ -14,8 +14,9 @@ and the pieces that all estimators build on:
   regression function or its derivatives at a set of points, with conventional
   and robust bias-corrected standard errors and intervals that agree with
   nprobust, nearest-neighbour and HC0–HC3 variances, floors on the windows that
-  are reported where they bind, the covariances of the estimates between points
-  and uniform sup-t bands;
+  are reported where they bind, the covariances of the estimates between points,
+  uniform sup-t bands, and honest intervals (Armstrong and Kolesár) with their
+  optimal bandwidths, which agree with RDHonest;
 - `fit(KDE, x)`, a kernel density estimate that is a distribution of
   Distributions.jl: `pdf`, `cdf`, `quantile`, `rand` and the rest, computed
   exactly from the observations, with derivatives of the density and pointwise

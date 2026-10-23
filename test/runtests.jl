@@ -11,6 +11,7 @@ tests = [
   "plugin",
   "kdeinference",
   "bands",
+  "honest",
   "aqua"
 ]
 

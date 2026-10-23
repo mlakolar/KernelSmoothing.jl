@@ -35,7 +35,7 @@ export
   KDE, fit, pdf, logpdf, quantile, stderror,
   LocalPolynomialRegression, PointwiseDensity, RuleOfThumb, MSEOptimal, IMSEOptimal, CoverageOptimal,
   VarianceEstimator, NNVariance, HCVariance,
-  InferenceMethod, Conventional, RobustBiasCorrected,
+  InferenceMethod, Conventional, RobustBiasCorrected, Honest, FLCIOptimal, worstcasebias,
   coef, confint, coeftable, predict, fitted, residuals, vcov, confband
 
 include("polynomials.jl")
@@ -49,5 +49,6 @@ include("locpoly.jl")
 include("plugin.jl")
 include("kdeinference.jl")
 include("bands.jl")
+include("honest.jl")
 
 end
