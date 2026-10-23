@@ -102,6 +102,7 @@ end
   C = vcov(m; method = RobustBiasCorrected())
   @test sqrt.(diag(C)) ≈ m.se_rbc rtol = 1e-10
   @test minimum(eigvals(Symmetric(C))) >= -1e-12 * maximum(diag(C))
+  @test C == C'
   b = confband(m; rng = MersenneTwister(2))
   @test all(b.lower .< m.estimate_bc .< b.upper) && b.critical > 1.96
   t = coeftable(m)

@@ -348,6 +348,7 @@ end
 function _coefvar(d, k, f, g, vce)
   a, e, h, o, c = f.a, f.e, f.h, f.o, f.c
   σ2 = vce isa NNVariance ? _nnvariances(d, a, e, vce.matches) : nothing
+  lev = vce isa HCVariance && vce.type >= 2 ? _leveragepoly(f.C, o) : nothing
   n = e - a + 1
   v = 0.0
   for i in a:e
@@ -362,8 +363,7 @@ function _coefvar(d, k, f, g, vce)
       elseif vce.type == 1
         ε2 * _dofscale(n, o + 1)^2
       else
-        r = [u^j for j in 0:o]
-        hii = kw * LinearAlgebra.dot(r, f.C \ r)
+        hii = kw * evalpoly(u, lev)
         vce.type == 2 ? ε2 / (1 - hii) : ε2 / (1 - hii)^2
       end
     end

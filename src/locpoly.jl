@@ -341,6 +341,7 @@ function _localfit(d::SmoothingData, k::AbstractKernel, x0, h, b, p, ν, vce; ve
   xs, ys = d.x, d.y
   a, e, βp, γ, g, c, ρ, s, scale = f.a, f.e, f.βp, f.γ, f.g, f.c, f.ρ, f.s, f.scale
   r = vce isa NNVariance ? _nnresiduals(d, a, e, vce.matches) : nothing
+  lev = vce isa HCVariance && vce.type >= 2 ? _leveragepoly(f.Cp, p) : nothing
   aus = vectors ? Vector{Float64}(undef, nwin) : Float64[]
   arb = vectors ? Vector{Float64}(undef, nwin) : Float64[]
   vh = vb = 0.0
@@ -352,7 +353,7 @@ function _localfit(d::SmoothingData, k::AbstractKernel, x0, h, b, p, ν, vce; ve
     ℓ = kh * evalpoly(u, g)
     ℓbc = ℓ - ρ * s * kb * evalpoly(v, c)
     rh, rb = _residuals(vce, r, i - a + 1, ys[i] - evalpoly(u, βp), ys[i] - evalpoly(v, γ),
-                        kh, u, f.Cp, nwin, p)
+                        kh, u, lev, nwin, p)
     vh += (ℓ * rh)^2
     vb += (ℓbc * rb)^2
     if vectors
@@ -379,15 +380,27 @@ end
 
 # the residuals for the conventional and the bias-corrected standard error, scaled
 # so that their squares are the variance estimates
-_residuals(::NNVariance, r, l, εh, εb, kh, u, Cp, n, p) = (r[l], r[l])
+_residuals(::NNVariance, r, l, εh, εb, kh, u, lev, n, p) = (r[l], r[l])
 
-function _residuals(vce::HCVariance, r, l, εh, εb, kh, u, Cp, n, p)
+function _residuals(vce::HCVariance, r, l, εh, εb, kh, u, lev, n, p)
   vce.type == 0 && return (εh, εb)
   vce.type == 1 && return (εh * _dofscale(n, p + 1), εb * _dofscale(n, p + 2))
-  x = [u^j for j in 0:p]
-  hii = kh * LinearAlgebra.dot(x, Cp \ x)   # the leverage in the fit of order p
+  hii = kh * evalpoly(u, lev)   # the leverage in the fit of order p
   f = vce.type == 2 ? 1 / sqrt(1 - hii) : 1 / (1 - hii)
   return (εh * f, εb * f)
+end
+
+# The leverage of an observation at u in a fit of order p, divided by its kernel
+# weight, r(u)' Γ⁻¹ r(u) with r(u) = (1, u, …, u^p), as the coefficients of a
+# polynomial in u of degree 2p, from the Cholesky factorization C of Γ, so that the
+# leverages need no solve and no allocation per observation
+function _leveragepoly(C, p)
+  Γinv = C \ Matrix{Float64}(LinearAlgebra.I, p + 1, p + 1)
+  lev = zeros(2p + 1)
+  for a in 0:p, b in 0:p
+    lev[a + b + 1] += Γinv[a + 1, b + 1]
+  end
+  return lev
 end
 
 # √(n / (n - k)) for n observations and k coefficients, or NaN without residual
