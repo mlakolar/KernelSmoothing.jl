@@ -93,11 +93,11 @@ end
 bandwidth(f::KDE) = f.h
 nobs(f::KDE) = nobs(f.data)
 
-# ∑ᵢ vᵢ k((xᵢ - x) / h) over the observations where k can be nonzero; vᵢ = wᵢ, or
-# 1 without weights
+# ∑ᵢ vᵢ k((xᵢ - x) / h) over the observations where k can be nonzero, also in Float64
+# for Gaussian kernels; vᵢ = wᵢ, or 1 without weights
 function _pointsum(d::SmoothingData, k::AbstractKernel, h::Float64, x::Real, v)
   xs, n = d.x, nobs(d)
-  lo, hi = support(k)
+  lo, hi = _zerosupport(k)
   a = isfinite(lo) ? _firsttrue(i -> (xs[i] - x) / h >= lo, n) : 1
   b = isfinite(hi) ? _firsttrue(i -> (xs[i] - x) / h > hi, n) : n + 1
   s = zero(float(x))
@@ -266,7 +266,7 @@ function stderror(f::KDE, x::Real)
   isnan(x) && return float(x)
   d, k, h = f.data, f.reflected, f.h
   xs, n = d.x, nobs(d)
-  lo, hi = support(k)
+  lo, hi = _zerosupport(k)
   a = isfinite(lo) ? _firsttrue(i -> (xs[i] - x) / h >= lo, n) : 1
   b = isfinite(hi) ? _firsttrue(i -> (xs[i] - x) / h > hi, n) : n + 1
   s0 = s1 = s2 = 0.0   # ∑ wᵢ kᵢ, ∑ wᵢ² kᵢ and ∑ wᵢ² kᵢ² with kᵢ = k((xᵢ - x) / h)

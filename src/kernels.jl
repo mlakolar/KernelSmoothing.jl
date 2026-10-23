@@ -291,15 +291,27 @@ function Base.show(io::IO, k::PiecewisePolynomialKernel)
         first(k.breaks), ", ", last(k.breaks), "], smoothness ", k.smoothness, ")")
 end
 
-function (k::PolynomialKernel)(u::Real)
+# inlined into the sums over windows, where each term evaluates the kernel
+@inline function (k::PolynomialKernel)(u::Real)
   b, c = pieces(k)
   isnan(u) && return u * b[1]
   (u < first(b) || u > last(b)) && return zero(u * b[1])
   j = 1
-  while j < length(c) && u >= b[j + 1]
+  @inbounds while j < length(c) && u >= b[j + 1]
     j += 1
   end
-  return evalpoly(u - _mid(b, j), c[j])
+  return @inbounds _horner(c[j], u - _mid(b, j))
+end
+
+# evalpoly(t, c) for coefficients in a tuple or a vector, without bounds checks
+@inline _horner(c::Tuple, t) = evalpoly(t, c)
+@inline function _horner(c::AbstractVector, t)
+  n = length(c)
+  @inbounds s = c[n] + zero(t)
+  @inbounds for i in n-1:-1:1
+    s = muladd(t, s, c[i])
+  end
+  return s
 end
 
 """
