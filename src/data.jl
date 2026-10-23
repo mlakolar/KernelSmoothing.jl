@@ -147,6 +147,12 @@ end
 
 nobs(d::SmoothingData) = length(d.x)
 
+# the same sample without its responses, sharing the arrays: the density estimators
+# ignore responses, and the plug-in rules choose between densities and regression by
+# whether there are any
+_withouty(d::SmoothingData) = d.y === nothing ? d :
+  SmoothingData(d.x, nothing, d.w, d.perm, d.values, d.starts, d.valueindex, d.cumw, d.sumw, d.neff)
+
 """
     effective_nobs(d::SmoothingData)
 

@@ -60,7 +60,7 @@ the following.
 | `fit(LocalPolynomialDensity, x)` | triangular, degree 2 | lpdensity's plug-in, with a bound on the bias | lpdensity |
 
 The plug-in bandwidths are pointwise ([`MSEOptimal`](@ref)) at a single point and
-integrated ([`IMSEOptimal`](@ref)) at several, as in nprobust. In three places the
+integrated ([`IMSEOptimal`](@ref)) at several, as in nprobust. In four places the
 defaults depart from the R packages, which `compat = true` reproduces:
 
 1. The density plug-in of nprobust estimates ``f''`` with a pilot bandwidth that
@@ -79,6 +79,14 @@ defaults depart from the R packages, which `compat = true` reproduces:
    ``(B_1 + a B_2)^2`` vanishes when the estimated terms have opposite signs, and it
    then chooses bandwidths of the order of the range of the data. We bound the bias
    by ``(|B_1| + a |B_2|)^2``.
+4. The regression plug-in of nprobust has the same flaw for even ``p - \nu``, whose
+   squared bias ``(B_1 + h B_2 + \lambda R)^2`` moreover adds the regularization
+   ``R``, which has the units of ``B_1^2``, to ``B_1``, so that the bandwidth depends
+   on the units of ``y``. We use ``(|B_1| + h |B_2|)^2 + \lambda R``. Its integrated
+   rule also leaves out the regularization for odd ``p - \nu`` and has no upper
+   bound, so that an exactly linear regression function on the unit interval gave a
+   bandwidth of 966; we keep the regularization and cap the bandwidth at the range of
+   the data.
 
 The pages of the estimators give the details.
 

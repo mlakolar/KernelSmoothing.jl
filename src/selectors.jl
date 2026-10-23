@@ -28,7 +28,10 @@ from the data binned linearly once, on a grid with about 100 points per smallest
 pilot bandwidth, with the lagged products of the bin weights from an FFT. This
 changes the estimates by about `1e-5` and the bandwidth by about `1e-6` relative,
 far below its statistical error, and makes the selection take a few milliseconds
-for up to `10^6` observations. R's `bw.SJ` bins differences of
+for up to `10^6` observations. Data that would need more than `2^20` grid points,
+because of far outliers or heavy tails, are split at gaps across which the pilot
+kernels are negligible, only the densest part of each run is binned, and the pairs
+with the other observations, which are sparse, are summed exactly. R's `bw.SJ` bins differences of
 pairs of observations coarsely and stops its search early, so by default it agrees
 with this rule to two or three digits only. With fine bins it agrees to about
 `1e-6` for `method = :dpi` and `4e-5` for `:ste`, where R rounds the constant
@@ -57,8 +60,9 @@ function selectbandwidth(rule::SheatherJones, d::SmoothingData, k::AbstractKerne
   exact = nobs(d) <= rule.exact
   # normal-reference pilot bandwidths for ψ₄ and ψ₆ (Sheather and Jones 1991)
   a, b = 1.24 * σ * n^(-1 / 7), 1.23 * σ * n^(-1 / 9)
-  # the root finding evaluates ψ₄ at bandwidths down to about a / 5
-  ψ = _psievaluator(d, min(a, b) / 500, exact)
+  # the root finding evaluates ψ₄ at bandwidths down to about a / 5, and rarely above
+  # a few times the larger pilot
+  ψ = _psievaluator(d, min(a, b) / 500, exact, 4 * max(a, b))
   TD = -ψ(6, b)
   TD > 0 || return _sparse(rule, d, k, "the estimate of ψ₆ is not negative")
   if rule.method == :dpi
@@ -110,8 +114,33 @@ function _PairSums(d::SmoothingData, g::Real, exact::Bool)
   w = d.w === nothing ? ones(nobs(d)) : d.w
   norm = d.sumw^2 - sum(abs2, w)
   exact && return _PairSums(d.x, w, norm)
-  gs, gv = _linearbin!(SumsWorkspace(), d.x, w, g / 100)
+  runs = _runs(d.x, 24g)
+  if length(runs) == 1
+    gs, gv = _linearbin!(SumsWorkspace(), d.x, w, g / 100)
+    return _PairSums(gs, gv, norm)
+  end
+  # the runs between gaps wider than the kernels reach are binned one by one, so that
+  # far outliers do not need a grid over the whole range
+  gs, gv, ws = Float64[], Float64[], SumsWorkspace()
+  for r in runs
+    rs, rv = _linearbin!(ws, view(d.x, r), view(w, r), g / 100)
+    append!(gs, rs)
+    append!(gv, rv)
+  end
   return _PairSums(gs, gv, norm)
+end
+
+# the runs of the sorted x between gaps wider than `gap`
+function _runs(x, gap)
+  runs = UnitRange{Int}[]
+  s = 1
+  for i in eachindex(x)
+    if i == lastindex(x) || x[i + 1] - x[i] > gap
+      push!(runs, s:i)
+      s = i + 1
+    end
+  end
+  return runs
 end
 
 # ∑ᵢ ∑ⱼ wᵢ wⱼ k((xⱼ - xᵢ) / g), the diagonal included, for a symmetric kernel that is
@@ -141,44 +170,93 @@ function _psi(d::SmoothingData, r, g, exact::Bool)
 end
 
 # (r, g) -> ψ̂ᵣ(g) for Sheather and Jones: exact double sums, or the data binned once
-# on a grid of spacing Δ with the lagged products of the bin weights, which makes each
-# evaluation cost O(g / Δ). A grid of more than 2^20 points, for data with far
-# outliers, falls back to binning for each g, which visits only the occupied points.
-function _psievaluator(d::SmoothingData, Δ, exact::Bool)
+# on grids of spacing Δ with the lagged products of the bin weights, which makes each
+# evaluation cost O(g / Δ). The binning leaves out pairs farther apart than 12 gmax,
+# and a g above gmax bins the data again.
+function _psievaluator(d::SmoothingData, Δ, exact::Bool, gmax)
   exact && return (r, g) -> _psi(d, r, g, true)
-  M = (d.x[end] - d.x[1]) / Δ + 2
-  M <= 2^20 || return (r, g) -> _psi(d, r, g, false)
-  p = _LaggedBins(d, Δ, floor(Int, M))
-  return (r, g) -> _psi(p, r, g)
+  p = _LaggedBins(d, Δ, 12gmax)
+  return (r, g) -> 12g <= p.gap ? _psi(p, r, g) : _psi(_LaggedBins(d, g / 100, 12g), r, g)
 end
 
 # The weights of linearly binned data on a grid of spacing Δ and their lagged
 # products c[m + 1] = ∑ₖ bₖ bₖ₊ₘ, so that ∑ᵢ ∑ⱼ wᵢ wⱼ K((xⱼ - xᵢ) / g), the diagonal
-# included, is about c[1] K(0) + 2 ∑ₘ c[m + 1] K(m Δ / g) for a symmetric K
+# included, is about c[1] K(0) + 2 ∑ₘ c[m + 1] K(m Δ / g) for a symmetric K.
+# Data whose range needs more than 2^20 bins, because of far outliers or heavy
+# tails, are split at gaps wider than `gap`, across which the pairs are negligible,
+# and of a run that is still wider than 2^18 bins only the densest part is binned.
+# The pairs with the other observations, which are sparse, are summed exactly.
 struct _LaggedBins
   Δ::Float64
-  c::Vector{Float64}
+  gap::Float64                  # pairs farther apart are left out; Inf for none
+  cs::Vector{Vector{Float64}}   # the lagged products of each binned part
+  x::Vector{Float64}
+  w::Vector{Float64}
+  binned::BitVector             # whether an observation is binned
+  rest::Vector{Int}             # the observations that are not
   norm::Float64
 end
 
-function _LaggedBins(d::SmoothingData, Δ, M)
-  w = d.w === nothing ? ones(nobs(d)) : d.w
+function _LaggedBins(d::SmoothingData, Δ, gap)
+  x, n = d.x, nobs(d)
+  w = d.w === nothing ? ones(n) : d.w
+  norm = d.sumw^2 - sum(abs2, w)
+  (x[end] - x[1]) / Δ + 2 <= 2^20 &&
+    return _LaggedBins(Δ, Inf, [_binlags(x, w, 1:n, Δ)], x, w, trues(n), Int[], norm)
+  binned = falses(n)
+  cs = [begin
+          part = _densest(x, r, (2^18 - 2) * Δ)
+          binned[part] .= true
+          _binlags(x, w, part, Δ)
+        end for r in _runs(x, gap)]
+  return _LaggedBins(Δ, gap, cs, x, w, binned, findall(!, binned), norm)
+end
+
+# the longest stretch of the observations r whose values span at most `width`
+function _densest(x, r, width)
+  best, from, l = 0, first(r), first(r)
+  for i in r
+    while x[i] - x[l] > width
+      l += 1
+    end
+    i - l + 1 > best && ((best, from) = (i - l + 1, l))
+  end
+  return from:from+best-1
+end
+
+# the lagged products of the observations r, binned linearly on a grid of spacing Δ
+# from the first of them
+function _binlags(x, w, r, Δ)
+  x0 = x[first(r)]
+  M = floor(Int, (x[last(r)] - x0) / Δ) + 2
   b = zeros(M)
-  for i in eachindex(d.x)
-    t = (d.x[i] - d.x[1]) / Δ
+  for i in r
+    t = (x[i] - x0) / Δ
     j = min(floor(Int, t), M - 2)
     f = t - j
     b[j + 1] += (1 - f) * w[i]
     b[j + 2] += f * w[i]
   end
-  return _LaggedBins(Δ, _lagproducts(b), d.sumw^2 - sum(abs2, w))
+  return _lagproducts(b)
 end
 
 function _psi(p::_LaggedBins, r, g)
   k = GaussianDerivativeKernel(1.0, r)
-  s = p.c[1] * k(0.0)
-  for m in 1:min(length(p.c) - 1, floor(Int, 12g / p.Δ))
-    s += 2 * p.c[m + 1] * k(m * p.Δ / g)
+  s = 0.0
+  for c in p.cs
+    s += c[1] * k(0.0)
+    for m in 1:min(length(c) - 1, floor(Int, 12g / p.Δ))
+      s += 2 * c[m + 1] * k(m * p.Δ / g)
+    end
+  end
+  # the pairs with an observation that is not binned, exactly: in both orders with
+  # binned ones, and among themselves from both ends
+  x, w = p.x, p.w
+  for j in p.rest
+    for i in searchsortedfirst(x, x[j] - 12g):searchsortedlast(x, x[j] + 12g)
+      t = w[i] * w[j] * k((x[i] - x[j]) / g)
+      s += p.binned[i] ? 2t : t
+    end
   end
   return s / (p.norm * g^(r + 1))
 end
@@ -269,21 +347,23 @@ function _goldenmin(f, a, b; rtol = 1e-6)
   return (a + b) / 2
 end
 
-# The bandwidth chosen from a criterion on a grid: the largest (or global) local
-# minimizer on the grid, refined between its neighbours, with the grid, the
-# criterion values, the local minimizers and whether the minimum is at an end.
+# The bandwidth chosen from a criterion on a grid: the global minimizer over the
+# finite values, or with `largest = true` the largest local minimizer. An interior
+# choice is refined between its neighbours, and the refinement is kept only where it
+# is no worse. Returns the details: the grid, the criterion values, the local
+# minimizers and whether the choice is at an end of the grid.
 function _gridminimize(f, hs; largest::Bool)
   cv = [f(h) for h in hs]
   m = length(hs)
-  interior = [i for i in 2:m-1 if cv[i] < cv[i - 1] && cv[i] <= cv[i + 1] && isfinite(cv[i])]
-  if isempty(interior)
-    i = argmin(map(v -> isfinite(v) ? v : Inf, cv))
-    atbound = true
-  else
-    i = largest ? last(interior) : interior[argmin(cv[interior])]
-    atbound = false
+  any(isfinite, cv) || throw(ArgumentError("the criterion is not finite at any bandwidth of the grid"))
+  interior = [i for i in 2:m-1 if isfinite(cv[i]) && cv[i] < cv[i - 1] && cv[i] <= cv[i + 1]]
+  i = largest && !isempty(interior) ? last(interior) : argmin(map(v -> isfinite(v) ? v : Inf, cv))
+  atbound = i == 1 || i == m
+  h = hs[i]
+  if !atbound && isfinite(cv[i - 1]) && isfinite(cv[i + 1])
+    t = _goldenmin(f, hs[i - 1], hs[i + 1])
+    f(t) <= cv[i] && (h = t)
   end
-  h = atbound ? hs[i] : _goldenmin(f, hs[i - 1], hs[i + 1])
   return h, (grid = collect(hs), criterion = cv, minimizers = hs[interior], atbound = atbound)
 end
 
@@ -300,11 +380,13 @@ over `gridsize` bandwidths spaced evenly on the log scale between `h_OS / 100` a
 `4 h_OS`, where `h_OS` is the oversmoothed bandwidth of Terrell (1990), an upper
 bound for the bandwidth that minimizes the asymptotic mean integrated squared
 error. The minimizer of the criterion itself can exceed `h_OS`, as it does for
-normal data about half of the time, hence the factor 4. Following Sheather (2004),
-it takes the largest local minimizer on the grid and refines it. The details of the selection record the grid, the criterion,
-all local minimizers and whether the minimum was at an end of the grid, which
-happens, for example, when ties make the criterion fall without bound as `h`
-shrinks.
+normal data about half of the time, hence the factor 4. The lower end uses the
+robust scale of [`NormalReference`](@ref), so that outliers and heavy tails, which
+inflate the standard deviation, do not lift the whole grid. Following Sheather
+(2004), it takes the largest local minimizer on the grid and refines it. The
+details of the selection record the grid, the criterion, all local minimizers and
+whether the minimum was at an end of the grid, which happens, for example, when ties
+make the criterion fall without bound as `h` shrinks; the rule warns then.
 
 Polynomial kernels use exact fast sums. Gaussian kernels use exact double sums for
 up to `exact` observations and binned ones otherwise, as in
@@ -327,18 +409,20 @@ LSCV(; gridsize::Integer = 60, exact::Integer = 1000) = LSCV(gridsize, exact)
 
 function selectbandwidth(rule::LSCV, d::SmoothingData, k::AbstractKernel)
   nobs(d) >= 2 || throw(ArgumentError("LSCV needs at least two observations"))
-  σ = _std(d)
-  _check_scale(σ, rule)
+  sd, iqr = _sdiqr(d)
+  _check_scale(sd, rule)
   n = effective_nobs(d)
-  hos = (243 * roughness(k) / (35 * _mu2(k)^2 * n))^(1 / 5) * σ
-  crit = _lscvcriterion(d, k, hos / 100, nobs(d) <= rule.exact)
-  hs = exp.(range(log(hos / 100), log(4hos); length = rule.gridsize))
+  c = (243 * roughness(k) / (35 * _mu2(k)^2 * n))^(1 / 5)
+  hmin, hmax = c * _robustscale(sd, iqr / 1.349) / 100, 4 * c * sd
+  crit = _lscvcriterion(d, k, nobs(d) <= rule.exact)
+  hs = exp.(range(log(hmin), log(hmax); length = rule.gridsize))
   h, details = _gridminimize(crit, hs; largest = true)
+  details.atbound && @warn "LSCV: the criterion is smallest at an end of the grid of bandwidths, h = $h"
   return BandwidthSelection(h, rule, details)
 end
 
 # h ↦ CV(h); ∫ f̂² is a double sum of the convolution of k with its reflection
-function _lscvcriterion(d, k::PolynomialKernel, hmin, exact)
+function _lscvcriterion(d, k::PolynomialKernel, exact)
   kk = convolve(k, _reflect(k))
   w = d.w === nothing ? ones(nobs(d)) : d.w
   W, sw2 = d.sumw, sum(abs2, w)
@@ -350,7 +434,7 @@ function _lscvcriterion(d, k::PolynomialKernel, hmin, exact)
   end
 end
 
-function _lscvcriterion(d, k::GaussianFamily, hmin, exact)
+function _lscvcriterion(d, k::GaussianFamily, exact)
   σ, r = _scale_order(k)
   r == 0 || throw(ArgumentError("LSCV needs a density kernel, got $k"))
   kk = convolve(k, k)
@@ -363,7 +447,7 @@ function _lscvcriterion(d, k::GaussianFamily, hmin, exact)
   end
 end
 
-_lscvcriterion(d, k::AbstractKernel, hmin, exact) =
+_lscvcriterion(d, k::AbstractKernel, exact) =
   throw(ArgumentError("LSCV needs the convolution of the kernel with itself, which is not available for $k"))
 
 """

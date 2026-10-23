@@ -65,6 +65,7 @@ end
 
 function fit(::Type{KDE}, d::SmoothingData; kernel::AbstractKernel = EpanechnikovKernel(),
              bandwidth = SheatherJones(), engine::Union{Nothing,SumEngine} = nothing)
+  d = _withouty(d)
   _isnonnegative(kernel) || throw(ArgumentError("$kernel takes negative values, so a " *
     "kernel density estimate with it is not a density; use a nonnegative kernel, and " *
     "derivative(f, r) for derivatives of the density"))
