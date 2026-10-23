@@ -19,7 +19,7 @@ estimators are built from, see [`kernelsums`](@ref).
 module KernelSmoothing
 
 import Distributions
-import Distributions: cdf, support, convolve, moment, pdf, logpdf, quantile, insupport, mean, var
+import Distributions: cdf, ccdf, cquantile, support, convolve, moment, pdf, logpdf, quantile, insupport, mean, var
 import LinearAlgebra
 import StatsAPI
 import StatsAPI: fit, nobs, stderror, coef, confint, coeftable, predict, fitted, residuals, vcov
@@ -32,7 +32,7 @@ export
   UniformKernel, TriangularKernel, EpanechnikovKernel, BiweightKernel,
   TriweightKernel, GaussianKernel,
   derivative, roughness, smoothness,
-  cdf, support, convolve, moment,
+  cdf, ccdf, support, insupport, convolve, moment,
   SmoothingData, nobs, effective_nobs, nunique, weightsum, window, knn_distance,
   kernelsums, kernelsums!, SumEngine, DirectSums, WindowSums, FastSums, BinnedSums, isexact,
   SumsWorkspace,

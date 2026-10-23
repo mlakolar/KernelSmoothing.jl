@@ -141,6 +141,36 @@ smoothness(::EpanechnikovKernel) = 1
 smoothness(::BiweightKernel) = 2
 smoothness(::TriweightKernel) = 3
 
+const NamedPolynomialKernel =
+  Union{UniformKernel,TriangularKernel,EpanechnikovKernel,BiweightKernel,TriweightKernel}
+
+# The Epanechnikov, biweight and triweight kernels are evaluated as powers of 1 - u²,
+# which is never negative on [-1, 1] and, with a fused multiply-add, rounded once, so
+# that it stays accurate near ±1, where the terms of the expanded pieces cancel and
+# their sum can turn negative.
+(::UniformKernel)(u::Real) = -1 <= u <= 1 ? 0.5 + zero(float(u)) : _outside(u)
+(::TriangularKernel)(u::Real) = -1 <= u <= 1 ? 1.0 - abs(u) : _outside(u)
+(::EpanechnikovKernel)(u::Real) = -1 <= u <= 1 ? 0.75 * muladd(-u, u, 1.0) : _outside(u)
+(::BiweightKernel)(u::Real) = -1 <= u <= 1 ? 15 / 16 * muladd(-u, u, 1.0)^2 : _outside(u)
+(::TriweightKernel)(u::Real) = -1 <= u <= 1 ? 35 / 32 * muladd(-u, u, 1.0)^3 : _outside(u)
+
+# the value of a kernel outside its support: zero, and NaN for NaN
+_outside(u) = isnan(u) ? float(u) : zero(float(u))
+
+# The expanded pieces of their distribution functions cancel in the lower tail, which
+# is evaluated as F(u) = (1 + u)^m P(u) / c instead, with the terms of P of one sign
+# for u ≤ 0. Elsewhere F(u) is above 0.07, and the pieces are accurate and cheaper.
+function cdf(k::NamedPolynomialKernel, u::Real)
+  -1 < u <= -0.5 && return _lowertail(k, u)
+  return min(_piececdf(k, u), 1.0)
+end
+
+_lowertail(::UniformKernel, u) = (1.0 + u) / 2
+_lowertail(::TriangularKernel, u) = (1.0 + u)^2 / 2
+_lowertail(::EpanechnikovKernel, u) = (1.0 + u)^2 * (2.0 - u) / 4
+_lowertail(::BiweightKernel, u) = (1.0 + u)^3 * evalpoly(u, (8.0, -9.0, 3.0)) / 16
+_lowertail(::TriweightKernel, u) = (1.0 + u)^4 * evalpoly(u, (16.0, -29.0, 20.0, -5.0)) / 32
+
 # The cdf on each piece, a polynomial in u - _mid(b, j) whose constant term carries
 # the mass to the left of the piece, and the total mass; _cdfcoefs computes the same
 # from the pieces, which the tests check.
@@ -196,6 +226,7 @@ struct PiecewisePolynomialKernel <: PolynomialKernel
     all(isfinite, breaks) && all(>(0), diff(breaks)) ||
       throw(ArgumentError("breakpoints must be finite and strictly increasing"))
     any(isempty, coefs) && throw(ArgumentError("every piece needs at least one coefficient"))
+    all(cj -> all(isfinite, cj), coefs) || throw(ArgumentError("coefficients must be finite"))
     smoothness >= 0 || throw(ArgumentError("smoothness must be nonnegative, got $smoothness"))
     b, c = Vector{Float64}(breaks), [Vector{Float64}(cj) for cj in coefs]
     new(b, c, smoothness, _cdfcoefs(b, c)...)
@@ -239,14 +270,20 @@ function _smoothness(breaks, coefs)
   n = length(breaks)
   for r in 0:maximum(length, coefs)
     d = [_derivcoefs(c, r) for c in coefs]
+    # a jump counts when it exceeds the rounding of the derivative's values, so that
+    # the test does not depend on the scale of u
+    scale = maximum(_bound(d[j], (breaks[j + 1] - breaks[j]) / 2) for j in eachindex(d))
     for j in 1:n
       left = j == 1 ? 0.0 : evalpoly(breaks[j] - _mid(breaks, j - 1), d[j - 1])
       right = j == n ? 0.0 : evalpoly(breaks[j] - _mid(breaks, j), d[j])
-      abs(left - right) > sqrt(eps()) * max(1, abs(left), abs(right)) && return r
+      abs(left - right) > sqrt(eps()) * scale && return r
     end
   end
   return maximum(length, coefs)
 end
+
+# a bound on |p(t)| for |t| ≤ w
+_bound(c, w) = sum(abs(c[i]) * w^(i - 1) for i in eachindex(c))
 
 function Base.show(io::IO, k::PiecewisePolynomialKernel)
   n = length(k.coefs)
@@ -256,6 +293,7 @@ end
 
 function (k::PolynomialKernel)(u::Real)
   b, c = pieces(k)
+  isnan(u) && return u * b[1]
   (u < first(b) || u > last(b)) && return zero(u * b[1])
   j = 1
   while j < length(c) && u >= b[j + 1]
@@ -268,9 +306,18 @@ end
     support(k::AbstractKernel)
 
 The interval `(lo, hi)` outside which the kernel `k` is zero: `(-1.0, 1.0)` for
-the compactly supported named kernels and `(-Inf, Inf)` for the Gaussian.
+the compactly supported named kernels and `(-Inf, Inf)` for the Gaussian. See
+also [`insupport`](@ref).
 """
 support(k::PolynomialKernel) = (b = first(pieces(k)); (first(b), last(b)))
+
+"""
+    insupport(k::AbstractKernel, u)
+
+Whether `u` lies in the [`support`](@ref) `(lo, hi)` of the kernel `k`, that is,
+`lo ≤ u ≤ hi`.
+"""
+insupport(k::AbstractKernel, u::Real) = (s = support(k); s[1] <= u <= s[2])
 
 """
     cdf(k::AbstractKernel, u)
@@ -279,7 +326,9 @@ The integral of the kernel `k` from `-Inf` to `u`. For a named kernel this is a
 distribution function. For a derivative of order `r ≥ 1` it is the derivative of
 order `r - 1`.
 """
-function cdf(k::PolynomialKernel, u::Real)
+cdf(k::PolynomialKernel, u::Real) = _piececdf(k, u)
+
+function _piececdf(k::PolynomialKernel, u::Real)
   b, cc, mass = _cdfpieces(k)
   z = zero(u * b[1])
   isnan(u) && return z + u
@@ -352,8 +401,12 @@ function convolve(k1::PolynomialKernel, k2::PolynomialKernel)
     end
     breaks = sort!(unique!(vcat([p[1] for p in parts], [p[2] for p in parts])))
     coefs = [zeros(BigFloat, 1) for _ in 1:length(breaks) - 1]
-    for (lo, hi, c) in parts, m in eachindex(coefs)
-      lo < _mid(breaks, m) < hi && _addto!(coefs[m], c)
+    # a part covers the pieces between its ends, found by position, since the midpoint
+    # of a piece one unit in the last place wide rounds onto one of its ends
+    for (lo, hi, c) in parts
+      for m in searchsortedfirst(breaks, lo):searchsortedfirst(breaks, hi)-1
+        _addto!(coefs[m], c)
+      end
     end
     breaks, [Float64.(_shifted(BigFloat, coefs[m], _mid(breaks, m))) for m in eachindex(coefs)]
   end
@@ -375,9 +428,11 @@ function _convolve_pieces!(parts, p, a, b, q, c, d)
   for s in 1:3
     lo, hi = ts[s], ts[s + 1]
     lo < hi || continue
-    mid = (lo + hi) / 2
-    αL, βL = mid - b > c ? (-b, 1) : (c, 0)   # lower limit αL + βL u
-    αU, βU = mid - a < d ? (-a, 1) : (d, 0)   # upper limit αU + βU u
+    # the lower limit is u - b from b + c on and the upper one u - a up to a + d;
+    # comparing the ends of the part with these points also decides parts one unit in
+    # the last place wide, whose midpoints round onto an end
+    αL, βL = lo >= b + c ? (-b, 1) : (c, 0)   # lower limit αL + βL u
+    αU, βU = hi <= a + d ? (-a, 1) : (d, 0)   # upper limit αU + βU u
     poly = zeros(T, 1)
     for m in axes(A, 1), l in axes(A, 2)
       iszero(A[m, l]) && continue
@@ -409,7 +464,8 @@ function Base.:*(k1::PolynomialKernel, k2::PolynomialKernel)
   coefs = setprecision(BigFloat, 256) do
     map(1:length(breaks) - 1) do j
       mid = _mid(breaks, j)
-      i1, i2 = _pieceat(b1, mid), _pieceat(b2, mid)
+      # the pieces of the factors that hold the new piece, found by its left end
+      i1, i2 = _pieceat(b1, breaks[j]), _pieceat(b2, breaks[j])
       # both factors expanded about the midpoint of the new piece
       g1 = _shifted(BigFloat, c1[i1], mid - _mid(b1, i1))
       g2 = _shifted(BigFloat, c2[i2], mid - _mid(b2, i2))
@@ -480,12 +536,14 @@ _scale_order(k::GaussianDerivativeKernel) = (k.σ, k.r)
 _amplitude(::GaussianKernel) = 1.0
 _amplitude(k::GaussianDerivativeKernel) = k.a
 
-(::GaussianKernel)(u::Real) = INV_SQRT_2PI * exp(-u^2 / 2)
+(::GaussianKernel)(u::Real) = INV_SQRT_2PI * exp(-float(u)^2 / 2)
 
-# φ^(r)(z) = (-1)^r He_r(z) φ(z), with He_r the probabilists' Hermite polynomials
+# φ^(r)(z) = (-1)^r He_r(z) φ(z), with He_r the probabilists' Hermite polynomials;
+# beyond |z| = 38.6 the exponential is zero while the polynomial can overflow
 function (k::GaussianDerivativeKernel)(u::Real)
   z = u * k.invσ
-  return k.c * _hermite(k.r, z) * exp(-z^2 / 2)
+  e = exp(-z^2 / 2)
+  return iszero(e) ? k.c * e : k.c * _hermite(k.r, z) * e
 end
 
 # He_r(z), from He_{n+1} = z He_n - n He_{n-1}
@@ -551,9 +609,6 @@ convolve(k1::AbstractKernel, k2::AbstractKernel) =
 
 ## Helpers for estimators
 
-const NamedPolynomialKernel =
-  Union{UniformKernel,TriangularKernel,EpanechnikovKernel,BiweightKernel,TriweightKernel}
-
 # u ↦ k(-u), as a kernel. Kernel sums are taken over u = (xᵢ - x) / h, while a
 # density estimate weights observations by k((x - xᵢ) / h).
 _reflect(k::Union{NamedPolynomialKernel,GaussianKernel}) = k
@@ -576,6 +631,7 @@ end
 
 (r::_Reflected)(u::Real) = r.k(-u)
 support(r::_Reflected) = (s = support(r.k); (-s[2], -s[1]))
+cdf(r::_Reflected, u::Real) = moment(r.k, 0) - cdf(r.k, -u)
 
 # k(u)², as a kernel: closed forms where they exist, a lazy product otherwise
 _square(k::Union{PolynomialKernel,GaussianKernel}) = k * k
@@ -604,7 +660,9 @@ end
 
 function _isnonnegative(k::PolynomialKernel)
   b, c = pieces(k)
-  tol = 1e-12 * maximum(maximum(abs, cj) for cj in c)
+  # relative to a bound on the values rather than on the coefficients, which grow
+  # with the scale of u
+  tol = 1e-12 * maximum(_bound(c[j], (b[j + 1] - b[j]) / 2) for j in eachindex(c))
   for j in eachindex(c)
     w = (b[j + 1] - b[j]) / 2
     for t in _criticalpoints(c[j], w)
@@ -638,14 +696,35 @@ end
 # u ↦ cdf(k, -u), restricted to the support of k reflected: the observations with
 # (xᵢ - x) / h below it count fully towards the distribution function at x, and
 # those above it not at all.
-function _cdfkernel(k::PolynomialKernel)
+_cdfkernel(k::PolynomialKernel) = _cdfpolynomials(k)
+_cdfkernel(k::NamedPolynomialKernel) = _NamedCDF(k, -1.0, _cdfpolynomials(k))
+_cdfkernel(k::AbstractKernel) = _ReflectedCDF(k)
+
+function _cdfpolynomials(k::PolynomialKernel)
   b, cc, _ = _cdfpieces(k)
   breaks = [-b[i] for i in length(b):-1:1]
   coefs = [[cc[j][i] * (-1)^(i - 1) for i in eachindex(cc[j])] for j in length(cc):-1:1]
   return PiecewisePolynomialKernel(Centered(), breaks, coefs, 0)
 end
 
-_cdfkernel(k::AbstractKernel) = _ReflectedCDF(k)
+# u ↦ 1 - cdf(k, -u) = cdf(k reflected, u) on the support of k reflected, the
+# mirror image for the upper tail: observations with (xᵢ - x) / h above the support
+# count fully towards 1 - F̂(x), and those below it not at all
+_ccdfkernel(k::AbstractKernel) = _reflect(_cdfkernel(_reflect(k)))
+
+# u ↦ cdf(k, s u) on [-1, 1] for a named kernel and s = ±1, from its factored
+# distribution function, with the pieces of the same polynomial for FastSums
+struct _NamedCDF{K<:NamedPolynomialKernel} <: PolynomialKernel
+  k::K
+  s::Float64
+  pk::PiecewisePolynomialKernel
+end
+
+pieces(g::_NamedCDF) = pieces(g.pk)
+smoothness(::_NamedCDF) = 0
+_cdfpieces(g::_NamedCDF) = _cdfpieces(g.pk)
+(g::_NamedCDF)(u::Real) = -1 <= u <= 1 ? cdf(g.k, g.s * u) : _outside(u)
+_reflect(g::_NamedCDF) = _NamedCDF(g.k, -g.s, _reflect(g.pk))
 
 struct _ReflectedCDF{K<:AbstractKernel} <: AbstractKernel
   k::K
@@ -666,29 +745,35 @@ function _kernelquantile(k::AbstractKernel, p)
   lo, hi = support(k)
   a = isfinite(lo) ? lo : -1.0
   b = isfinite(hi) ? hi : 1.0
-  while cdf(k, a) > p
+  # an unbounded support is bracketed by doubling, a bounded one by its ends
+  while !isfinite(lo) && isfinite(a) && cdf(k, a) > p
     a = 2a - 1
   end
-  while cdf(k, b) < p
+  while !isfinite(hi) && isfinite(b) && cdf(k, b) < p
     b = 2b + 1
   end
+  # a kernel whose mass is just below one has no quantile above it
+  cdf(k, b) < p && return b
   return _invertcdf(u -> cdf(k, u), k, p, a, b)
 end
 
 # The smallest x in [a, b] with F(x) ≥ p, to a few units in the last place, for a
 # nondecreasing F with derivative f, F(a) ≤ p ≤ F(b): Newton steps where they stay
-# inside the bracket, bisection otherwise. Once Newton has converged, the bracket
-# is closed around its limit. Where F is flat at the level p, bisection moves to
-# the left end of the flat part.
+# inside the bracket and at least halve the step before the last one, bisection
+# otherwise, as in rtsafe of Numerical Recipes. In a convex tail, Newton steps stay
+# inside the bracket but shrink slowly. Once Newton has converged, the bracket is
+# closed around its limit. Where F is flat at the level p, bisection moves to the
+# left end of the flat part.
 function _invertcdf(F, f, p, a, b)
   x = (a + b) / 2
-  for _ in 1:200
+  step, before = b - a, b - a   # the last step and the one before it
+  for _ in 1:2000
     Fx = F(x)
     Fx < p ? (a = x) : (b = x)
     b - a <= 4 * eps(max(abs(a), abs(b))) && break
     fx = f(x)
     xn = fx > 0 ? x - (Fx - p) / fx : (a + b) / 2
-    if !(a < xn < b)
+    if !(a < xn < b) || 2 * abs(xn - x) > abs(before)
       xn = (a + b) / 2
     elseif abs(xn - x) <= 4 * eps(abs(x))
       δ = 8 * eps(abs(xn)) + floatmin()
@@ -697,6 +782,7 @@ function _invertcdf(F, f, p, a, b)
       F(hi) >= p && (b = hi)
       xn = (a + b) / 2
     end
+    before, step = step, xn - x
     x = xn
   end
   return b

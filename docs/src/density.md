@@ -10,8 +10,9 @@ bandwidth ``h``, the kernel density estimate is
 ```
 
 `fit(KDE, x)` returns it as a continuous univariate distribution of
-Distributions.jl, so that `pdf`, `logpdf`, `cdf`, `quantile`, `rand`, `mean`, `var`,
-`minimum`, `maximum` and `insupport` work as for any distribution. The density is
+Distributions.jl, so that `pdf`, `logpdf`, `cdf`, `ccdf`, `quantile`, `cquantile`,
+`rand`, `mean`, `var`, `minimum`, `maximum` and `insupport` work as for any
+distribution. The density is
 computed exactly from the observations, without a grid. A point costs a binary
 search in the sorted data and a sum over the observations within ``h`` of it, and
 broadcasting `pdf.(f, xs)` over many points uses the engines of
@@ -21,7 +22,9 @@ default [`SheatherJones`](@ref); see [Bandwidth selection](@ref bandwidths-page)
 The distribution function is ``\hat F(x) = W^{-1} \sum_i w_i \mathcal{K}((x - x_i)/h)``,
 where ``\mathcal{K}`` is the distribution function of the kernel, and
 `quantile(f, p)` is ``\inf\{x : \hat F(x) \geq p\}``, found by safeguarded Newton
-steps. A draw from the estimate is an observation chosen with probability
+steps. `ccdf(f, x)` sums the upper tail ``1 - \hat F(x)`` directly, and
+`cquantile(f, p)` inverts it, so that both keep their relative accuracy far above
+the data, where ``1 - \hat F(x)`` computed from ``\hat F(x)`` would round to zero. A draw from the estimate is an observation chosen with probability
 proportional to its weight plus ``h`` times a draw from the kernel, the smoothed
 bootstrap. The estimate of the derivative of order ``r``,
 

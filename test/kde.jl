@@ -4,7 +4,7 @@ using Test
 using KernelSmoothing
 using KernelSmoothing: PiecewisePolynomialKernel, GaussianDerivativeKernel, _reflect,
   _isnonnegative, _kernelquantile, _randkernel
-using Distributions: Distributions, ccdf, logcdf, insupport
+using Distributions: Distributions, ccdf, cquantile, logcdf, logccdf, insupport
 using ForwardDiff
 using QuadGK
 using Random
@@ -160,6 +160,21 @@ end
   for k in DENSITY_KERNELS, p in (0.001, 0.3, 0.5, 0.999)
     @test cdf(k, _kernelquantile(k, p)) ≈ p atol = 1e-13
   end
+  # the test for negative values does not depend on the scale of u: the fourth-order
+  # kernel 315/512 (3 - 11v²)(1 - v²)³ rescaled to [-s, s], whose minimum is -0.2/s
+  c = [315 / 512 * a for a in (3.0, 0, -20, 0, 42, 0, -36, 0, 11)]
+  for s in (1.0, 0.1, 0.03, 1e-3)
+    k = PiecewisePolynomialKernel([-s, s], [[c[i] / s^i for i in eachindex(c)]])
+    @test moment(k, 0) ≈ 1
+    @test !_isnonnegative(k)
+    @test_throws ArgumentError fit(KDE, XQ; kernel = k, bandwidth = 1.0)
+    @test _isnonnegative(PiecewisePolynomialKernel([-s, s], [[0.75 / s, 0, -0.75 / s^3]]))
+  end
+  # a kernel whose mass is just below one has no quantile above its mass
+  kq = PiecewisePolynomialKernel([-1, 1], [[0.5 - 1e-12]])
+  @test _kernelquantile(kq, nextfloat(moment(kq, 0))) == 1
+  fq = fit(KDE, [0.0, 1.0]; kernel = kq, bandwidth = 0.5)
+  @test quantile(fq, 1 - 1e-13) <= maximum(fq)
 end
 
 @testset "non-finite points and broadcasting" begin
@@ -249,13 +264,60 @@ KernelSmoothing.moment(::CosineKernel, j::Integer) = j == 0 ? 1.0 : quadgk(u -> 
   @test sprint(show, BandwidthSelection(0.5)) == "BandwidthSelection(0.5)"
 end
 
+@testset "tails" begin
+  # a triweight estimate near the end of its support, where the expanded pieces cancel
+  f = fit(KDE, [0.0, 10.0]; kernel = TriweightKernel(), bandwidth = 1.0)
+  t = 0.9999997
+  @test pdf(f, t) ≈ 35 / 64 * (1 - big(t)^2)^3 rtol = 1e-12
+  @test pdf.(f, [t]) ≈ [pdf(f, t)] rtol = 1e-12
+  @test logpdf(f, t) ≈ log(pdf(f, t))
+  # for data symmetric about zero, 1 - F̂(t) = F̂(-t), also far in the upper tail
+  v = [Distributions.quantile(Distributions.Normal(), (i - 0.5) / 100) for i in 1:50]
+  x = [v; -v]
+  for k in (GaussianKernel(), EpanechnikovKernel(), TriweightKernel()), h in (0.3, 1.1)
+    f = fit(KDE, x; kernel = k, bandwidth = h)
+    ts = [0.0, 0.4, 1.7, maximum(x) + 0.5h, maximum(x) + 0.99h, maximum(x) + 2h]
+    k isa GaussianKernel && append!(ts, maximum(x) .+ [9h, 30h])
+    for t in ts
+      @test ccdf(f, t) ≈ cdf(f, -t) rtol = 1e-12
+      @test ccdf(f, t) ≈ 1 - cdf(f, t) atol = 1e-14
+    end
+    @test ccdf.(f, ts) ≈ [ccdf(f, t) for t in ts] rtol = 1e-11
+    @test ccdf.(f, ts) ≈ cdf.(f, -ts) rtol = 1e-11
+    for p in (1e-12, 1e-3, 0.3, 0.5, 0.8)
+      @test cquantile(f, p) ≈ -quantile(f, p) rtol = 1e-10 atol = 1e-12
+    end
+    @test cquantile(f, 0) == maximum(f) && cquantile(f, 1) == minimum(f)
+  end
+  g = fit(KDE, x; kernel = GaussianKernel(), bandwidth = 0.3)
+  t = maximum(x) + 9 * 0.3
+  @test ccdf(g, t) > 1e-25
+  @test logccdf(g, t) ≈ log(cdf(g, -t)) rtol = 1e-12
+  # tail quantiles, where Newton steps in a convex tail shrink slowly
+  for p in (1e-200, 1e-300)
+    @test cdf(g, quantile(g, p)) ≈ p rtol = 1e-8
+    @test ccdf(g, cquantile(g, p)) ≈ p rtol = 1e-8
+  end
+  # asymmetric kernels and other kernels
+  for k in (ASYM, CosineKernel(), LaplaceKernel())
+    f = fit(KDE, XQ; kernel = k, bandwidth = 0.7, weights = WQ)
+    for t in (-2.0, 0.1, 1.9, 3.0)
+      @test ccdf(f, t) ≈ 1 - cdf(f, t) atol = 1e-13
+    end
+    @test ccdf.(f, [-2.0, 0.1, 1.9]) ≈ [ccdf(f, t) for t in (-2.0, 0.1, 1.9)] rtol = 1e-11
+    @test cquantile(f, 0.01) ≈ quantile(f, 0.99) rtol = 1e-10
+  end
+end
+
 @testset "type stability" begin
   for k in (EpanechnikovKernel(), GaussianKernel())
     f = fit(KDE, XQ; kernel = k, weights = WQ, bandwidth = 0.8)
     @inferred pdf(f, 0.3)
     @inferred logpdf(f, 0.3)
     @inferred cdf(f, 0.3)
+    @inferred ccdf(f, 0.3)
     @inferred quantile(f, 0.3)
+    @inferred cquantile(f, 0.3)
     @inferred stderror(f, 0.3)
     @inferred mean(f)
     @inferred var(f)

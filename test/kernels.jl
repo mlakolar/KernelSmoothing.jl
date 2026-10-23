@@ -161,7 +161,7 @@ end
   b, c = pieces(EpanechnikovKernel())
   k = PiecewisePolynomialKernel(collect(b), [collect(c[1])])
   @test smoothness(k) == 1
-  @test k(0.3) == EpanechnikovKernel()(0.3)
+  @test k(0.3) ≈ EpanechnikovKernel()(0.3)
   tri = PiecewisePolynomialKernel([-1, 0, 1], [[1, 1], [1, -1]])   # coefficients in powers of u
   @test smoothness(tri) == 1
   @test all(tri(u) ≈ TriangularKernel()(u) for u in (-0.8, -0.3, 0.0, 0.45, 0.9))
@@ -175,6 +175,13 @@ end
   @test_throws ArgumentError PiecewisePolynomialKernel([1, -1], [[1.0]])
   @test_throws ArgumentError PiecewisePolynomialKernel([-1, 0, 1], [[1.0]])
   @test_throws ArgumentError PiecewisePolynomialKernel([-1, 1], [Float64[]])
+  @test_throws ArgumentError PiecewisePolynomialKernel([-1, 1], [[NaN]])
+  @test_throws ArgumentError PiecewisePolynomialKernel([-1, 1], [[1.0, Inf]])
+  # a constant piece still propagates NaN
+  @test isnan(PiecewisePolynomialKernel([-1, 1], [[0.5]])(NaN))
+  # the smoothness test does not depend on the scale of u: the biweight on [-10³, 10³]
+  @test smoothness(PiecewisePolynomialKernel([-1e3, 1e3], [[15 / 16e3, 0, -15 / 8e9, 0, 15 / 16e15]])) == 2
+  @test smoothness(PiecewisePolynomialKernel([-1e-3, 1e-3], [[15 / 16e-3, 0, -15 / 8e-9, 0, 15 / 16e-15]])) == 2
   @test sprint(show, convolve(UniformKernel(), UniformKernel())) ==
         "PiecewisePolynomialKernel(2 pieces on [-2.0, 2.0], smoothness 1)"
 end
@@ -241,11 +248,66 @@ end
   @test_throws ArgumentError UniformKernel() * PiecewisePolynomialKernel([2.0, 3.0], [[1.0]])
 end
 
+@testset "accuracy near the ends of the support" begin
+  # the named kernels and their distribution functions in factored form keep their
+  # relative accuracy near ±1, where the terms of the expanded pieces cancel; the
+  # reference evaluates the expanded pieces in 256-bit precision
+  for k in COMPACT
+    b, cc, _ = _cdfpieces(k)
+    function F(t)
+      j = something(findlast(i -> b[i] <= t, 1:length(b)-1), 1)
+      return evalpoly(t - (big(b[j]) + b[j + 1]) / 2, big.(cc[j]))
+    end
+    for j in 1:15, u in (-1 + 10.0^-j, 1 - 10.0^-j)
+      @test k(u) >= 0
+      @test k(u) ≈ formula(k, big(u)) rtol = 1e-13
+      @test cdf(k, u) ≈ F(big(u)) rtol = 1e-13
+    end
+    @test cdf(k, -1.0) == 0 && cdf(k, 1.0) == 1 && cdf(k, 0.0) == 0.5
+    @test isnan(k(NaN)) && k(Inf) == 0 && k(-Inf) == 0
+    @test k(1) === k(1.0) && cdf(k, 0) === 0.5
+  end
+  @test isnan(UniformKernel()(NaN))
+  @test insupport(EpanechnikovKernel(), 0.5) && insupport(EpanechnikovKernel(), -1.0)
+  @test !insupport(EpanechnikovKernel(), 1.5) && insupport(GaussianKernel(), 1e10)
+end
+
+@testset "Gaussian kernels far out" begin
+  g = GaussianKernel()
+  @test g(2^32) == 0 && g(Inf) == 0 && isnan(g(NaN))
+  for r in (1, 2, 4, 7)
+    d = derivative(g, r)
+    @test d(Inf) == 0 && d(-Inf) == 0 && d(40.0) == 0 && isnan(d(NaN))
+    @test isfinite(d(38.0))
+  end
+end
+
+@testset "convolutions and products on narrow pieces" begin
+  # breakpoints that coincide only up to rounding, -0.7 + 1 and 0.3, make a piece one
+  # unit in the last place wide; the convolution must not drop it
+  box = PiecewisePolynomialKernel([-0.7, 0.3], [[1.0]])
+  c = convolve(TriangularKernel(), box)
+  a, b = -0.7, 0.3
+  T(t) = t <= -1 ? 0.0 : t >= 1 ? 1.0 : t <= 0 ? (1 + t)^2 / 2 : 1 - (1 - t)^2 / 2
+  exact(u) = max(T(min(1.0, u - a)) - T(max(-1.0, u - b)), 0.0)   # ∫_{u-b}^{u-a} triangular
+  @test c(0.3) ≈ 0.5 atol = 1e-15
+  @test all(abs(c(u) - exact(u)) < 1e-14 for u in range(-1.7, 1.3; length = 3001))
+  @test all(abs(c(u) - exact(u)) < 1e-14 for u in (0.3, nextfloat(0.3), prevfloat(0.3), -0.7, nextfloat(-0.7)))
+  # products: the factors of a piece one unit in the last place wide
+  k1 = PiecewisePolynomialKernel([-1, 0.1, 1], [[1.0], [2.0]])
+  k2 = PiecewisePolynomialKernel([-1, nextfloat(0.1), 1], [[3.0], [5.0]])
+  p = k1 * k2
+  for u in (0.0, 0.1, nextfloat(0.1), 0.5, prevfloat(0.1))
+    @test p(u) == k1(u) * k2(u)
+  end
+end
+
 @testset "names shared with Distributions" begin
   @test cdf === Distributions.cdf
   @test support === Distributions.support
   @test convolve === Distributions.convolve
   @test moment === Distributions.moment
+  @test insupport === Distributions.insupport
   @test cdf.(EpanechnikovKernel(), [-2.0, 0.0, 2.0]) ≈ [0, 0.5, 1]
 end
 
