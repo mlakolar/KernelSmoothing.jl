@@ -20,6 +20,7 @@ import StatsAPI
 import StatsAPI: fit, nobs, stderror, coef, confint, coeftable, predict, fitted, residuals, vcov
 import Random
 using Random: AbstractRNG
+using PrecompileTools: @setup_workload, @compile_workload
 
 export
   AbstractKernel,
@@ -51,5 +52,6 @@ include("kdeinference.jl")
 include("bands.jl")
 include("honest.jl")
 include("lpdensity.jl")
+include("precompile.jl")
 
 end
