@@ -24,9 +24,9 @@ psi(x, f, g, r) = sum(f((xi - xj) / g) for xi in x, xj in x) / (length(x) * (len
 @testset "Sheather and Jones" begin
   d = SmoothingData(Q)
   g = GaussianKernel()
-  @test bandwidth(SheatherJones(method = :dpi), d, g) ≈ R_SJ_DPI rtol = 2e-6
+  @test bandwidth(SheatherJones(method = :dpi, exact = 1000), d, g) ≈ R_SJ_DPI rtol = 2e-6
   # R rounds the constant 1.35733 of α₂ to 1.357, which moves its bandwidth by 4e-5
-  s = selectbandwidth(SheatherJones(), d, g)
+  s = selectbandwidth(SheatherJones(exact = 1000), d, g)
   @test s.h ≈ R_SJ_STE rtol = 1e-4
   # the equation solved by its definition, with α₂'s constant unrounded
   n = length(Q)
@@ -37,18 +37,22 @@ psi(x, f, g, r) = sum(f((xi - xj) / g) for xi in x, xj in x) / (length(x) * (len
   @test abs(F(s.h)) < 1e-9 * s.h
   @test s.details.alpha2 ≈ α2 rtol = 1e-12
   @test s.details.exact && !s.details.fallback
-  # binned sums agree with exact ones
+  # binned sums agree with exact ones, and are the default above 100 observations
   @test bandwidth(SheatherJones(exact = 0), d, g) ≈ s.h rtol = 1e-5
+  @test !selectbandwidth(SheatherJones(), d, g).details.exact
   @test bandwidth(SheatherJones(method = :dpi, exact = 0), d, g) ≈ R_SJ_DPI rtol = 1e-5
   @test _psi(d, 4, 0.3, false) ≈ _psi(d, 4, 0.3, true) rtol = 1e-4
   # other kernels get the canonical bandwidth ratio, (R(k) / μ₂(k)²)^(1/5) over the Gaussian one
   for k in (EpanechnikovKernel(), BiweightKernel(), UniformKernel())
     ratio = (roughness(k) / moment(k, 2)^2 * 2sqrt(π))^(1 / 5)
-    @test bandwidth(SheatherJones(), d, k) ≈ ratio * s.h rtol = 1e-9
+    @test bandwidth(SheatherJones(exact = 1000), d, k) ≈ ratio * s.h rtol = 1e-9
   end
   # location and scale, and equal weights
-  @test bandwidth(SheatherJones(), SmoothingData(7 .- 3 .* Q), g) ≈ 3 * s.h rtol = 1e-9
-  @test bandwidth(SheatherJones(), SmoothingData(Q; weights = fill(2.0, n)), g) ≈ s.h rtol = 1e-12
+  @test bandwidth(SheatherJones(exact = 1000), SmoothingData(7 .- 3 .* Q), g) ≈ 3 * s.h rtol = 1e-9
+  @test bandwidth(SheatherJones(exact = 1000), SmoothingData(Q; weights = fill(2.0, n)), g) ≈ s.h rtol = 1e-12
+  # the binned path is equivariant as well, to the accuracy of its root finding
+  sb = bandwidth(SheatherJones(), d, g)
+  @test bandwidth(SheatherJones(), SmoothingData(7 .- 3 .* Q), g) ≈ 3 * sb rtol = 1e-7
   # a sample too sparse for the estimates falls back to the normal reference, with a warning
   r = @test_logs (:warn,) KernelSmoothing._sparse(SheatherJones(), d, g, "a test")
   @test r.details.fallback && r.h == bandwidth(NormalReference(), d, g) && r.rule == SheatherJones()
@@ -56,6 +60,21 @@ psi(x, f, g, r) = sum(f((xi - xj) / g) for xi in x, xj in x) / (length(x) * (len
   @test_throws ArgumentError selectbandwidth(SheatherJones(), SmoothingData([1.0]), g)
   # the default bandwidth of a density estimate
   @test bandwidth(fit(KDE, Q)) == bandwidth(SheatherJones(), d, EpanechnikovKernel())
+end
+
+@testset "binned sums for Sheather and Jones" begin
+  # the FFT against the discrete Fourier transform, and the lagged products of the bins
+  for N in (1, 2, 16, 128)
+    z = [complex(sin(3j), cos(7j)) for j in 1:N]
+    @test KernelSmoothing._fft!(copy(z)) ≈ [sum(z[j] * cispi(-2 * (j - 1) * (k - 1) / N) for j in 1:N) for k in 1:N]
+  end
+  @test_throws ArgumentError KernelSmoothing._fft!(zeros(ComplexF64, 3))
+  b = [abs(sin(5k)) for k in 1:37]
+  @test KernelSmoothing._lagproducts(b) ≈ [sum(b[k] * b[k + m] for k in 1:37-m) for m in 0:36]
+  # a far outlier would need a grid of more than 2^20 points, so that the data are binned for each g
+  x = [Q; 1e7]
+  @test bandwidth(SheatherJones(exact = 0), SmoothingData(x), GaussianKernel()) ≈
+        bandwidth(SheatherJones(), SmoothingData(x), GaussianKernel()) rtol = 1e-4
 end
 
 # a kernel defined outside the package, without a convolution
