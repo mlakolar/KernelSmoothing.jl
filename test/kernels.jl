@@ -302,6 +302,24 @@ end
   end
 end
 
+# a polynomial kernel defined outside the package, with its pieces in tuples
+struct TupleKernel <: PolynomialKernel end
+KernelSmoothing.pieces(::TupleKernel) = ((-1.0, 0.0, 1.0), ((0.5, 1.0), (0.5, -1.0)))   # the triangular kernel
+KernelSmoothing.smoothness(::TupleKernel) = 1
+
+@testset "polynomial kernels defined elsewhere" begin
+  k = TupleKernel()
+  for u in (-1.5, -0.7, -0.2, 0.0, 0.3, 1.0)
+    @test k(u) ≈ TriangularKernel()(u) atol = 1e-15
+  end
+  @test moment(k, 2) ≈ 1 / 6
+  # the distribution function of a named kernel, as a kernel for the sums, has the
+  # pieces of its polynomial and no derivative
+  g = KernelSmoothing._cdfkernel(EpanechnikovKernel())
+  @test smoothness(g) == 0
+  @test KernelSmoothing._cdfpieces(g)[3] ≈ KernelSmoothing._cdfpieces(g.pk)[3]
+end
+
 @testset "names shared with Distributions" begin
   @test cdf === Distributions.cdf
   @test support === Distributions.support
