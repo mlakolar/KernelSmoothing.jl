@@ -401,4 +401,14 @@ end
   @test_throws "missing values" fit(LocalPolynomialRegression, [1.0, 2.0, 3.0], [1.0, missing, 3.0])
 end
 
+@testset "stderror broadcasts in one pass" begin
+  x = [7 * sin(1.618i) + 0.3 * cos(2.7i) for i in 1:5000]
+  w = 1 .+ mod.(1:5000, 4)
+  pts = [collect(range(-8, 8; length = 1500)); [0.3, -2.0, 7.9]]
+  for k in (EpanechnikovKernel(), BiweightKernel(), GaussianKernel()), weights in (nothing, w)
+    f = fit(KDE, x; kernel = k, bandwidth = 0.4, weights)
+    @test stderror.(f, pts) == [stderror(f, t) for t in pts]
+  end
+end
+
 end
