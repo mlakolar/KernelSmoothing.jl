@@ -169,4 +169,15 @@ end
   @test all(isapprox(weightsum(d, i:i), w[i]; rtol = 1e-10) for i in 1:13)
 end
 
+@testset "weights beyond the range of Float64" begin
+  # divided by a power of two in their own type before they become Float64
+  d = SmoothingData([1.0, 2.0]; weights = [big"1e-400", big"2e-400"])
+  @test nobs(d) == 2
+  @test d.w[2] / d.w[1] ≈ 2
+  # a weight that vanishes next to the largest one is dropped, as a zero weight is
+  d = SmoothingData([1.0, 2.0, 3.0]; weights = [1e300, 1e-300, 2e300])
+  @test d.x == [1.0, 3.0] && d.perm == [1, 3]
+  @test d.w[2] / d.w[1] ≈ 2
+end
+
 end

@@ -18,7 +18,8 @@ is sorted and checked once.
 All values must be finite real numbers, also after their conversion to `Float64`.
 Vectors containing `missing` are rejected, so remove incomplete observations first.
 Weights must be nonnegative with a positive sum; only their ratios matter, and
-observations with zero weight are dropped. Values are stored as `Float64`, with
+observations with zero weight are dropped, as are those whose weight is below the
+range of `Float64` next to the largest weight. Values are stored as `Float64`, with
 `-0.0` stored as `0.0`. Weights whose largest value lies outside `[2^-200, 2^200]`
 are stored divided by a power of two, so that products of weights neither overflow
 nor underflow; [`weightsum`](@ref) undoes the division.
@@ -81,21 +82,29 @@ function _smoothingdata(x, y, weights)
     length(weights) == length(x) || throw(DimensionMismatch(
       "weights has $(length(weights)) values for $(length(x)) observations"))
     any(<(0), weights) && throw(ArgumentError("weights must be nonnegative"))
-    keep = findall(>(0), weights)
-    isempty(keep) && throw(ArgumentError("weights must have a positive sum"))
+    any(>(0), weights) || throw(ArgumentError("weights must have a positive sum"))
+  end
+  # Weights whose products would overflow or underflow, as with weights of 1e-170,
+  # are divided by a power of two, exactly, in their own type, before they become
+  # Float64, so that weights of another type beyond its range, such as big"1e-400",
+  # keep their ratios. Only the ratios matter, and observations whose weight vanishes
+  # in Float64 next to the largest one, after the division, are dropped.
+  wexp, wf = 0, nothing
+  if weights !== nothing
+    wmax = maximum(weights)
+    if !(2.0^-200 <= Float64(wmax) <= 2.0^200)
+      wexp = exponent(float(wmax))
+      wf = [Float64(ldexp(float(w), -wexp)) for w in weights]
+    else
+      wf = [Float64(w) for w in weights]
+    end
+    keep = findall(>(0), wf)
   end
 
   perm = _sortperm(x, keep)
   xs = [Float64(x[i]) + 0.0 for i in perm]   # adding 0.0 turns -0.0 into 0.0
   ys = y === nothing ? nothing : Float64[y[i] for i in perm]
-  ws = weights === nothing ? nothing : Float64[weights[i] for i in perm]
-  # weights whose products would overflow or underflow, as with weights of 1e-170,
-  # are divided by a power of two, exactly; only their ratios matter
-  wexp = 0
-  if ws !== nothing && !(2.0^-200 <= maximum(ws) <= 2.0^200)
-    wexp = exponent(maximum(ws))
-    ws .= ldexp.(ws, -wexp)
-  end
+  ws = weights === nothing ? nothing : Float64[wf[i] for i in perm]
 
   starts = [1]
   valueindex = Vector{Int}(undef, length(xs))
