@@ -66,8 +66,10 @@ function selectbandwidth(rule::SheatherJones, d::SmoothingData, k::AbstractKerne
     (scale = σ, pilots = (a, b), pilot = Float64(pilot), alpha2 = Float64(alpha2), psi4 = Float64(psi4),
      psi6 = Float64(psi6), exact = exact, iterations = iterations, fallback = fallback)
   # the root finding evaluates ψ₄ at bandwidths down to about a / 5, and rarely above
-  # a few times the larger pilot
-  ψ = _psievaluator(d, min(a, b) / 500, exact, 4 * max(a, b))
+  # a few times the larger pilot; the evaluator is one of two closures, so that the
+  # type of its values is asserted for inference
+  evaluator = _psievaluator(d, min(a, b) / 500, exact, 4 * max(a, b))
+  ψ(r, g) = evaluator(r, g)::Float64
   TD = -ψ(6, b)
   TD > 0 || return _sparse(rule, d, k, "the estimate of ψ₆ is not negative", details(psi6 = -TD, fallback = true))
   if rule.method == :dpi
