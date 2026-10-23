@@ -1,7 +1,7 @@
 ## Data-driven bandwidth selectors
 
 """
-    SheatherJones(; method = :ste, exact = 1000)
+    SheatherJones(; method = :ste, exact = 100)
 
 The plug-in bandwidth of Sheather and Jones (1991) for kernel density estimates.
 It estimates `ψ₄ = ∫ f''(x)² dx` with a Gaussian pilot kernel and plugs the
@@ -24,9 +24,11 @@ The estimates are the double sums of Sheather and Jones,
 
 with the diagonal included, which with equal weights is the definition of R's
 `bw.SJ`. They are computed exactly for up to `exact` observations and otherwise
-from data binned linearly on a grid with 100 points per pilot bandwidth, which
-changes the estimates by about `1e-4` and the bandwidth by about `1e-5` relative,
-far below its statistical error. R's `bw.SJ` bins differences of
+from the data binned linearly once, on a grid with about 100 points per smallest
+pilot bandwidth, with the lagged products of the bin weights from an FFT. This
+changes the estimates by about `1e-5` and the bandwidth by about `1e-6` relative,
+far below its statistical error, and makes the selection take a few milliseconds
+for up to `10^6` observations. R's `bw.SJ` bins differences of
 pairs of observations coarsely and stops its search early, so by default it agrees
 with this rule to two or three digits only. With fine bins it agrees to about
 `1e-6` for `method = :dpi` and `4e-5` for `:ste`, where R rounds the constant
@@ -43,7 +45,7 @@ struct SheatherJones <: BandwidthSelector
   end
 end
 
-SheatherJones(; method::Symbol = :ste, exact::Integer = 1000) = SheatherJones(method, exact)
+SheatherJones(; method::Symbol = :ste, exact::Integer = 100) = SheatherJones(method, exact)
 
 function selectbandwidth(rule::SheatherJones, d::SmoothingData, k::AbstractKernel)
   nobs(d) >= 2 || throw(ArgumentError("SheatherJones needs at least two observations"))
