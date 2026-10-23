@@ -7,9 +7,13 @@
 Kernel density estimation and local polynomial regression, with data-driven
 bandwidth selection and robust bias-corrected inference.
 
-The package is under development. So far it provides the pieces the estimators
-will build on:
+The package is under development. So far it provides kernel density estimates
+and the pieces that all estimators build on:
 
+- `fit(KDE, x)`, a kernel density estimate that is a distribution of
+  Distributions.jl: `pdf`, `cdf`, `quantile`, `rand` and the rest, computed
+  exactly from the observations, with derivatives of the density, pointwise
+  standard errors and rule-of-thumb bandwidths;
 - smoothing kernels: the uniform, triangular, Epanechnikov, biweight, triweight
   and Gaussian kernels, with their distribution functions, moments, roughness,
   derivatives, convolutions and products;
@@ -22,6 +26,13 @@ will build on:
   per point, exact direct, windowed and fast engines and an approximate binned
   one. They run in parallel when Julia is started with several threads
   (`julia --threads=auto`).
+
+```julia
+using KernelSmoothing
+f = fit(KDE, randn(1000))            # Epanechnikov kernel, normal-reference bandwidth
+pdf(f, 0.0), cdf(f, 0.0), quantile(f, 0.975)
+pdf.(f, range(-3, 3; length = 401))   # many points at once
+```
 
 ## Installation
 

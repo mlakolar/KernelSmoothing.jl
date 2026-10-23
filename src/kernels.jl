@@ -547,3 +547,168 @@ end
 
 convolve(k1::AbstractKernel, k2::AbstractKernel) =
   throw(ArgumentError("the convolution of $k1 and $k2 is not implemented"))
+
+
+## Helpers for estimators
+
+const NamedPolynomialKernel =
+  Union{UniformKernel,TriangularKernel,EpanechnikovKernel,BiweightKernel,TriweightKernel}
+
+# u ↦ k(-u), as a kernel. Kernel sums are taken over u = (xᵢ - x) / h, while a
+# density estimate weights observations by k((x - xᵢ) / h).
+_reflect(k::Union{NamedPolynomialKernel,GaussianKernel}) = k
+_reflect(k::GaussianDerivativeKernel) = isodd(k.r) ? GaussianDerivativeKernel(k.σ, k.r, -k.a) : k
+
+# piece j becomes piece n + 1 - j, and c(-u - m) = ∑ cᵢ (-1)^i (u + m)^i
+function _reflect(k::PolynomialKernel)
+  b, c = pieces(k)
+  breaks = [-b[i] for i in length(b):-1:1]
+  coefs = [[c[j][i] * (-1)^(i - 1) for i in eachindex(c[j])] for j in length(c):-1:1]
+  return PiecewisePolynomialKernel(Centered(), breaks, coefs, smoothness(k))
+end
+
+# other kernels: a lazy reflection
+_reflect(k::AbstractKernel) = _Reflected(k)
+
+struct _Reflected{K<:AbstractKernel} <: AbstractKernel
+  k::K
+end
+
+(r::_Reflected)(u::Real) = r.k(-u)
+support(r::_Reflected) = (s = support(r.k); (-s[2], -s[1]))
+
+# k(u)², as a kernel: closed forms where they exist, a lazy product otherwise
+_square(k::Union{PolynomialKernel,GaussianKernel}) = k * k
+_square(k::GaussianDerivativeKernel) = k.r == 0 ? k * k : _Squared(k)
+_square(k::AbstractKernel) = _Squared(k)
+
+struct _Squared{K<:AbstractKernel} <: AbstractKernel
+  k::K
+end
+
+(s::_Squared)(u::Real) = s.k(u)^2
+support(s::_Squared) = support(s.k)
+
+# Whether k(u) ≥ 0 for all u. A polynomial piece is checked at its ends and at the
+# real zeros of its derivative inside it, with a tolerance for rounding.
+_isnonnegative(::Union{NamedPolynomialKernel,GaussianKernel}) = true
+_isnonnegative(k::GaussianDerivativeKernel) = k.r == 0 && k.a >= 0
+
+# other kernels: checked on a grid
+function _isnonnegative(k::AbstractKernel)
+  lo, hi = support(k)
+  us = range(isfinite(lo) ? lo : -40.0, isfinite(hi) ? hi : 40.0; length = 4001)
+  vals = k.(us)
+  return minimum(vals) >= -1e-12 * maximum(abs, vals)
+end
+
+function _isnonnegative(k::PolynomialKernel)
+  b, c = pieces(k)
+  tol = 1e-12 * maximum(maximum(abs, cj) for cj in c)
+  for j in eachindex(c)
+    w = (b[j + 1] - b[j]) / 2
+    for t in _criticalpoints(c[j], w)
+      evalpoly(t, c[j]) < -tol && return false
+    end
+  end
+  return true
+end
+
+# -w, w and the real zeros of the derivative of the polynomial c in (-w, w)
+function _criticalpoints(c, w)
+  ts = [-w, w]
+  d = _derivcoefs(c, 1)
+  while length(d) > 1 && abs(d[end]) <= 1e-14 * maximum(abs, d)
+    pop!(d)
+  end
+  n = length(d) - 1   # degree of the derivative
+  n >= 1 || return ts
+  C = zeros(n, n)     # companion matrix of the monic derivative
+  for i in 2:n
+    C[i, i - 1] = 1
+  end
+  C[:, n] .= -d[1:n] ./ d[n + 1]
+  for z in LinearAlgebra.eigvals(C)
+    t = real(z)
+    abs(imag(z)) <= 1e-7 * (1 + abs(t)) && -w < t < w && push!(ts, t)
+  end
+  return ts
+end
+
+# u ↦ cdf(k, -u), restricted to the support of k reflected: the observations with
+# (xᵢ - x) / h below it count fully towards the distribution function at x, and
+# those above it not at all.
+function _cdfkernel(k::PolynomialKernel)
+  b, cc, _ = _cdfpieces(k)
+  breaks = [-b[i] for i in length(b):-1:1]
+  coefs = [[cc[j][i] * (-1)^(i - 1) for i in eachindex(cc[j])] for j in length(cc):-1:1]
+  return PiecewisePolynomialKernel(Centered(), breaks, coefs, 0)
+end
+
+_cdfkernel(k::AbstractKernel) = _ReflectedCDF(k)
+
+struct _ReflectedCDF{K<:AbstractKernel} <: AbstractKernel
+  k::K
+end
+
+support(g::_ReflectedCDF) = (lo = support(g.k); (-lo[2], -lo[1]))
+
+function (g::_ReflectedCDF)(u::Real)
+  lo, hi = support(g)
+  return lo <= u <= hi ? cdf(g.k, -u) : zero(float(u))
+end
+
+# The p-quantile of a kernel that is a probability density, for 0 < p < 1.
+_kernelquantile(::GaussianKernel, p) = Distributions.quantile(Distributions.Normal(), p)
+_kernelquantile(k::GaussianDerivativeKernel, p) = k.σ * Distributions.quantile(Distributions.Normal(), p)
+
+function _kernelquantile(k::AbstractKernel, p)
+  lo, hi = support(k)
+  a = isfinite(lo) ? lo : -1.0
+  b = isfinite(hi) ? hi : 1.0
+  while cdf(k, a) > p
+    a = 2a - 1
+  end
+  while cdf(k, b) < p
+    b = 2b + 1
+  end
+  return _invertcdf(u -> cdf(k, u), k, p, a, b)
+end
+
+# The smallest x in [a, b] with F(x) ≥ p, to a few units in the last place, for a
+# nondecreasing F with derivative f, F(a) ≤ p ≤ F(b): Newton steps where they stay
+# inside the bracket, bisection otherwise. Once Newton has converged, the bracket
+# is closed around its limit. Where F is flat at the level p, bisection moves to
+# the left end of the flat part.
+function _invertcdf(F, f, p, a, b)
+  x = (a + b) / 2
+  for _ in 1:200
+    Fx = F(x)
+    Fx < p ? (a = x) : (b = x)
+    b - a <= 4 * eps(max(abs(a), abs(b))) && break
+    fx = f(x)
+    xn = fx > 0 ? x - (Fx - p) / fx : (a + b) / 2
+    if !(a < xn < b)
+      xn = (a + b) / 2
+    elseif abs(xn - x) <= 4 * eps(abs(x))
+      δ = 8 * eps(abs(xn)) + floatmin()
+      lo, hi = max(a, xn - δ), min(b, xn + δ)
+      F(lo) < p && (a = lo)
+      F(hi) >= p && (b = hi)
+      xn = (a + b) / 2
+    end
+    x = xn
+  end
+  return b
+end
+
+# A draw from a kernel that is a probability density. (1 + U) / 2 has the
+# Beta(j + 1, j + 1) distribution when U has density proportional to (1 - u²)^j.
+_randkernel(rng, ::UniformKernel) = 2 * rand(rng) - 1
+_randkernel(rng, ::TriangularKernel) = rand(rng) - rand(rng)
+_randkernel(rng, ::EpanechnikovKernel) = 2 * rand(rng, Distributions.Beta(2, 2)) - 1
+_randkernel(rng, ::BiweightKernel) = 2 * rand(rng, Distributions.Beta(3, 3)) - 1
+_randkernel(rng, ::TriweightKernel) = 2 * rand(rng, Distributions.Beta(4, 4)) - 1
+_randkernel(rng, ::GaussianKernel) = randn(rng)
+_randkernel(rng, k::GaussianDerivativeKernel) = k.σ * randn(rng)
+_randkernel(rng, k::AbstractKernel) = _kernelquantile(k, rand(rng))
