@@ -36,14 +36,19 @@ time (fast sum updating; Seifert et al. 1994, Langrené and Warin 2019).
 
 Power sums about one far-away centre lose all accuracy when the data are far from
 zero or the bandwidth is small compared with their range. Here the data are split
-into blocks one window wide and the power sums are taken about the centre of each
-block. The rounding error is then about `1e-13` times the total absolute weight of
-the observations near the point, whatever the location and scale of the data. A
-sum that is much smaller than that, because the kernel nearly vanishes at every
-observation in the window, has a larger relative error.
+into blocks at most one window wide and the power sums are taken about the centre
+of each block. The rounding error grows with the width of the blocks and the
+highest power of the sums, the degree of the kernel plus `kmax`, so that the blocks
+narrow as the power grows. The error is then at most
+about `1e-13` times the total absolute weight of the observations near the point,
+whatever the location and scale of the data; for kernels of degree `d` with
+`d + kmax ≤ 6`, such as the named kernels other than the triweight with
+`kmax ≤ 2`, the blocks are one window wide. A sum that is much smaller than that,
+because the kernel nearly vanishes at every observation in the window, has a larger
+relative error.
 
-With a bandwidth per point, the blocks are one window wide at the smallest
-bandwidth, and a point with a larger bandwidth spans more of them.
+With a bandwidth per point, the blocks are sized for the smallest bandwidth, and a
+point with a larger bandwidth spans more of them.
 """
 struct FastSums <: SumEngine end
 
@@ -134,9 +139,11 @@ equations of a local polynomial fit of order `p` in the scaled variable `u`.
 
 `engine` chooses the algorithm. By default it is the faster exact one: for
 polynomial kernels [`WindowSums`](@ref) when the windows hold few observations
-and [`FastSums`](@ref) otherwise, and [`DirectSums`](@ref) for other kernels.
-[`BinnedSums`](@ref) approximates. A [`SumsWorkspace`](@ref) passed as `workspace`
-provides reusable buffers.
+and [`FastSums`](@ref) otherwise, by a model of their costs; for Gaussian kernels
+sums over the observations within 38.62 standard deviations, beyond which the
+kernel underflows to zero, so that they equal [`DirectSums`](@ref) exactly; and
+[`DirectSums`](@ref) for other kernels. [`BinnedSums`](@ref) approximates. A
+[`SumsWorkspace`](@ref) passed as `workspace` provides reusable buffers.
 
 # Examples
 ```julia
@@ -216,24 +223,70 @@ function _sumvalues!(ws::SumsWorkspace, d::SmoothingData, z)
   return vals
 end
 
-# The faster exact engine for a polynomial kernel: windowed sums cost about one unit
-# per observation in each window, fast sums one unit per power sum of each
-# observation plus 64 per point. The window sizes are estimated from 32 points.
+# The faster exact engine for a polynomial kernel, from a model of the costs in
+# nanoseconds measured on Apple M-series machines: a windowed sum costs a term per
+# observation in each window, 0.8 for the named kernels and 2.7 for others, whose
+# pieces are vectors; fast sums cost 0.65 per power sum of each observation, and per
+# point a constant plus the pieces of the kernel times the blocks its window spans.
+# Both are estimated from 32 of the points.
 _choose_engine(::AbstractKernel, xs, h, points, kmax) = DirectSums()
 
 function _choose_engine(k::PolynomialKernel, xs, h, points, kmax)
   m, n = length(points), length(xs)
-  lo, hi = support(k)
+  b, c = pieces(k)
+  lo, hi = first(b), last(b)
+  np, len = length(c), maximum(length, c)
+  f = _blockfactor(len - 1 + kmax)
+  h0 = _hmin(h)
+  sample = 1:max(1, m ÷ 32):m
+  terms = blocks = 0.0
+  for j in sample
+    p, hj = points[j], _bw(h, j)
+    terms += _firsttrue(i -> (xs[i] - p) / hj > hi, n) - _firsttrue(i -> (xs[i] - p) / hj >= lo, n)
+    blocks += f * hj / h0 + 1
+  end
+  windowcost = (k isa NamedPolynomialKernel ? 0.8 : 2.7) * (1 + kmax / 20) * terms / length(sample) * m
+  fastcost = 0.65 * n * (len + kmax) + (45 * length(sample) + 3.5 * np * len * blocks) * (1 + kmax / 4) / length(sample) * m
+  return windowcost <= fastcost ? WindowSums() : FastSums()
+end
+
+# Gaussian kernels: the sums over the observations within the radius where the
+# kernel underflows to zero, which equal the direct sums term by term, when the
+# windows hold fewer than about half of the observations
+function _choose_engine(k::GaussianFamily, xs, h, points, kmax)
+  m, n = length(points), length(xs)
+  r = _zeroradius(k)
   sample = 1:max(1, m ÷ 32):m
   terms = 0
   for j in sample
     p, hj = points[j], _bw(h, j)
-    terms += _firsttrue(i -> (xs[i] - p) / hj > hi, n) - _firsttrue(i -> (xs[i] - p) / hj >= lo, n)
+    terms += _firsttrue(i -> (xs[i] - p) / hj > r, n) - _firsttrue(i -> (xs[i] - p) / hj >= -r, n)
   end
-  windowcost = terms / length(sample) * m
-  fastcost = n * (maximum(length, last(pieces(k))) + kmax) + 64m
-  return windowcost <= fastcost ? WindowSums() : FastSums()
+  return terms / length(sample) <= n / 2 ? _ZeroWindowSums() : DirectSums()
 end
+
+# The windowed sums of a Gaussian kernel over |u| ≤ _zeroradius(k), outside which it
+# is exactly zero; the automatic choice only, since they are DirectSums by another
+# route
+struct _ZeroWindowSums <: SumEngine end
+
+_kernelsums!(out, ::_ZeroWindowSums, xs, vals, k, h, points, kmax, ws) =
+  _windowsums!(out, xs, vals, k, h, points, Val(kmax), -_zeroradius(k), _zeroradius(k), _sortedorder!(ws, points))
+
+# exp(-z²/2) is zero in Float64 for |z| > 38.604, which holds for |u| ≥ 38.62 σ
+_zeroradius(k::GaussianFamily) = 38.62 * first(_scale_order(k))
+
+# the interval outside which a kernel is exactly zero in Float64: its support, or for
+# Gaussian kernels the interval where the exponential has not underflowed
+_zerosupport(k::AbstractKernel) = support(k)
+_zerosupport(k::GaussianFamily) = (r = _zeroradius(k); (-r, r))
+
+# The factor by which the blocks of fast sums are narrower than a window, for powers
+# up to s. Measured over the named kernels, their convolutions and up to s = 19, the
+# relative error of blocks one window wide grows about as 2.6^s eps, to 5e-14 at
+# s = 6 and 8e-7 at s = 19, while halving the blocks takes off about s / 1.4 bits;
+# with these factors it stayed below 5e-14.
+_blockfactor(s) = 2.0^cld(max(s - 6, 0), 7)
 
 # the indices of the points in increasing order of the points
 function _sortedorder!(ws::SumsWorkspace, points)
@@ -391,11 +444,13 @@ function _kernelsums!(out, ::FastSums, xs, vals, k::PolynomialKernel, h, points,
   b, c = pieces(k)
   order = _sortedorder!(ws, points)
   h0 = _hmin(h)
-  Δ = (last(b) - first(b)) * h0   # block width: one window at the smallest bandwidth
+  smax = maximum(length, c) - 1 + kmax   # the highest power of t needed
+  # block width: a window at the smallest bandwidth, narrower for wide supports and
+  # high powers, whose rounding grows with the width
+  Δ = (last(b) - first(b)) * h0 / _blockfactor(smax)
   # below the resolution of the data, blocks would hold single values; sum directly
   Δ > 64 * eps(max(abs(xs[1]), abs(xs[end]))) ||
     return _windowsums!(out, xs, vals, k, h, points, Val(kmax), first(b), last(b), order)
-  smax = maximum(length, c) - 1 + kmax   # the highest power of t needed
   starts, centers, blockof, prefix = _blockprefix!(ws, xs, vals, Δ, h0, smax)
   n, np = length(xs), length(c)
   _foreachchunk(order) do chunk
