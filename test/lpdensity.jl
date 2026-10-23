@@ -156,4 +156,20 @@ end
   @test isfinite(b.lower[1]) && isnan(b.lower[2])
 end
 
+@testset "covariances over the windows" begin
+  # with many distinct values the covariances are sums over the windows, which agree
+  # with the product of the dense matrix of influence values
+  # (20000 distinct values: windows from 14 points on, the dense product up to 13)
+  x = [nquantile(Normal(), mod(0.6180339887498949i, 1)) for i in 1:20000]
+  pts = collect(range(-2, 2; length = 15))
+  m15 = fit(LocalPolynomialDensity, x; points = pts, bandwidth = 0.5)
+  m13 = fit(LocalPolynomialDensity, x; points = pts[1:13], bandwidth = 0.5)
+  for method in (Conventional(), RobustBiasCorrected())
+    V = vcov(m15; method)
+    @test diag(V) ≈ stderror(m15; method) .^ 2 rtol = 1e-12
+    @test V == V' && minimum(eigvals(Symmetric(V))) > -1e-12 * maximum(diag(V))
+    @test V[1:13, 1:13] ≈ vcov(m13; method) rtol = 1e-12
+  end
+end
+
 end
