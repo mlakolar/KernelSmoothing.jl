@@ -26,6 +26,7 @@ Every kernel can be evaluated as `k(u)` and supports the following functions.
 | `support(k)` | the interval `(lo, hi)` outside which ``K`` vanishes |
 | `insupport(k, u)` | whether `lo ≤ u ≤ hi` |
 | `cdf(k, u)` | ``\int_{-\infty}^{u} K(t)\,dt`` |
+| `ccdf(k, u)` | ``\int_{u}^{\infty} K(t)\,dt``, accurate where it is small |
 | `moment(k, j)` | ``\int u^j K(u)\,du`` |
 | `roughness(k)` | ``\int K(u)^2\,du`` |
 | `smoothness(k)` | the number of derivatives of ``K`` that are functions |
@@ -52,7 +53,11 @@ which keeps evaluation accurate far from zero, and convolutions and products are
 computed exactly in this representation. The named kernels are evaluated as powers
 of ``1 - u^2`` and their distribution functions near ``-1`` as
 ``(1 + u)^m P(u)``, with the terms of ``P`` of one sign, since the expanded
-polynomials cancel near ``\pm 1`` and can turn negative there. Derivatives, convolutions and products of
+polynomials cancel near ``\pm 1`` and can turn negative there. For the same reason,
+a piecewise polynomial kernel keeps its distribution function on the first piece
+and its upper tail on the last piece as polynomials about the ends of the support,
+computed in extended precision from the exact pieces of a convolution or a product,
+so that both keep their relative accuracy at the ends. Derivatives, convolutions and products of
 Gaussian kernels stay in the family
 
 ```math

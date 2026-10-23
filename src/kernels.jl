@@ -23,8 +23,8 @@ KernelDensity.jl, KDEpy and R's `density` corresponds to the half-width
 | [`GaussianKernel`](@ref)     | `exp(-u^2/2) / sqrt(2π)` | `1`            | `1 / (2 sqrt(π))` | `typemax(Int)`  |
 
 Every kernel can be evaluated, `k(u)`, and supports [`support`](@ref),
-[`cdf`](@ref), [`moment`](@ref), [`roughness`](@ref), [`smoothness`](@ref),
-[`derivative`](@ref) and [`convolve`](@ref). Derivatives and convolutions are
+[`cdf`](@ref), [`ccdf`](@ref), [`moment`](@ref), [`roughness`](@ref),
+[`smoothness`](@ref), [`derivative`](@ref) and [`convolve`](@ref). Derivatives and convolutions are
 kernels too, although a derivative integrates to zero rather than one.
 """
 abstract type AbstractKernel end
@@ -216,10 +216,15 @@ struct PiecewisePolynomialKernel <: PolynomialKernel
   smoothness::Int
   cdfcoefs::Vector{Vector{Float64}}   # the cdf on each piece, see _cdfcoefs
   mass::Float64                       # the integral of the kernel
+  lowercdf::Vector{Float64}           # the cdf on the first piece in powers of u - breaks[1]
+  upperccdf::Vector{Float64}          # the upper tail on the last piece in powers of breaks[end] - u
 
+  # The coefficients may be given in extended precision, from which the distribution
+  # function and its tails are computed before they are rounded; `tails` passes
+  # tails that are already known, as for a reflection.
   function PiecewisePolynomialKernel(::Centered, breaks::AbstractVector{<:Real},
                                      coefs::AbstractVector{<:AbstractVector{<:Real}},
-                                     smoothness::Integer)
+                                     smoothness::Integer; tails = nothing)
     isempty(coefs) && throw(ArgumentError("a kernel needs at least one piece"))
     length(breaks) == length(coefs) + 1 || throw(ArgumentError(
       "need one more breakpoint than pieces, got $(length(breaks)) and $(length(coefs))"))
@@ -229,7 +234,12 @@ struct PiecewisePolynomialKernel <: PolynomialKernel
     all(cj -> all(isfinite, cj), coefs) || throw(ArgumentError("coefficients must be finite"))
     smoothness >= 0 || throw(ArgumentError("smoothness must be nonnegative, got $smoothness"))
     b, c = Vector{Float64}(breaks), [Vector{Float64}(cj) for cj in coefs]
-    new(b, c, smoothness, _cdfcoefs(b, c)...)
+    cc, mass, lower, upper = setprecision(BigFloat, 256) do
+      cb = [BigFloat.(cj) for cj in coefs]
+      A, M = _cdfcoefs(b, cb)
+      [Float64.(a) for a in A], Float64(M), (tails === nothing ? _cdftails(b, cb) : tails)...
+    end
+    new(b, c, smoothness, cc, mass, Vector{Float64}(lower), Vector{Float64}(upper))
   end
 end
 
@@ -238,9 +248,9 @@ function PiecewisePolynomialKernel(breaks::AbstractVector{<:Real},
   k = PiecewisePolynomialKernel(Centered(), breaks, coefs, 0)   # validates the arguments
   b = k.breaks
   centered = setprecision(BigFloat, 256) do
-    [Float64.(_shifted(BigFloat, coefs[j], _mid(b, j))) for j in eachindex(k.coefs)]
+    [_shifted(BigFloat, coefs[j], _mid(b, j)) for j in eachindex(k.coefs)]
   end
-  return PiecewisePolynomialKernel(Centered(), b, centered, _smoothness(b, centered))
+  return PiecewisePolynomialKernel(Centered(), b, centered, _smoothness(b, [Float64.(c) for c in centered]))
 end
 
 pieces(k::PiecewisePolynomialKernel) = (k.breaks, k.coefs)
@@ -252,16 +262,51 @@ _cdfpieces(k::PiecewisePolynomialKernel) = (k.breaks, k.cdfcoefs, k.mass)
 # into A_j's constant term leaves one polynomial per piece. Returns those and the
 # total mass.
 function _cdfcoefs(b, c)
-  cc = Vector{Vector{Float64}}(undef, length(c))
-  mass = 0.0
+  T = float(eltype(first(c)))
+  cc = Vector{Vector{T}}(undef, length(c))
+  mass = zero(T)
   for j in eachindex(c)
     m = _mid(b, j)
-    A = [0.0; [c[j][i] / i for i in eachindex(c[j])]]
+    A = [zero(T); [c[j][i] / i for i in eachindex(c[j])]]
     A[1] = mass - evalpoly(b[j] - m, A)
     mass = evalpoly(b[j + 1] - m, A)
     cc[j] = A
   end
   return cc, mass
+end
+
+# The cdf on the first piece in powers of u - b[1] and the upper tail on the last
+# piece in powers of b[end] - u, both zero at their end of the support. Near the ends
+# the expansions about the midpoints cancel, while these keep their relative
+# accuracy. Computed in the precision of c; coefficients at the level of its rounding
+# are zeros of the exact polynomials, such as the vanishing derivatives of a
+# convolution at the ends, and are set to zero.
+function _cdftails(b, c)
+  T = float(eltype(first(c)))
+  lo = _shifted(T, c[1], b[1] - _mid(b, 1))                  # in powers of u - b[1]
+  hi = _shifted(T, c[end], b[end] - _mid(b, length(c)))      # in powers of u - b[end]
+  lower = [zero(T); [lo[i] / i for i in eachindex(lo)]]
+  upper = [zero(T); [(-1)^(i - 1) * hi[i] / i for i in eachindex(hi)]]
+  chop(a) = (m = maximum(abs, a); Float64[abs(t) <= 1e-60 * m ? 0.0 : Float64(t) for t in a])
+  return chop(lower), chop(upper)
+end
+
+# In the outer halves of the end pieces, the distribution function and its upper tail
+# come from the expansions about the ends of the support
+function cdf(k::PiecewisePolynomialKernel, u::Real)
+  b = k.breaks
+  b[1] < u < _mid(b, 1) && return evalpoly(u - b[1], k.lowercdf)
+  return _piececdf(k, u)
+end
+
+function ccdf(k::PiecewisePolynomialKernel, u::Real)
+  b = k.breaks
+  z = zero(u * b[1])
+  isnan(u) && return z + u
+  u <= b[1] && return z + k.mass
+  u >= b[end] && return z
+  _mid(b, length(b) - 1) < u && return evalpoly(b[end] - u, k.upperccdf)
+  return k.mass - _piececdf(k, u)
 end
 
 # The order of the first derivative that jumps somewhere on the real line (the
@@ -339,6 +384,18 @@ distribution function. For a derivative of order `r ≥ 1` it is the derivative 
 order `r - 1`.
 """
 cdf(k::PolynomialKernel, u::Real) = _piececdf(k, u)
+
+"""
+    ccdf(k::AbstractKernel, u)
+
+The integral of the kernel `k` from `u` to `Inf`, `moment(k, 0) - cdf(k, u)`,
+computed without the cancellation of that difference where the upper tail is small.
+A new kernel type can define it to keep its upper tail accurate, which the upper
+tail of a [`KDE`](@ref) with the kernel then inherits; otherwise the difference is
+used.
+"""
+ccdf(k::AbstractKernel, u::Real) = moment(k, 0) - cdf(k, u)
+ccdf(k::NamedPolynomialKernel, u::Real) = cdf(k, -u)   # the named kernels are symmetric
 
 function _piececdf(k::PolynomialKernel, u::Real)
   b, cc, mass = _cdfpieces(k)
@@ -420,7 +477,7 @@ function convolve(k1::PolynomialKernel, k2::PolynomialKernel)
         _addto!(coefs[m], c)
       end
     end
-    breaks, [Float64.(_shifted(BigFloat, coefs[m], _mid(breaks, m))) for m in eachindex(coefs)]
+    breaks, [_shifted(BigFloat, coefs[m], _mid(breaks, m)) for m in eachindex(coefs)]
   end
   return PiecewisePolynomialKernel(Centered(), centered..., smoothness(k1) + smoothness(k2) + 1)
 end
@@ -481,10 +538,10 @@ function Base.:*(k1::PolynomialKernel, k2::PolynomialKernel)
       # both factors expanded about the midpoint of the new piece
       g1 = _shifted(BigFloat, c1[i1], mid - _mid(b1, i1))
       g2 = _shifted(BigFloat, c2[i2], mid - _mid(b2, i2))
-      Float64.(_polymul(g1, g2))
+      _polymul(g1, g2)
     end
   end
-  return PiecewisePolynomialKernel(Centered(), breaks, coefs, _smoothness(breaks, coefs))
+  return PiecewisePolynomialKernel(Centered(), breaks, coefs, _smoothness(breaks, [Float64.(c) for c in coefs]))
 end
 
 # the piece j with b[j] ≤ u < b[j+1]
@@ -578,6 +635,15 @@ function cdf(k::GaussianDerivativeKernel, u::Real)
   return GaussianDerivativeKernel(k.σ, k.r - 1, k.a)(u)
 end
 
+ccdf(::GaussianKernel, u::Real) = ccdf(Distributions.Normal(), u)
+
+# a derivative of order r ≥ 1 integrates to zero, so that its upper tail is minus its
+# distribution function
+function ccdf(k::GaussianDerivativeKernel, u::Real)
+  k.r == 0 && return k.a * ccdf(Distributions.Normal(), u / k.σ)
+  return -GaussianDerivativeKernel(k.σ, k.r - 1, k.a)(u)
+end
+
 # ∫ u^j φ^(r)(u) du = (-1)^r j!/(j-r)! E[Z^(j-r)], and E[Z^m] = (m-1)!! for even m
 function moment(k::GaussianFamily, j::Integer)
   j >= 0 || throw(ArgumentError("moment order must be nonnegative, got $j"))
@@ -626,13 +692,18 @@ convolve(k1::AbstractKernel, k2::AbstractKernel) =
 _reflect(k::Union{NamedPolynomialKernel,GaussianKernel}) = k
 _reflect(k::GaussianDerivativeKernel) = isodd(k.r) ? GaussianDerivativeKernel(k.σ, k.r, -k.a) : k
 
-# piece j becomes piece n + 1 - j, and c(-u - m) = ∑ cᵢ (-1)^i (u + m)^i
+# piece j becomes piece n + 1 - j, and c(-u - m) = ∑ cᵢ (-1)^i (u + m)^i; the upper
+# tail becomes the lower one, and a derived kernel passes on its tails, which came
+# from coefficients before their rounding
 function _reflect(k::PolynomialKernel)
   b, c = pieces(k)
   breaks = [-b[i] for i in length(b):-1:1]
   coefs = [[c[j][i] * (-1)^(i - 1) for i in eachindex(c[j])] for j in length(c):-1:1]
-  return PiecewisePolynomialKernel(Centered(), breaks, coefs, smoothness(k))
+  return PiecewisePolynomialKernel(Centered(), breaks, coefs, smoothness(k); tails = _reflectedtails(k))
 end
+
+_reflectedtails(k::PiecewisePolynomialKernel) = (k.upperccdf, k.lowercdf)
+_reflectedtails(::PolynomialKernel) = nothing
 
 # other kernels: a lazy reflection
 _reflect(k::AbstractKernel) = _Reflected(k)
@@ -643,7 +714,8 @@ end
 
 (r::_Reflected)(u::Real) = r.k(-u)
 support(r::_Reflected) = (s = support(r.k); (-s[2], -s[1]))
-cdf(r::_Reflected, u::Real) = moment(r.k, 0) - cdf(r.k, -u)
+cdf(r::_Reflected, u::Real) = ccdf(r.k, -u)
+ccdf(r::_Reflected, u::Real) = cdf(r.k, -u)
 
 # k(u)², as a kernel: closed forms where they exist, a lazy product otherwise
 _square(k::Union{PolynomialKernel,GaussianKernel}) = k * k
@@ -684,10 +756,13 @@ function _isnonnegative(k::PolynomialKernel)
   return true
 end
 
-# -w, w and the real zeros of the derivative of the polynomial c in (-w, w)
+# -w, w and the real zeros of the derivative of the polynomial c in (-w, w). The
+# zeros are found in s = t / w, where the sizes of the coefficients measure their
+# terms on the piece, so that the leading ones are dropped by what they contribute
+# there and not by a size that depends on the scale of u.
 function _criticalpoints(c, w)
   ts = [-w, w]
-  d = _derivcoefs(c, 1)
+  d = _derivcoefs([c[i] * w^(i - 1) for i in eachindex(c)], 1)
   while length(d) > 1 && abs(d[end]) <= 1e-14 * maximum(abs, d)
     pop!(d)
   end
@@ -699,8 +774,8 @@ function _criticalpoints(c, w)
   end
   C[:, n] .= -d[1:n] ./ d[n + 1]
   for z in LinearAlgebra.eigvals(C)
-    t = real(z)
-    abs(imag(z)) <= 1e-7 * (1 + abs(t)) && -w < t < w && push!(ts, t)
+    s = real(z)
+    abs(imag(z)) <= 1e-7 * (1 + abs(s)) && -1 < s < 1 && push!(ts, s * w)
   end
   return ts
 end
