@@ -67,8 +67,11 @@ with the diagonal included, which with equal weights is the definition of R's
 `bw.SJ`. They are computed exactly for up to 100 observations. Larger samples are
 binned linearly once, on a grid with about 100 points per pilot bandwidth, and the
 lagged products of the bin weights come from an FFT, which changes the bandwidth by
-about ``10^{-6}`` relative. The equation is solved to a relative accuracy of
-``10^{-10}``. For other kernels than the Gaussian, the bandwidth is the Gaussian
+about ``10^{-6}`` relative. Far outliers and heavy tails would need too fine a grid
+over the whole range: the data are then split at gaps across which the kernels are
+negligible, only the dense part of each run is binned, and the pairs with the
+remaining observations, which are sparse, are summed exactly. The equation is solved
+to a relative accuracy of ``10^{-10}``. For other kernels than the Gaussian, the bandwidth is the Gaussian
 one times the ratio ``(R(K)/\mu_2(K)^2)^{1/5}`` of canonical bandwidths. With
 `method = :dpi`, the pilot bandwidth is the direct plug-in instead of
 ``\alpha_2 h^{5/7}``. The rule is the recommended default for densities without
@@ -83,7 +86,8 @@ the integrated squared error minus ``\int f^2``,
 \mathrm{CV}(h) = \int \hat f(x)^2\,dx - \frac{2}{W^2 - \sum_i w_i^2} \sum_{i \neq j} w_i w_j\, \frac{1}{h} K\Big(\frac{x_i - x_j}{h}\Big),
 ```
 
-on a grid of bandwidths spaced evenly on the log scale. Following Sheather (2004),
+on a grid of bandwidths spaced evenly on the log scale, whose lower end comes from a
+robust scale estimate, so that outliers do not lift it. Following Sheather (2004),
 it takes the largest local minimizer, refines it and reports all local minimizers,
 since the criterion often has several. For regression,
 [`CrossValidation`](@ref) minimizes
@@ -95,8 +99,9 @@ since the criterion often has several. For regression,
 
 where ``\ell_{ii}`` is the weight of ``y_i`` in the fit at ``x_i``. The fits at all
 observations come from [`kernelsums`](@ref), so that a bandwidth costs ``O(n)``
-operations for polynomial kernels. Cross-validation assumes independent errors;
-with positively correlated errors it undersmooths.
+operations for polynomial kernels. The rule takes the global minimizer over the
+grid and refines it between its neighbours. Cross-validation assumes independent
+errors; with positively correlated errors it undersmooths.
 
 ## Plug-in bandwidths for regression
 
@@ -112,7 +117,10 @@ h = \left( \frac{(1 + 2\nu)\, V}{2 (p + 1 - \nu)\, n\, (B^2 + \lambda R)} \right
 
 where ``R = 3 C_B^2 \hat V[\hat\beta_{p+1}]`` regularizes the bandwidth where the
 derivative nearly vanishes, scaled by `regularization` ``= \lambda``. When ``p - \nu``
-is even, the bias includes its next term and the error is minimized numerically.
+is even, the bias includes its next term and the error is minimized numerically,
+with the squared bias ``(|B_1| + h |B_2|)^2 + \lambda R``; nprobust's
+``(B_1 + h B_2 + \lambda R)^2``, which `compat = true` keeps, vanishes where the
+estimated terms cancel, and its bandwidth depends on the units of ``y``.
 The derivative in ``B`` is estimated by a fit of order ``p + 1`` with a pilot
 bandwidth ``b``. By default, ``b`` is the cross-validation bandwidth of the fit of
 order ``p`` times the ratio of the rule-of-thumb bandwidths for the derivative of
@@ -126,7 +134,9 @@ local.
 
 [`IMSEOptimal`](@ref) averages the variance and squared-bias constants over a grid,
 30 equally spaced points between the smallest and the largest observation as in
-nprobust, or the evaluation points with `grid = :points`, and gives one bandwidth.
+nprobust, or the evaluation points with `grid = :points`, and gives one bandwidth,
+at most the range of the data. Unlike nprobust's, whose rule `compat = true`
+reproduces, the squared bias keeps the regularization.
 [`CoverageOptimal`](@ref) rescales the plug-in bandwidths by a power of the sample
 size, which makes the coverage error of robust bias-corrected intervals shrink at
 the fastest rate (Calonico, Cattaneo and Farrell 2018, 2022). The same rules give

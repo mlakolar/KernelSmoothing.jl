@@ -137,6 +137,22 @@ end
   @test_throws ArgumentError selectbandwidth(MSEOptimal(), d, BiweightKernel(); points = [0.0], compat = true)
 end
 
+@testset "plug-in bandwidths where the density vanishes, and responses" begin
+  k = EpanechnikovKernel()
+  v = quantile.(Normal(), range(0.002, 0.998; length = 500))
+  c = [v; 10 .+ v]   # two clusters, with nothing near 5
+  d = SmoothingData(c)
+  s = selectbandwidth(MSEOptimal(), d, k; points = [0.0, 5.0, 10.0])
+  @test all(isfinite, s.h) && s.h[2] == knn_distance(d, 5.0, 21)
+  s0 = selectbandwidth(MSEOptimal(), d, k; points = [5.0], minobs = 0)
+  @test s0.h[1] == 5 - minimum(c)   # the cap: the distance to the farther end
+  @test isfinite(fit(PointwiseDensity, c; points = [5.0]).estimate[1])
+  # the density rules ignore responses, also through prepared data
+  dy = SmoothingData(c, sin.(c))
+  @test fit(PointwiseDensity, dy; points = [0.0, 1.0]).h == fit(PointwiseDensity, d; points = [0.0, 1.0]).h
+  @test bandwidth(fit(KDE, dy; bandwidth = IMSEOptimal())) == bandwidth(fit(KDE, d; bandwidth = IMSEOptimal()))
+end
+
 @testset "arguments" begin
   d = SmoothingData(X)
   asym = PiecewisePolynomialKernel([-1.0, 0.0, 2.0], [[2/3, 2/3], [2/3, -1/3]])

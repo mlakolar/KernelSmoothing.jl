@@ -118,6 +118,20 @@ end
   @test_throws ArgumentError fit(LocalPolynomialDensity, fill(2.0, 50))
 end
 
+@testset "integrated bandwidths over a grid" begin
+  # the floors and caps of IMSEOptimal belong to the evaluation points: with a grid
+  # between the extremes, the floor at the largest observation of an exponential
+  # sample used to set the bandwidth, 4.35 against 0.6 for grid = :points
+  e = -log.(1 .- mod.((1:2000) .* 0.7548776662466927, 1))
+  pts = [0.25, 1.0, 2.0]
+  mi = fit(LocalPolynomialDensity, e; points = pts, bandwidth = IMSEOptimal())
+  mp = fit(LocalPolynomialDensity, e; points = pts, bandwidth = IMSEOptimal(grid = :points))
+  @test mi.h[1] < 2mp.h[1]
+  @test all(abs.(mi.estimate .- exp.(-pts)) .< 0.05)
+  # prepared data with responses
+  @test fit(LocalPolynomialDensity, SmoothingData(e, sin.(e)); points = pts).h == fit(LocalPolynomialDensity, e; points = pts).h
+end
+
 @testset "identification" begin
   # heaped data: within one of 10.25 only the values 10 and 11 have positive weight, too
   # few for fits of orders 2 and 3, whose singular Gram matrices used to factor with

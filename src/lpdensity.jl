@@ -60,7 +60,8 @@ bias-corrected estimates of order `degree + 1`.
   distribution function with local fits at rule-of-thumb bandwidths for the whole
   set of points, and the constants of the bias and the variance from the data.
   `IMSEOptimal(grid = m)` sums over `m` equally spaced points between the smallest
-  and the largest observation instead. lpdensity minimizes the squared bias
+  and the largest observation instead, with the floors and caps of the evaluation
+  points. lpdensity minimizes the squared bias
   `(B₁ + a B₂)²`, which vanishes at `a = -B₁/B₂` when the two estimated terms have
   opposite signs, so that it can choose bandwidths of the order of the range of the
   data. We bound the bias by `(|B₁| + a |B₂|)²` instead; `compat = true` restores
@@ -70,7 +71,7 @@ bias-corrected estimates of order `degree + 1`.
   `nLocalMin` and `nUniqueMin`; `minobs = 0` turns this off. The rules apply the
   floor before they cap the bandwidth at the distance to the farthest distinct
   value, as lpdensity does, and `IMSEOptimal` applies the largest floor over the
-  points to its single bandwidth.
+  evaluation points to its single bandwidth.
 
 The kernel must be compactly supported; lpdensity uses the triangular,
 Epanechnikov and uniform kernels. The estimates agree with lpdensity 3.0.1 with
@@ -83,6 +84,7 @@ end
 function fit(::Type{LocalPolynomialDensity}, d::SmoothingData; points = nothing, degree::Integer = 2,
              derivative::Integer = 0, kernel::AbstractKernel = TriangularKernel(), bandwidth = MSEOptimal(),
              minobs::Integer = degree + 21, compat::Bool = false)
+  d = _withouty(d)
   p, v = Int(degree), Int(derivative) + 1
   derivative >= 0 || throw(ArgumentError("derivative must be nonnegative, got $derivative"))
   v <= p || throw(ArgumentError("the derivative of order $derivative needs degree at least $v, got $p"))
@@ -296,14 +298,15 @@ function _lpdensity_rot(rule, d::SmoothingData, k, pts, p, v, minobs)
 end
 
 # lpdensity's bw_IROT: one bandwidth that minimizes the sum of the asymptotic mean
-# squared errors at the points of grid when the data are normal
-function _lpdensity_irot(d::SmoothingData, k, grid, p, v, minobs)
+# squared errors at the points of grid when the data are normal, with the floor and
+# the cap of the points `at` where it is used
+function _lpdensity_irot(d::SmoothingData, k, grid, p, v, minobs; at = grid)
   nr = _lpdensity_nr(d, k, p, v)
   ts = map(nr.terms, grid)
   h = _fmin(a -> sum(t -> _lpdmse(a, p, v, t), ts), eps(), nr.range) * nr.sdx
-  isfinite(h) || (h = maximum(x0 -> knn_distance(d, x0, min(nobs(d), max(minobs, p + 21))), grid))
-  minobs > 0 && (h = max(h, maximum(x0 -> _lpdfloor(d, x0, minobs), grid)))
-  return min(h, max(abs(d.values[end] - minimum(grid)), abs(d.values[1] - maximum(grid))))
+  isfinite(h) || (h = maximum(x0 -> knn_distance(d, x0, min(nobs(d), max(minobs, p + 21))), at))
+  minobs > 0 && (h = max(h, maximum(x0 -> _lpdfloor(d, x0, minobs), at)))
+  return min(h, max(abs(d.values[end] - minimum(at)), abs(d.values[1] - maximum(at))))
 end
 
 # lpdensity's bw_MSE and bw_IMSE. On the standardized data, fits of orders p + 2 and
@@ -324,9 +327,13 @@ function _lpdensity_dpi(rule, d::SmoothingData, k, pts, p, v, minobs, compat = f
   sdx = sqrt(sum(abs2, d.x .- x̄) / (n - 1))
   dz = SmoothingData((d.x .- x̄) ./ sdx; weights = d.w)
   zs = (grid .- x̄) ./ sdx
-  h1 = _lpdensity_irot(dz, k, zs, 2, 1, 23)
-  hp1 = _lpdensity_irot(dz, k, zs, p + 2, p + 1, p + 23)
-  hp2 = _lpdensity_irot(dz, k, zs, p + 3, p + 2, p + 24)
+  # the floors and caps belong to the evaluation points, also when the integrated
+  # errors run over a grid between the extremes of the data, where the floors are
+  # large: the bandwidth used to be the floor at the largest observation
+  zp = (pts .- x̄) ./ sdx
+  h1 = _lpdensity_irot(dz, k, zs, 2, 1, 23; at = zp)
+  hp1 = _lpdensity_irot(dz, k, zs, p + 2, p + 1, p + 23; at = zp)
+  hp2 = _lpdensity_irot(dz, k, zs, p + 3, p + 2, p + 24; at = zp)
   aux = _lpdaux(dz)
   vfac = factorial(v)
   ts = _pointwise(zs) do z0
@@ -345,9 +352,9 @@ function _lpdensity_dpi(rule, d::SmoothingData, k, pts, p, v, minobs, compat = f
   pilots = (h1 = h1 * sdx, hp1 = hp1 * sdx, hp2 = hp2 * sdx)
   if imse
     good = filter(ok, ts)
-    h = isempty(good) ? maximum(fallback, grid) : _fmin(a -> sum(t -> _lpdmse(a, p, v, t), good), eps(), rz) * sdx
-    minobs > 0 && (h = max(h, maximum(x0 -> _lpdfloor(d, x0, minobs), grid)))
-    h = min(h, max(abs(d.values[end] - minimum(grid)), abs(d.values[1] - maximum(grid))))
+    h = isempty(good) ? maximum(fallback, pts) : _fmin(a -> sum(t -> _lpdmse(a, p, v, t), good), eps(), rz) * sdx
+    minobs > 0 && (h = max(h, maximum(x0 -> _lpdfloor(d, x0, minobs), pts)))
+    h = min(h, max(abs(d.values[end] - minimum(pts)), abs(d.values[1] - maximum(pts))))
     return BandwidthSelection(h, rule, (grid = grid, pilots = pilots))
   end
   h = map(pts, ts) do x0, t

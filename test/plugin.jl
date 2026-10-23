@@ -80,6 +80,33 @@ end
   @test selectbandwidth(MSEOptimal(), d, k; degree = 2, derivative = 1, points = [0.3]).h[1] > 0
 end
 
+@testset "even p - ν and the integrated rule" begin
+  n = 2000
+  xs = [mod(0.7548776662466927i, 1.0) for i in 1:n]
+  ys = sin.(2π .* xs) .+ 0.5 .* xs .+ 0.3 .* sin.(1.0e4 .* (1:n))
+  k = EpanechnikovKernel()
+  # nprobust's squared bias for even p - ν adds the regularization term, which has the
+  # units of B₁², to B₁; the adaptive rule's bandwidth does not depend on the units of y
+  for (deg, ν) in ((0, 0), (2, 1))
+    h = [selectbandwidth(MSEOptimal(), SmoothingData(xs, s .* ys), k; degree = deg, derivative = ν,
+                         points = [0.0, 0.5]).h for s in (1.0, 10.0, 0.1)]
+    @test h[2] ≈ h[1] rtol = 1e-8
+    @test h[3] ≈ h[1] rtol = 1e-8
+  end
+  hi = [bandwidth(IMSEOptimal(), SmoothingData(xs, s .* ys), k; degree = 0) for s in (1.0, 0.1)]
+  @test hi[2] ≈ hi[1] rtol = 1e-8
+  # without regularization, nprobust's form finds the zero of the squared bias
+  h0 = selectbandwidth(MSEOptimal(regularization = 0), SmoothingData(xs, ys), k; degree = 0, points = [0.0]).h[1]
+  @test h0 < 0.2
+  # the integrated rule keeps the regularization of MSEOptimal and the cap at the range
+  xl = collect(range(0, 1; length = 500))
+  yl = 2 .* xl .+ 1 .+ 0.1 .* sin.(1.0e4 .* (1:500))
+  hr = [bandwidth(IMSEOptimal(regularization = r), SmoothingData(xl, yl), k) for r in (0, 1, 10)]
+  @test hr[1] >= hr[2] > hr[3] && all(hr .<= 1)
+  @test bandwidth(IMSEOptimal(), SmoothingData(xl, 2 .* xl .+ 1), k) <= 1   # nprobust's rule gives 966
+  @test bandwidth(IMSEOptimal(), SmoothingData(xl, 2 .* xl .+ 1), k; compat = true) > 1
+end
+
 @testset "coverage-error-optimal bandwidths" begin
   d = SmoothingData(X, Y)
   n = 400

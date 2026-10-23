@@ -70,6 +70,7 @@ end
 function fit(::Type{PointwiseDensity}, d::SmoothingData; points = nothing,
              kernel::AbstractKernel = EpanechnikovKernel(), bandwidth = nothing, pilot = nothing,
              rho::Real = 1, minobs::Integer = 21, compat::Bool = false)
+  d = _withouty(d)
   _check_density_kernel(kernel)
   isapprox(moment(kernel, 1), 0; atol = 1e-12) && isapprox(moment(kernel, 3), 0; atol = 1e-12) ||
     throw(ArgumentError("$kernel is not symmetric; robust bias-corrected densities need a symmetric kernel"))
@@ -275,6 +276,8 @@ function _densityplugin(rule, d, k, points, minobs, compat; imse::Bool)
       [_quantile(d, q) for q in range(0.1, 0.9; length = rule.grid isa Integer ? rule.grid : 30)] : points
     cs = map(constants, grid)
     h = hopt(sum(c.V for c in cs), sum(c.B2 for c in cs), sum(c.Rreg for c in cs))
+    # where the pilot estimates vanish on the whole grid, the Sheather–Jones bandwidth
+    h > 0 && isfinite(h) || (h = hsj)
     return BandwidthSelection(h, rule, (b = b, grid = grid, sheatherjones = hsj))
   end
   pts = points === nothing ? [_quantile(d, q) for q in range(0.1, 0.9; length = 30)] : points
@@ -283,9 +286,17 @@ function _densityplugin(rule, d, k, points, minobs, compat; imse::Bool)
     cs = constants(c)
     floor = minobs > 0 ? knn_distance(d, c, min(minobs, nobs(d))) : 0.0
     cap = max(abs(c - xs[1]), abs(c - xs[end]))
-    h[j], bs[j] = max(min(hopt(cs.V, cs.B2, cs.Rreg), cap), floor), max(b, floor)
+    h[j], bs[j] = _clampdensity(hopt(cs.V, cs.B2, cs.Rreg), floor, cap), max(b, floor)
   end
   return BandwidthSelection(h, rule, (b = bs, points = pts, sheatherjones = hsj))
+end
+
+# The bandwidth at a point between the floor and the cap. Where the pilot estimates
+# vanish, as between two clusters, the rule gives NaN or zero, and the floor is
+# used instead, or the cap without a floor.
+function _clampdensity(h, floor, cap)
+  h > 0 && isfinite(h) || return floor > 0 ? floor : cap
+  return max(min(h, cap), floor)
 end
 
 # nprobust's kdbwselect: rule-of-thumb pilots for f and f''
@@ -327,7 +338,10 @@ function _kdbwselect(rule, d, k, points, minobs; imse::Bool)
   for (j, c) in enumerate(pts)
     B, V = constants(c)
     floor = minobs > 0 ? knn_distance(d, c, min(minobs, nobs(d))) : 0.0
-    h[j], b[j] = max(hopt(V, B^2), floor), max(brot, floor)
+    # nprobust has no cap, which only replaces a bandwidth that the rule leaves undefined
+    h[j] = _clampdensity(hopt(V, B^2), floor, Inf)
+    isfinite(h[j]) || (h[j] = max(abs(c - xs[1]), abs(c - xs[end])))
+    b[j] = max(brot, floor)
   end
   return BandwidthSelection(h, rule, (b = b, points = pts))
 end

@@ -34,9 +34,10 @@ development.
 
 With given bandwidths, the estimates and standard errors agree with nprobust,
 lpdensity and RDHonest to rounding. The default plug-in bandwidths depart from
-these packages where their pilot estimates fail, and `compat = true` reproduces
-them; the [documentation](https://mlakolar.github.io/KernelSmoothing.jl/dev/)
-explains the differences.
+these packages where their pilot estimates or their squared bias fail, and
+`compat = true` reproduces them; the
+[documentation](https://mlakolar.github.io/KernelSmoothing.jl/dev/) explains the
+differences.
 
 ```julia
 using KernelSmoothing

@@ -11,11 +11,15 @@ bandwidth `b`, and `h` minimizes the estimated mean squared error, with the
 finite-sample bias and variance constants of the local fits, a preliminary
 normal-reference bandwidth for the variances, a cap at the distance to the farther
 end of the data and a floor at the distance of the `minobs`-th nearest
-observation. The squared bias carries the regularization term `3 B₁² V̂[β̂]` times
-`regularization`, which keeps the bandwidth finite where the derivative is nearly
-zero (Imbens and Kalyanaraman 2012). When `p - ν` is even and `interior = false`,
-the bias includes the next term of its expansion and the mean squared error is
-minimized numerically.
+observation. The squared bias `B₁²` carries the regularization term `3 B₁² V̂[β̂]`
+times `regularization`, which keeps the bandwidth finite where the derivative is
+nearly zero (Imbens and Kalyanaraman 2012). When `p - ν` is even and
+`interior = false`, the bias includes the next term of its expansion and the mean
+squared error is minimized numerically. Its squared bias is then
+`(|B₁| + h |B₂|)²` plus the regularization term, which cannot vanish where the two
+estimated terms have opposite signs; nprobust's `(B₁ + h B₂ + regularization R)²`,
+kept with `compat = true`, can, and since it adds `R`, which has the units of `B₁²`,
+to `B₁`, its bandwidth depends on the units of `y`.
 
 By default, the pilot bandwidth `b` is the [`CrossValidation`](@ref) bandwidth of
 the fit of order `p` times the ratio of the [`RuleOfThumb`](@ref) bandwidths for
@@ -71,11 +75,15 @@ MSEOptimal(; regularization::Real = 1, interior::Bool = false) = MSEOptimal(regu
 
 The direct plug-in estimate of the bandwidth that minimizes the integrated mean
 squared error of a local polynomial fit, one bandwidth for all points: the
-variance and squared bias constants of [`MSEOptimal`](@ref) are averaged over
-`grid` equally spaced points between the smallest and the largest observation, as
-nprobust's `imse-dpi` does, or with `grid = :points` over the evaluation points of
-the fit. The pilot bandwidths are those of [`MSEOptimal`](@ref), adaptive by
-default and nprobust's with `compat = true`, and `b` is in `details.b`.
+variance and squared bias constants of [`MSEOptimal`](@ref), with its
+regularization, are averaged over `grid` equally spaced points between the
+smallest and the largest observation, as nprobust's `imse-dpi` does, or with
+`grid = :points` over the evaluation points of the fit, and the bandwidth is capped
+at the range of the data. The pilot bandwidths are those of [`MSEOptimal`](@ref),
+adaptive by default, and `b` is in `details.b`. With `compat = true` the rule is
+nprobust's, whose pilots are its own, whose averaged squared bias leaves out the
+regularization and whose bandwidth has no cap, which for an exactly linear
+regression function was 966 on the unit interval.
 
 For a sample without responses, the rule gives the integrated plug-in bandwidth
 for densities, with the constants of [`MSEOptimal`](@ref) averaged over the
@@ -170,6 +178,9 @@ function selectbandwidth(rule::IMSEOptimal, d::SmoothingData, k::AbstractKernel;
   Vh, Bh = sum(s.Vh for s in r) / length(r), sum(s.Bh for s in r) / length(r)
   if isodd(p - ν) || rule.interior
     h = (Vh / (N * Bh))^(1 / (2p + 3))
+    # where the bias nearly vanishes, as for a linear regression function, h has no
+    # bound in nprobust; the adaptive rule caps it at the range, as MSEOptimal does
+    compat || (h = min(h, R))
   else
     h = _fmin(H -> abs(H^(2p + 2 - 2ν) * Bh + Vh / (N * H^(1 + 2ν))), eps(), R)
   end
@@ -229,12 +240,18 @@ function _msedpi(d, k, c, p, ν, regul, interior, vce, minobs, pilots = nothing)
   clamp_bw(h) = max(min(h, bwmax), bwmin)
   # the second bias term enters only for even p - ν at boundary points, in every stage
   needB2 = even && !interior
+  # nprobust's squared bias for even p - ν, (B₁ + H B₂ + λR)², adds R, which has the
+  # units of B₁², to B₁, so that the bandwidth depends on the units of y, and vanishes
+  # where the estimated terms cancel; the adaptive rule bounds it by
+  # (|B₁| + H |B₂|)² + λR instead, as for lpdensity
+  compat = pilots === nothing
+  sqbias(C, H, scale) = compat ? (C.B1 + H * C.B2 + scale * C.R)^2 :
+                                 (abs(C.B1) + H * abs(C.B2))^2 + scale * C.R
   # the bandwidth that minimizes the mean squared error from the constants of a stage
   function optimal(C, o, nu, scale)
     isfinite(C.V) || return NaN
     needB2 || return C.bw
-    return _fmin(H -> abs(H^(2o + 2 - 2nu) * (C.B1 + H * C.B2 + scale * C.R)^2 + C.V / (N * H^(1 + 2nu))),
-                 eps(), R)
+    return _fmin(H -> abs(H^(2o + 2 - 2nu) * sqbias(C, H, scale) + C.V / (N * H^(1 + 2nu))), eps(), R)
   end
   if pilots === nothing
     d1 = _lpbw(d, k, c, q + 1, q + 1, q + 2, cbw, R, R, 0.0, vce, needB2)
@@ -251,8 +268,14 @@ function _msedpi(d, k, c, p, ν, regul, interior, vce, minobs, pilots = nothing)
   isfinite(h) || throw(ArgumentError("the plug-in bandwidth at x = $c is not defined, since a " *
     "local fit of its stages has fewer distinct values of x with positive weight than " *
     "coefficients; pass a bandwidth"))
-  Vh, Bh = !even || interior ? (ch.rV * ch.V, ch.rB * ch.B1^2) : (ch.V, (ch.B1 + h * ch.B2)^2)
-  pilots === nothing || return (h = h, b = b, Vh = Vh, Bh = Bh)
+  # the constants that IMSEOptimal averages; nprobust leaves out the regularization,
+  # which the adaptive rule keeps, as MSEOptimal does
+  Vh, Bh = if !needB2
+    (ch.rV * ch.V, ch.rB * (compat ? ch.B1^2 : ch.B1^2 + regul * ch.R))
+  else
+    (ch.V, compat ? (ch.B1 + h * ch.B2)^2 : sqbias(ch, h, regul))
+  end
+  compat || return (h = h, b = b, Vh = Vh, Bh = Bh)
   Vb, Bb = !even || interior ? (cb.rV * cb.V, cb.rB * cb.B1^2) : (cb.V, (cb.B1 + b * cb.B2)^2)
   return (h = h, b = b, Vh = Vh, Bh = Bh, Vb = Vb, Bb = Bb)
 end

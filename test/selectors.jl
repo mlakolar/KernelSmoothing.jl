@@ -107,7 +107,7 @@ KernelSmoothing.roughness(::BumpKernel) = 0.6
       s2 = sum(ww[i] * ww[j] * k((Z[i] - Z[j]) / h) for i in 1:400, j in 1:400 if i != j) / (h * (W^2 - S2))
       return s1 - 2s2
     end
-    crit = _lscvcriterion(d, k, 0.01, true)
+    crit = _lscvcriterion(d, k, true)
     for h in (0.1, 0.35, 0.9)
       @test crit(h) ≈ cv(h) rtol = 1e-9
     end
@@ -118,7 +118,8 @@ KernelSmoothing.roughness(::BumpKernel) = 0.6
     @test length(s.details.grid) == length(s.details.criterion) == 60
   end
   # with heavy ties the criterion falls as h shrinks, without an interior minimum
-  st = selectbandwidth(LSCV(), SmoothingData(repeat([0.0, 1.0, 2.0, 3.0], 50)), GaussianKernel())
+  st = @test_logs (:warn, r"end of the grid") selectbandwidth(LSCV(), SmoothingData(repeat([0.0, 1.0, 2.0, 3.0], 50)),
+                                                            GaussianKernel())
   @test st.details.atbound && isempty(st.details.minimizers)
   @test st.h == st.details.grid[1]
   @test_throws ArgumentError selectbandwidth(LSCV(), SmoothingData(Z), BumpKernel())
@@ -166,6 +167,50 @@ end
   @test_throws ArgumentError fit(LocalPolynomialRegression, x, y; bandwidth = SheatherJones())
   @test_throws ArgumentError fit(KDE, x; bandwidth = CrossValidation())
   @test_throws ArgumentError fit(KDE, x; bandwidth = RuleOfThumb())
+end
+
+@testset "grid minimization" begin
+  # an interior local minimum at 2 and a lower end at 10
+  f(h) = h < 5 ? (h - 2)^2 + 1 : 0.5 - 0.01h
+  h, det = KernelSmoothing._gridminimize(f, collect(1.0:10.0); largest = false)
+  @test h == 10 && det.atbound && det.minimizers == [2.0]
+  h, det = KernelSmoothing._gridminimize(f, collect(1.0:10.0); largest = true)   # Sheather's rule for LSCV
+  @test h ≈ 2 atol = 1e-5
+  @test !det.atbound
+  # a refinement that is worse than its grid value is not kept
+  spike(h) = h == 2 ? 0.0 : 1 + (h - 2)^2
+  @test KernelSmoothing._gridminimize(spike, collect(1.0:5.0); largest = false)[1] == 2
+  @test_throws ArgumentError KernelSmoothing._gridminimize(h -> Inf, [1.0, 2.0, 3.0]; largest = false)
+  # cross-validation takes the global minimum, also for linear regression functions
+  # whose criterion falls towards the end of the grid
+  for y in (Z .+ 0.5 .* sin.(1e4 .* (1:400)), 2 .* Z .+ 0.3 .* cos.(7e3 .* (1:400)), sin.(2 .* Z) .+ 0.5 .* cos.(13.7 .* (1:400)))
+    d = SmoothingData(Z, y)
+    sel = selectbandwidth(CrossValidation(), d, EpanechnikovKernel())
+    @test _cvcriterion(d, EpanechnikovKernel(), sel.h, 1, SumsWorkspace()) <=
+          minimum(filter(isfinite, sel.details.criterion)) * (1 + 1e-12)
+  end
+  # an outlier inflates the standard deviation, but not the lower end of the LSCV grid
+  for k in (EpanechnikovKernel(), GaussianKernel())
+    @test bandwidth(LSCV(), SmoothingData([Z; 1e7]), k) ≈ bandwidth(LSCV(), SmoothingData(Z), k) rtol = 0.05
+  end
+end
+
+@testset "Sheather and Jones with outliers and heavy tails" begin
+  k = GaussianKernel()
+  # a far outlier: a grid over the whole range would need 2^60 points
+  x = [Q; 1e14]
+  @test bandwidth(SheatherJones(), SmoothingData(x), k) ≈ bandwidth(SheatherJones(exact = 10^6), SmoothingData(x), k) rtol = 1e-5
+  @test bandwidth(fit(KDE, x)) ≈ bandwidth(SheatherJones(), SmoothingData(x), EpanechnikovKernel())
+  # heavy tails: Cauchy quantiles, of which the dense center is binned and the
+  # sparse tails are summed exactly
+  c = [tan(π * (mod(0.6180339887498949i, 1) - 0.5)) for i in 1:2000]
+  d = SmoothingData(c)
+  @test bandwidth(SheatherJones(), d, k) ≈ bandwidth(SheatherJones(exact = 10^6), d, k) rtol = 1e-5
+  p = KernelSmoothing._LaggedBins(d, 1e-3, 30.0)
+  @test !isempty(p.rest) && length(p.cs) > 1
+  for (r, g) in ((4, 0.3), (6, 0.5), (4, 2.0))
+    @test _psi(p, r, g) ≈ _psi(d, r, g, true) rtol = 1e-5
+  end
 end
 
 @testset "root finding and minimization" begin
