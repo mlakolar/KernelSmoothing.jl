@@ -80,6 +80,25 @@ end
         kernelsums(t, EpanechnikovKernel(), 1e-12, [1e6]; engine = DirectSums())
 end
 
+@testset "FastSums for high powers" begin
+  # relative to ∑ᵢ |wᵢ k(uᵢ)|, blocks one window wide lost up to 7.8e-7 for the
+  # convolution of two triweight kernels with kmax = 6; narrower blocks keep 1e-13
+  x = [mod(0.6180339887498949i, 1.0) for i in 1:20_000]
+  d = SmoothingData(x)
+  pts = collect(range(0.05, 0.95; length = 151))
+  h = 0.01
+  tw = TriweightKernel()
+  for (k, kmax) in ((EpanechnikovKernel(), 6), (tw, 2), (tw, 6), (convolve(tw, tw), 0), (convolve(tw, tw), 6),
+                    (convolve(BiweightKernel(), BiweightKernel()), 2))
+    F = kernelsums(d, k, h, pts; kmax, engine = FastSums())
+    D = kernelsums(d, k, h, pts; kmax, engine = DirectSums())
+    scale = [sum(abs(k((xi - p) / h)) for xi in x) for p in pts]
+    @test maximum(abs.(F .- D) ./ scale') < 1e-13
+  end
+  @test KernelSmoothing._blockfactor(4) == 1 && KernelSmoothing._blockfactor(8) == 2
+  @test KernelSmoothing._blockfactor(19) == 4
+end
+
 @testset "Gaussian kernels" begin
   d = SmoothingData(XR; weights = WR)
   @test_throws ArgumentError kernelsums(d, GaussianKernel(), 0.3, POINTS; engine = WindowSums())
@@ -138,6 +157,27 @@ end
   @test _choose_engine(EpanechnikovKernel(), d.x, 0.01, POINTS[1:5], 0) isa WindowSums
   @test _choose_engine(EpanechnikovKernel(), d.x, 0.5, d.x, 2) isa FastSums
   @test _choose_engine(GaussianKernel(), d.x, 0.5, d.x, 2) isa DirectSums
+  # one tiny bandwidth among many would make the blocks of fast sums tiny for all
+  hs = fill(0.5, length(d.x)); hs[100] = 1e-6
+  @test _choose_engine(EpanechnikovKernel(), d.x, hs, d.x, 2) isa WindowSums
+  # windowed terms cost more for kernels whose pieces are vectors: windows 0.004
+  # wide are summed as windows for the Epanechnikov kernel, while for its
+  # convolution with itself windows 0.08 wide take fast sums
+  dl = SmoothingData([mod(0.7548776662466927i, 1.0) for i in 1:100_000])
+  pts = collect(range(0, 1; length = 100))
+  @test _choose_engine(EpanechnikovKernel(), dl.x, 0.002, pts, 0) isa WindowSums
+  @test _choose_engine(convolve(EpanechnikovKernel(), EpanechnikovKernel()), dl.x, 0.02, pts, 0) isa FastSums
+  # Gaussian kernels: the observations within 38.62 standard deviations, beyond
+  # which the kernel is exactly zero, give the direct sums exactly
+  @test _choose_engine(GaussianKernel(), d.x, 0.01, POINTS, 0) isa KernelSmoothing._ZeroWindowSums
+  dy = SmoothingData(XR, YR; weights = WR)
+  for k in (GaussianKernel(), derivative(GaussianKernel(), 3)), h in (0.005, 0.05, 0.5)
+    @test kernelsums(dy, k, h, POINTS; kmax = 2, z = dy.y) ==
+          kernelsums(dy, k, h, POINTS; kmax = 2, z = dy.y, engine = DirectSums())
+  end
+  g = fit(KDE, dy; kernel = GaussianKernel(), bandwidth = 0.01)
+  @test [pdf(g, t) for t in POINTS] == vec(kernelsums(dy, GaussianKernel(), 0.01, POINTS; engine = DirectSums())) ./
+                                       (0.01 * dy.sumw)
   for (h, points) in ((0.01, POINTS[1:5]), (0.5, d.x))
     @test check_exact(d, EpanechnikovKernel(), h, points, 2)
     @test kernelsums(d, EpanechnikovKernel(), h, points; kmax = 2) ==
