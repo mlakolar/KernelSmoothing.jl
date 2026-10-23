@@ -58,6 +58,21 @@ psi(x, f, g, r) = sum(f((xi - xj) / g) for xi in x, xj in x) / (length(x) * (len
   @test bandwidth(fit(KDE, Q)) == bandwidth(SheatherJones(), d, EpanechnikovKernel())
 end
 
+@testset "binned sums for Sheather and Jones" begin
+  # the FFT against the discrete Fourier transform, and the lagged products of the bins
+  for N in (1, 2, 16, 128)
+    z = [complex(sin(3j), cos(7j)) for j in 1:N]
+    @test KernelSmoothing._fft!(copy(z)) ≈ [sum(z[j] * cispi(-2 * (j - 1) * (k - 1) / N) for j in 1:N) for k in 1:N]
+  end
+  @test_throws ArgumentError KernelSmoothing._fft!(zeros(ComplexF64, 3))
+  b = [abs(sin(5k)) for k in 1:37]
+  @test KernelSmoothing._lagproducts(b) ≈ [sum(b[k] * b[k + m] for k in 1:37-m) for m in 0:36]
+  # a far outlier would need a grid of more than 2^20 points, so that the data are binned for each g
+  x = [Q; 1e7]
+  @test bandwidth(SheatherJones(exact = 0), SmoothingData(x), GaussianKernel()) ≈
+        bandwidth(SheatherJones(), SmoothingData(x), GaussianKernel()) rtol = 1e-4
+end
+
 # a kernel defined outside the package, without a convolution
 struct BumpKernel <: AbstractKernel end
 (::BumpKernel)(u::Real) = abs(u) < 1 ? 0.75 * (1 - u^2) : 0.0
