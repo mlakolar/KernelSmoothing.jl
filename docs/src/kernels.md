@@ -24,6 +24,7 @@ Every kernel can be evaluated as `k(u)` and supports the following functions.
 | function | value |
 |---|---|
 | `support(k)` | the interval `(lo, hi)` outside which ``K`` vanishes |
+| `insupport(k, u)` | whether `lo ≤ u ≤ hi` |
 | `cdf(k, u)` | ``\int_{-\infty}^{u} K(t)\,dt`` |
 | `moment(k, j)` | ``\int u^j K(u)\,du`` |
 | `roughness(k)` | ``\int K(u)^2\,du`` |
@@ -48,7 +49,10 @@ are polynomials between breakpoints, which
 `PiecewisePolynomialKernel(breaks, coefs)` also lets the user define, for example
 higher-order kernels. Each piece is stored as a polynomial about its midpoint,
 which keeps evaluation accurate far from zero, and convolutions and products are
-computed exactly in this representation. Derivatives, convolutions and products of
+computed exactly in this representation. The named kernels are evaluated as powers
+of ``1 - u^2`` and their distribution functions near ``-1`` as
+``(1 + u)^m P(u)``, with the terms of ``P`` of one sign, since the expanded
+polynomials cancel near ``\pm 1`` and can turn negative there. Derivatives, convolutions and products of
 Gaussian kernels stay in the family
 
 ```math

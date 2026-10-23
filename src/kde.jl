@@ -6,12 +6,14 @@ A kernel density estimate
     f̂(x) = ∑ᵢ wᵢ k((x - xᵢ) / h) / (h ∑ᵢ wᵢ),
 
 fitted with [`fit`](@ref)`(KDE, x)`. A `KDE` is a continuous univariate
-distribution of Distributions.jl, so `pdf`, `logpdf`, `cdf`, `quantile`, `rand`,
-`mean`, `var`, `minimum`, `maximum` and `insupport` work as for any other
-distribution. The density and the distribution function are computed exactly from
-the observations, without a grid. Broadcasting `pdf.(f, xs)`, `logpdf.(f, xs)`,
-`cdf.(f, xs)` or `stderror.(f, xs)` over many points computes them with
-[`kernelsums`](@ref), which is much faster than evaluating point by point.
+distribution of Distributions.jl, so `pdf`, `logpdf`, `cdf`, `ccdf`, `quantile`,
+`cquantile`, `rand`, `mean`, `var`, `minimum`, `maximum` and `insupport` work as for
+any other distribution. The density and the distribution function are computed
+exactly from the observations, without a grid; `ccdf` and `cquantile` sum the upper
+tail directly, so that they keep their relative accuracy far above the data.
+Broadcasting `pdf.(f, xs)`, `logpdf.(f, xs)`, `cdf.(f, xs)`, `ccdf.(f, xs)` or
+`stderror.(f, xs)` over many points computes them with [`kernelsums`](@ref), which
+is much faster than evaluating point by point.
 
 [`derivative`](@ref)`(f, r)` estimates the `r`-th derivative of the density,
 [`stderror`](@ref)`(f, x)` gives the standard error of `f̂(x)` and
@@ -116,9 +118,11 @@ end
 _sums(f::KDE, k, points; z = nothing, engine = f.engine) =
   vec(kernelsums(f.data, k, f.h, points; z, engine))
 
+# clamped at zero, since a kernel accepted as nonnegative can round to a tiny
+# negative value
 function pdf(f::KDE, x::Real)
   isnan(x) && return float(x)
-  return _pointsum(f.data, f.reflected, f.h, x, f.data.w) / (f.h * f.data.sumw)
+  return max(_pointsum(f.data, f.reflected, f.h, x, f.data.w) / (f.h * f.data.sumw), 0.0)
 end
 
 logpdf(f::KDE, x::Real) = log(pdf(f, x))
@@ -162,6 +166,43 @@ function _cdf(f::KDE, x)
   end
 end
 
+# 1 - F̂(x) from the weight above the window and the upper tail of the kernel within
+# it, which keeps its relative accuracy where F̂(x) is close to one
+function ccdf(f::KDE, x::Real)
+  isnan(x) && return float(x)
+  x <= minimum(f) && return 1.0
+  x >= maximum(f) && return 0.0
+  d, r, h = f.data, f.reflected, f.h
+  xs, n = d.x, nobs(d)
+  lo, hi = support(r)
+  # observations with (xᵢ - x) / h > hi count fully, those below lo not at all
+  a = isfinite(lo) ? _firsttrue(i -> (xs[i] - x) / h >= lo, n) : 1
+  b = isfinite(hi) ? _firsttrue(i -> (xs[i] - x) / h > hi, n) : n + 1
+  s = zero(float(x))
+  @inbounds for i in a:b-1
+    s += _weight(d.w, i) * cdf(r, (xs[i] - x) / h)
+  end
+  return clamp((d.sumw - d.cumw[b] + s) / d.sumw, 0.0, 1.0)
+end
+
+function _ccdf(f::KDE, x)
+  d, h = f.data, f.h
+  g = _ccdfkernel(f.kernel)
+  hi = last(support(g))
+  return _evaluate(t -> ccdf(f, t), x) do p
+    s = _sums(f, g, p)
+    xmin, xmax = minimum(f), maximum(f)
+    for j in eachindex(p)
+      if isfinite(hi)   # add the weight of the observations above the window
+        b = _firsttrue(i -> (d.x[i] - p[j]) / h > hi, nobs(d))
+        s[j] += d.sumw - d.cumw[b]
+      end
+      s[j] = p[j] <= xmin ? 1.0 : p[j] >= xmax ? 0.0 : clamp(s[j] / d.sumw, 0.0, 1.0)
+    end
+    s
+  end
+end
+
 function quantile(f::KDE, p::Real)
   0 <= p <= 1 || throw(DomainError(p, "a probability must be between 0 and 1"))
   p == 0 && return minimum(f)
@@ -169,6 +210,18 @@ function quantile(f::KDE, p::Real)
   # F̂(x) lies between k's distribution function at (x - xₙ) / h and at (x - x₁) / h
   q = _kernelquantile(f.kernel, p)
   return _invertcdf(t -> cdf(f, t), t -> pdf(f, t), p, f.data.x[1] + f.h * q,
+                    f.data.x[end] + f.h * q)
+end
+
+# The upper quantile, quantile(f, 1 - p), from the upper tail: the smallest x with
+# 1 - F̂(x) ≤ p, which keeps its relative accuracy for small p
+function cquantile(f::KDE, p::Real)
+  0 <= p <= 1 || throw(DomainError(p, "a probability must be between 0 and 1"))
+  p >= 0.5 && return quantile(f, 1 - p)   # 1 - p is exact here
+  p == 0 && return maximum(f)
+  # 1 - F̂(x) lies between the upper tails of k at (x - x₁) / h and at (x - xₙ) / h
+  q = -_kernelquantile(_reflect(f.kernel), p)
+  return _invertcdf(t -> -ccdf(f, t), t -> pdf(f, t), -p, f.data.x[1] + f.h * q,
                     f.data.x[end] + f.h * q)
 end
 
@@ -282,6 +335,7 @@ _unref(f::Base.RefValue{<:KDE}) = f[]
 Base.broadcasted(::typeof(pdf), f::_KDELike, x::AbstractArray{<:Real}) = _pdf(_unref(f), x)
 Base.broadcasted(::typeof(logpdf), f::_KDELike, x::AbstractArray{<:Real}) = log.(_pdf(_unref(f), x))
 Base.broadcasted(::typeof(cdf), f::_KDELike, x::AbstractArray{<:Real}) = _cdf(_unref(f), x)
+Base.broadcasted(::typeof(ccdf), f::_KDELike, x::AbstractArray{<:Real}) = _ccdf(_unref(f), x)
 Base.broadcasted(::typeof(stderror), f::_KDELike, x::AbstractArray{<:Real}) =
   _stderror(_unref(f), x)
 
