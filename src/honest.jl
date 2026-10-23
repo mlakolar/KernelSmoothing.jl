@@ -15,9 +15,10 @@ class and `cv(t)` is the `level` quantile of `|N(t, 1)|`. The intervals account
 for the bias instead of removing it, so that they need a bound on the smoothness:
 adapting to unknown smoothness is impossible over such classes. With `M = :rot`,
 the bound is the largest absolute derivative of order `p + 1` of a global
-polynomial of order `p + 3` over the range of the data, the rule of thumb of
-Armstrong and Kolesár for local linear fits, which they offer as a starting point
-for sensitivity analysis. With `biascorrected = true`, the interval is built
+polynomial of order `p + 3` over the range of the data (of lower order when `x`
+has fewer than `p + 4` distinct values), the rule of thumb of Armstrong and Kolesár
+for local linear fits, which they offer as a starting point for sensitivity
+analysis. With `biascorrected = true`, the interval is built
 around the bias-corrected estimate and its weights.
 """
 struct Honest <: InferenceMethod
@@ -65,12 +66,15 @@ function _absmoment(d, k, x0, h, b, p, ν, bc)
   return s
 end
 
-# the largest |m^(p+1)| of a global polynomial of order p + 3 over the range of x
+# the largest |m^(p+1)| of a global polynomial of order p + 3 over the range of x,
+# or of the highest order that the distinct values identify
 function _honestM(d::SmoothingData, p)
   d.y === nothing && throw(ArgumentError("the rule of thumb for M needs responses"))
+  P = min(p + 3, nunique(d) - 1)
+  P >= p + 1 || throw(ArgumentError("the rule of thumb for M fits a global polynomial of " *
+    "order at least $(p + 1), which needs $(p + 2) distinct values of x, got $(nunique(d)); pass M"))
   x̄, s = _mean(d), sqrt(_variance(d))
   z = (d.x .- x̄) ./ s
-  P = p + 3
   sw = d.w === nothing ? ones(nobs(d)) : sqrt.(d.w)
   α = LinearAlgebra.qr(sw .* [zi^j for zi in z, j in 0:P]) \ (sw .* d.y)
   r = p + 1

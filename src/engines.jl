@@ -250,16 +250,30 @@ function _foreachchunk(f, order)
   if nchunks <= 1
     f(order)
   else
-    @sync for chunk in Iterators.partition(order, cld(m, nchunks))
-      Threads.@spawn f(chunk)
-    end
+    _fetchall([Threads.@spawn f(chunk) for chunk in Iterators.partition(order, cld(m, nchunks))])
   end
   return nothing
 end
 
 # [f(p) for p in points] for an f that is expensive at each point, one task per point,
 # which run in parallel when Julia runs with several threads
-_pointwise(f, points) = fetch.([Threads.@spawn f(p) for p in points])
+_pointwise(f, points) = _fetchall([Threads.@spawn f(p) for p in points])
+
+# The results of the tasks, once all of them have finished. An error in a task is
+# thrown as itself, not wrapped in a TaskFailedException, so that its type does not
+# depend on whether the work ran in tasks.
+function _fetchall(tasks)
+  for t in tasks
+    try
+      wait(t)
+    catch
+    end
+  end
+  for t in tasks
+    istaskfailed(t) && throw(t.result)
+  end
+  return [fetch(t) for t in tasks]
+end
 
 # The first i with pred(i), or n + 1, for a predicate that is false and then true on
 # 1:n, starting from the answer for the previous point. With one bandwidth the

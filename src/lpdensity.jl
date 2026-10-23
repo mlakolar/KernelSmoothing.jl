@@ -149,13 +149,17 @@ function _lpdfit(d::SmoothingData, k, aux, x0, h, p, v; values::Bool = false)
   nuniq = max(gb - ga + 1, 0)
   q = p + 1
   s, t = zeros(2q + 1), zeros(q + 1)
+  count = 0
   for g in ga:gb
     tg = (u[g] - x0) / h
-    _powersums!(s, t, aux.P[g] * k(tg) / h / n, tg, aux.F[g])
+    kg = aux.P[g] * k(tg) / h / n
+    count += kg > 0
+    _powersums!(s, t, kg, tg, aux.F[g])
   end
+  npos = count   # distinct values with positive weight, assigned once for the closure
   function order(o)
-    C = LinearAlgebra.cholesky(LinearAlgebra.Symmetric([s[i + j + 1] for i in 0:o, j in 0:o]); check = false)
-    LinearAlgebra.issuccess(C) || return (est = NaN, se = NaN, vals = Float64[], aT = NaN, Atot = NaN)
+    C, ok = _gramfactor([s[i + j + 1] for i in 0:o, j in 0:o], npos)
+    ok || return (est = NaN, se = NaN, vals = Float64[], aT = NaN, Atot = NaN)
     β = C \ t[1:o+1]
     a = C \ [i == v ? 1.0 : 0.0 for i in 0:o]
     aT = LinearAlgebra.dot(a, t[1:o+1])
@@ -179,7 +183,7 @@ function _lpdfit(d::SmoothingData, k, aux, x0, h, p, v; values::Bool = false)
   fp, fq = order(p), order(q)
   r = (estimate = fp.est, se = fp.se, estimate_bc = fq.est, se_rbc = fq.se, nwin = nwin, nuniq = nuniq)
   values || return r
-  return (r..., ga = ga, gb = gb, p = fp, q = fq, s = s)
+  return (r..., ga = ga, gb = gb, p = fp, q = fq, s = s, npos = npos)
 end
 
 nobs(m::LocalPolynomialDensity) = nobs(m.data)
@@ -207,6 +211,8 @@ function StatsAPI.vcov(m::LocalPolynomialDensity; method::InferenceMethod = Conv
   dense = _pointwise(eachindex(m.points)) do j
     r = _lpdfit(d, m.kernel, aux, m.points[j], m.h[j], m.degree, v; values = true)
     f = bc ? r.q : r.p
+    # a fit that is not identified has no influence function
+    isnan(f.est) && return fill(NaN, U)
     val = zeros(U)
     val[1:r.ga-1] .= f.Atot / n - f.aT
     val[r.ga:r.gb] .= f.vals
@@ -278,6 +284,7 @@ _lpdmse(a, p, v, t) = a^(2p + 2 - 2v) * (t.B1 + a * t.B2)^2 + t.V / a^(2v - 1)
 # lpdensity's bw_ROT: the bandwidth that minimizes the asymptotic mean squared
 # error at each point when the data are normal
 function _lpdensity_rot(rule, d::SmoothingData, k, pts, p, v, minobs)
+  _check_spread(d, rule)
   nr = _lpdensity_nr(d, k, p, v)
   h = map(pts) do x0
     t = nr.terms(x0)
@@ -309,6 +316,7 @@ function _lpdensity_dpi(rule, d::SmoothingData, k, pts, p, v, minobs, compat = f
   rule.regularization == 1 && !rule.interior || throw(ArgumentError(
     "lpdensity's plug-in bandwidths have no regularization or interior option, got $rule"))
   k isa PolynomialKernel || throw(ArgumentError("lpdensity's bandwidths need a polynomial kernel, got $k"))
+  _check_spread(d, rule)
   imse = rule isa IMSEOptimal
   grid = imse && rule.grid isa Integer ? collect(range(d.x[1], d.x[end]; length = rule.grid)) : pts
   n = nobs(d)
@@ -323,8 +331,8 @@ function _lpdensity_dpi(rule, d::SmoothingData, k, pts, p, v, minobs, compat = f
   vfac = factorial(v)
   ts = _pointwise(zs) do z0
     f = _lpdfit(dz, k, aux, z0, h1, p, v; values = true)
-    C = LinearAlgebra.cholesky(LinearAlgebra.Symmetric([f.s[i + j + 1] for i in 0:p, j in 0:p]); check = false)
-    LinearAlgebra.issuccess(C) || return (B1 = NaN, B2 = NaN, V = NaN)
+    C, ok = _gramfactor([f.s[i + j + 1] for i in 0:p, j in 0:p], f.npos)
+    ok || return (B1 = NaN, B2 = NaN, V = NaN)
     c1 = vfac * (C \ f.s[p+2:2p+2])[v + 1]
     c2 = vfac * (C \ f.s[p+3:2p+3])[v + 1]
     B1 = _lpdcoef(dz, k, aux, z0, hp1, p + 2, p + 1) * c1
@@ -355,12 +363,15 @@ end
 function _lpdcoef(d::SmoothingData, k, aux, x0, h, o, j)
   u, U = d.values, nunique(d)
   s, t = zeros(2o + 1), zeros(o + 1)
+  npos = 0
   for g in _firsttrue(g -> u[g] - x0 >= -h, U):_firsttrue(g -> u[g] - x0 > h, U)-1
     tg = (u[g] - x0) / h
-    _powersums!(s, t, aux.P[g] * k(tg), tg, aux.F[g])
+    kg = aux.P[g] * k(tg)
+    npos += kg > 0
+    _powersums!(s, t, kg, tg, aux.F[g])
   end
-  C = LinearAlgebra.cholesky(LinearAlgebra.Symmetric([s[a + b + 1] for a in 0:o, b in 0:o]); check = false)
-  LinearAlgebra.issuccess(C) || return NaN
+  C, ok = _gramfactor([s[a + b + 1] for a in 0:o, b in 0:o], npos)
+  ok || return NaN
   return (C \ t)[j + 1] / h^j
 end
 

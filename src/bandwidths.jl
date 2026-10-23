@@ -45,16 +45,18 @@ standard deviation for the Gaussian kernel.
 function selectbandwidth end
 
 """
-    bandwidth(rule::BandwidthSelector, d::SmoothingData, k::AbstractKernel)
+    bandwidth(rule::BandwidthSelector, d::SmoothingData, k::AbstractKernel; kwargs...)
     bandwidth(s::BandwidthSelection)
     bandwidth(f)
 
-The bandwidth that `rule` chooses for the sample `d` and the kernel `k`, the
-bandwidth of a selection `s`, or the bandwidth of a fitted estimate `f`.
+The bandwidth that `rule` chooses for the sample `d` and the kernel `k`, with the
+keywords of [`selectbandwidth`](@ref) for the rule, such as `degree` for
+regression; the bandwidth of a selection `s`; or the bandwidth of a fitted
+estimate `f`.
 """
 bandwidth(s::BandwidthSelection) = s.h
-bandwidth(rule::BandwidthSelector, d::SmoothingData, k::AbstractKernel) =
-  bandwidth(selectbandwidth(rule, d, k))
+bandwidth(rule::BandwidthSelector, d::SmoothingData, k::AbstractKernel; kwargs...) =
+  bandwidth(selectbandwidth(rule, d, k; kwargs...))
 
 # a bandwidth given as a number, or chosen by a rule
 _selection(h::Real, d, k) = BandwidthSelection(h)
@@ -128,6 +130,7 @@ _robustscale(sd, s) = s > 0 ? min(sd, s) : sd
 
 _check_scale(σ, rule) = σ > 0 || throw(ArgumentError(
   "the data have no spread, so $rule cannot choose a bandwidth; pass a number instead"))
+_check_spread(d, rule) = _check_scale(d.x[end] - d.x[1], rule)
 
 function _mu2(k)
   μ2 = moment(k, 2)

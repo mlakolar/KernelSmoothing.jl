@@ -145,6 +145,8 @@ estimates the regression function or its derivative of order `derivative`.
 - `minobs` raises `h` and `b` at each point, where needed, to the distance of the
   `minobs`-th nearest observation, so that every window holds enough data;
   `minobs = 0` turns this off. The fit records where the floor was binding.
+  Estimates whose window holds fewer distinct values than coefficients, `p + 1`
+  for the fit and `p + 2` for its bias correction, are `NaN`.
 - `compat = true` gives the plug-in rules ([`MSEOptimal`](@ref),
   [`IMSEOptimal`](@ref) and [`CoverageOptimal`](@ref)) nprobust's pilot
   bandwidths instead of the adaptive ones, so that they agree with nprobust 1.0.0.
@@ -256,24 +258,17 @@ end
 # variances are ∑ (ℓᵢ ε̂ᵢ)² and ∑ (ℓᵢᵇᶜ ε̂ᵢᵇ)², and these products are also the
 # vectors whose inner products give the covariances between points.
 function _localsetup(d::SmoothingData, k::AbstractKernel, x0, h, b, p, ν)
-  xs, ys, n = d.x, d.y, nobs(d)
+  xs, ys = d.x, d.y
   q = p + 1
   # the observations with positive weight for the larger bandwidth, as in nprobust
-  hb = max(h, b)
-  lo, hi = support(k)
-  a = isfinite(lo) ? _firsttrue(i -> (xs[i] - x0) / hb >= lo, n) : 1
-  e = isfinite(hi) ? _firsttrue(i -> (xs[i] - x0) / hb > hi, n) - 1 : n
-  while a <= e && k((xs[a] - x0) / hb) == 0
-    a += 1
-  end
-  while e >= a && k((xs[e] - x0) / hb) == 0
-    e -= 1
-  end
+  r = _poswindow(d, k, x0, max(h, b))
+  a, e = first(r), last(r)
   e >= a || return (a = a, e = e, ok = false, nuniq = 0)
   # power sums: sh[j+1] = ∑ wk(u) u^j, th[j+1] = ∑ wk(u) u^j y, and the same in v
   sh, th = zeros(2p + 2), zeros(p + 1)
   sb, tb = zeros(2q + 1), zeros(q + 1)
   ah, eh = e + 1, a - 1   # the observations with positive weight for h
+  ab, eb = e + 1, a - 1   # and for b
   for i in a:e
     t = xs[i] - x0
     u, v = t / h, t / b
@@ -282,18 +277,57 @@ function _localsetup(d::SmoothingData, k::AbstractKernel, x0, h, b, p, ν)
     if kh > 0
       ah, eh = min(ah, i), i
     end
+    if kb > 0
+      ab, eb = min(ab, i), i
+    end
     _powersums!(sh, th, kh, u, ys[i])
     _powersums!(sb, tb, kb, v, ys[i])
   end
   nuniq = nunique(d, ah:eh)
-  Cp = LinearAlgebra.cholesky(LinearAlgebra.Symmetric([sh[i + j + 1] for i in 0:p, j in 0:p]); check = false)
-  Cq = LinearAlgebra.cholesky(LinearAlgebra.Symmetric([sb[i + j + 1] for i in 0:q, j in 0:q]); check = false)
-  LinearAlgebra.issuccess(Cp) && LinearAlgebra.issuccess(Cq) || return (a = a, e = e, ok = false, nuniq = nuniq)
+  Cp, okp = _gramfactor([sh[i + j + 1] for i in 0:p, j in 0:p], nuniq)
+  okp || return (a = a, e = e, ok = false, nuniq = nuniq)
+  # without the fit of order q, only the bias-corrected results are missing
+  Cq, okq = _gramfactor([sb[i + j + 1] for i in 0:q, j in 0:q], nunique(d, ab:eb))
   g = Cp \ [i == ν ? 1.0 : 0.0 for i in 0:p]
-  return (a = a, e = e, ok = true, nuniq = nuniq, Cp = Cp, βp = Cp \ th, γ = Cq \ tb, g = g,
-          c = Cq \ [i == p + 1 ? 1.0 : 0.0 for i in 0:q], ρ = (h / b)^(p + 1),
-          s = sum(g[i + 1] * sh[p + i + 2] for i in 0:p), scale = factorial(ν) / h^ν)
+  return (a = a, e = e, ok = true, nuniq = nuniq, Cp = Cp, βp = Cp \ th,
+          γ = okq ? Cq \ tb : fill(NaN, q + 1), g = g,
+          c = okq ? Cq \ [i == p + 1 ? 1.0 : 0.0 for i in 0:q] : fill(NaN, q + 1),
+          ρ = (h / b)^(p + 1), s = sum(g[i + 1] * sh[p + i + 2] for i in 0:p),
+          scale = factorial(ν) / h^ν)
 end
+
+# the observations with positive weight at x0 for a kernel that is nonnegative on its
+# support
+function _poswindow(d::SmoothingData, k::AbstractKernel, x0, h)
+  xs, n = d.x, nobs(d)
+  lo, hi = support(k)
+  a = isfinite(lo) ? _firsttrue(i -> (xs[i] - x0) / h >= lo, n) : 1
+  e = isfinite(hi) ? _firsttrue(i -> (xs[i] - x0) / h > hi, n) - 1 : n
+  while a <= e && k((xs[a] - x0) / h) == 0
+    a += 1
+  end
+  while e >= a && k((xs[e] - x0) / h) == 0
+    e -= 1
+  end
+  return a:e
+end
+
+# The Cholesky factorization of the Gram matrix G of a local polynomial fit, and
+# whether the fit is identified. With fewer distinct values of positive weight than
+# coefficients G is singular, although rounding can let its factorization succeed;
+# a pivot that is a tiny fraction of its diagonal entry then marks the powers that
+# are collinear. A matrix whose pivots are all above 1e-8 of their diagonal entries
+# cannot come from too few distinct values, so that their number, `distinct` (a
+# number, or a function that counts them), is only needed below that.
+function _gramfactor(G, distinct)
+  C = LinearAlgebra.cholesky(LinearAlgebra.Symmetric(G); check = false)
+  LinearAlgebra.issuccess(C) || return C, false
+  r = minimum(j -> C.factors[j, j]^2 / G[j, j], axes(G, 1))
+  return C, r > 1e-8 || (r > 1e-12 && _count(distinct) >= size(G, 1))
+end
+
+_count(n::Integer) = n
+_count(f) = f()
 
 # The estimates and standard errors at x0; with `vectors = true` also the vectors
 # scale ℓᵢ ε̂ᵢ and scale ℓᵢᵇᶜ ε̂ᵢᵇ over the window
@@ -349,12 +383,16 @@ _residuals(::NNVariance, r, l, εh, εb, kh, u, Cp, n, p) = (r[l], r[l])
 
 function _residuals(vce::HCVariance, r, l, εh, εb, kh, u, Cp, n, p)
   vce.type == 0 && return (εh, εb)
-  vce.type == 1 && return (εh * sqrt(n / (n - p - 1)), εb * sqrt(n / (n - p - 2)))
+  vce.type == 1 && return (εh * _dofscale(n, p + 1), εb * _dofscale(n, p + 2))
   x = [u^j for j in 0:p]
   hii = kh * LinearAlgebra.dot(x, Cp \ x)   # the leverage in the fit of order p
   f = vce.type == 2 ? 1 / sqrt(1 - hii) : 1 / (1 - hii)
   return (εh * f, εb * f)
 end
+
+# √(n / (n - k)) for n observations and k coefficients, or NaN without residual
+# degrees of freedom
+_dofscale(n, k) = n > k ? sqrt(n / (n - k)) : NaN
 
 _nnvariances(d::SmoothingData, a, e, J) = _nnresiduals(d, a, e, J) .^ 2
 
@@ -451,9 +489,11 @@ bandwidth, and the same floor on the windows. The sums are computed by
 points.
 """
 function StatsAPI.predict(m::LocalPolynomialRegression, x::AbstractVector{<:Real})
-  h0 = m.selection.h
-  h0 isa Float64 || throw(ArgumentError(
+  hs = m.selection.h
+  # a pointwise rule at a single point also selects one bandwidth
+  hs isa Float64 || allequal(hs) || throw(ArgumentError(
     "predict needs a fit with one bandwidth for all points; fit again at the new points"))
+  h0 = first(hs)
   pts = _checkpoints(x)
   h, b = fill(h0, length(pts)), fill(h0, length(pts))
   _floor!(h, b, m.data, pts, m.minobs)
@@ -466,8 +506,8 @@ function _estimates(d, k, h, points, p, ν)
   T = kernelsums(d, k, h, points; kmax = p, z = d.y)
   out = Vector{Float64}(undef, length(points))
   for j in eachindex(points)
-    C = LinearAlgebra.cholesky(LinearAlgebra.Symmetric([S[i + l + 1, j] for i in 0:p, l in 0:p]); check = false)
-    out[j] = LinearAlgebra.issuccess(C) ? factorial(ν) * (C \ T[:, j])[ν + 1] / h[j]^ν : NaN
+    C, ok = _gramfactor([S[i + l + 1, j] for i in 0:p, l in 0:p], () -> nunique(d, _poswindow(d, k, points[j], h[j])))
+    out[j] = ok ? factorial(ν) * (C \ T[:, j])[ν + 1] / h[j]^ν : NaN
   end
   return out
 end
@@ -526,11 +566,13 @@ polynomial regression of order `p` and derivative `ν`,
 
 the bandwidth that minimizes the asymptotic integrated mean squared error when the
 variance `σ̃²` and the mean squared derivative `D` of order `p + 1` come from a
-global polynomial fit of order `p + 3`. The constant `C_{ν,p}(k)` depends on the
-equivalent kernel, and `n` is the effective sample size. The global fit uses the
-standardized covariate, so that the rule is equivariant under changes of location
-and scale. When `p - ν` is even, the rule of order `p + 1` is used, which has the
-same rate. The bandwidth is capped at the range of the data.
+global polynomial fit of order `p + 3`, or of lower order when `x` has fewer than
+`p + 4` distinct values. The constant `C_{ν,p}(k)` depends on the equivalent
+kernel, and `n` is the effective sample size. The global fit uses the standardized
+covariate, so that the rule is equivariant under changes of location and scale.
+When `p - ν` is even, the rule of order `p + 1` is used, which has the same rate.
+The bandwidth is capped at the range of the data, which it reaches when the
+derivative of the global fit vanishes.
 """
 struct RuleOfThumb <: BandwidthSelector end
 
@@ -566,9 +608,11 @@ function _equivalentkernel(k, p, ν)
 end
 
 # A weighted least-squares fit of a polynomial of order P in the standardized
-# covariate; returns the residual variance and the weighted mean of the squared
-# derivative of order r at the observations.
+# covariate, or of the highest order that the distinct values identify; returns the
+# residual variance and the weighted mean of the squared derivative of order r at
+# the observations.
 function _globalpilot(d::SmoothingData, P, r)
+  P = min(P, nunique(d) - 1)
   x̄, s = _mean(d), sqrt(_variance(d))
   z = (d.x .- x̄) ./ s
   sw = d.w === nothing ? ones(nobs(d)) : sqrt.(d.w)
