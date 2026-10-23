@@ -248,4 +248,27 @@ KernelSmoothing.support(::FailingKernel) = (-1.0, 1.0)
   end
 end
 
+@testset "FastSums with bandwidths far above the spread of the data" begin
+  # one block, a window wide, holds all the data; its power sums are taken about the
+  # midpoint of the observations, not of the block, so that they do not cancel
+  x = [mod(0.6180339887498949 * i, 1) for i in 1:1000]
+  d = SmoothingData(x)
+  k = EpanechnikovKernel()
+  pts = collect(range(0, 1; length = 11))
+  for h in (1e3, 1e5, 1e7)
+    F = kernelsums(d, k, h, pts; kmax = 2, engine = FastSums())
+    D = kernelsums(d, k, h, pts; kmax = 2, engine = DirectSums())
+    for r in 1:3   # relative to the sum of the absolute terms, since the sums cancel
+      scale = [sum(abs(k((xi - p) / h) * ((xi - p) / h)^(r - 1)) for xi in x) for p in pts]
+      @test all(abs.(F[r, :] .- D[r, :]) .<= 1e-13 .* scale)
+    end
+  end
+  @test !any(isnan, kernelsums(d, k, 1e308, pts; kmax = 2))
+  # the slope of a linear function, from the sums of the chosen engine
+  m = fit(LocalPolynomialRegression, x, 2 .+ 3 .* x; bandwidth = 1e7, derivative = 1, points = [0.5])
+  @test predict(m, collect(range(0, 1; length = 201)))[101] ≈ 3 rtol = 1e-12
+  # at a tie the sums with u and u² vanish exactly
+  @test kernelsums(SmoothingData(fill(-3.0, 50)), k, 0.1, [-3.0]; kmax = 2, engine = FastSums())[2:3] == [0.0, 0.0]
+end
+
 end
