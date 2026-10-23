@@ -62,6 +62,16 @@ psi(x, f, g, r) = sum(f((xi - xj) / g) for xi in x, xj in x) / (length(x) * (len
   @test bandwidth(fit(KDE, Q)) == bandwidth(SheatherJones(), d, EpanechnikovKernel())
 end
 
+@testset "small positive definite solves" begin
+  for p in 0:3
+    A = [1.0 / (a + b - 1) for a in 1:p+1, b in 1:p+1] + 0.1 * LinearAlgebra.I   # a shifted Hilbert matrix
+    e = zeros(p + 1)
+    @test KernelSmoothing._solvefirst!(e, copy(A))
+    @test e ≈ A \ [j == 1 ? 1.0 : 0.0 for j in 1:p+1] rtol = 1e-12
+  end
+  @test !KernelSmoothing._solvefirst!(zeros(2), [1.0 2.0; 2.0 1.0])
+end
+
 @testset "binned sums for Sheather and Jones" begin
   # the FFT against the discrete Fourier transform, and the lagged products of the bins
   for N in (1, 2, 16, 128)

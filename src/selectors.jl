@@ -415,17 +415,57 @@ function _cvcriterion(d, k, h, p, ws)
   S = kernelsums(d, k, h; kmax = 2p, workspace = ws)
   T = kernelsums(d, k, h; kmax = p, z = d.y, workspace = ws)
   k0 = k(0.0)
+  A, e = zeros(p + 1, p + 1), zeros(p + 1)
   s = 0.0
   for i in 1:nobs(d)
-    C = LinearAlgebra.cholesky(LinearAlgebra.Symmetric([S[a + b + 1, i] for a in 0:p, b in 0:p]);
-                               check = false)
-    LinearAlgebra.issuccess(C) || return Inf
-    e = C \ [j == 0 ? 1.0 : 0.0 for j in 0:p]
-    fit = LinearAlgebra.dot(e, view(T, :, i))
+    for b in 0:p, a in 0:p
+      A[a + 1, b + 1] = S[a + b + 1, i]
+    end
+    _solvefirst!(e, A) || return Inf
+    fit = 0.0
+    for j in 1:p+1
+      fit += e[j] * T[j, i]
+    end
     wi = _weight(d.w, i)
     lii = wi * k0 * e[1]
     lii < 1 - 1e-10 || return Inf
     s += wi * (d.y[i] - (fit - lii * d.y[i]) / (1 - lii))^2
   end
   return s / d.sumw
+end
+
+# e = A⁻¹ e₁ for a symmetric positive definite A, by a Cholesky factorization in the
+# lower triangle of A, without allocating; false if a pivot is not positive
+function _solvefirst!(e, A)
+  n = size(A, 1)
+  for j in 1:n
+    t = A[j, j]
+    for l in 1:j-1
+      t -= A[j, l]^2
+    end
+    t > 0 || return false
+    A[j, j] = sqrt(t)
+    for i in j+1:n
+      u = A[i, j]
+      for l in 1:j-1
+        u -= A[i, l] * A[j, l]
+      end
+      A[i, j] = u / A[j, j]
+    end
+  end
+  for j in 1:n   # L y = e₁
+    u = j == 1 ? 1.0 : 0.0
+    for l in 1:j-1
+      u -= A[j, l] * e[l]
+    end
+    e[j] = u / A[j, j]
+  end
+  for j in n:-1:1   # Lᵀ e = y
+    u = e[j]
+    for l in j+1:n
+      u -= A[l, j] * e[l]
+    end
+    e[j] = u / A[j, j]
+  end
+  return true
 end
