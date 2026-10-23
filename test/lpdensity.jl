@@ -27,13 +27,13 @@ const SELECTION = Dict("mse-rot" => NormalReference(), "mse-dpi" => MSEOptimal()
     # R integrates the kernel constants numerically, to about 1e-7 for the triangular kernel,
     # which the minimizations of the plug-in rules can amplify to 1e-5
     tol = selected ? (c.kernel == "triangular" ? 1e-4 : 1e-6) : 1e-10
-    @test m.h ≈ c.bw rtol = tol
+    @test all(isapprox.(m.h, c.bw; rtol = tol))
     @test m.nwindow == c.nh
     @test m.nunique == c.nhu
-    @test m.estimate ≈ c.f_p rtol = tol
-    @test m.estimate_bc ≈ c.f_q rtol = tol
-    @test m.se ≈ c.se_p rtol = tol
-    @test m.se_rbc ≈ c.se_q rtol = tol
+    @test all(isapprox.(m.estimate, c.f_p; rtol = tol))
+    @test all(isapprox.(m.estimate_bc, c.f_q; rtol = tol))
+    @test all(isapprox.(m.se, c.se_p; rtol = tol))
+    @test all(isapprox.(m.se_rbc, c.se_q; rtol = tol))
     @test vcov(m) ≈ c.cov_p rtol = tol
   end
 end

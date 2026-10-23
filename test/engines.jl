@@ -280,7 +280,8 @@ end
   for kmax in (15, 16, 40)
     @test kernelsums(d, k, 0.8, pts; kmax, engine = WindowSums()) == kernelsums(d, k, 0.8, pts; kmax, engine = DirectSums())
   end
-  @test kernelsums(d, k, 0.8, pts; kmax = 40, engine = FastSums()) ≈ kernelsums(d, k, 0.8, pts; kmax = 40, engine = DirectSums())
+  F40, D40 = kernelsums(d, k, 0.8, pts; kmax = 40, engine = FastSums()), kernelsums(d, k, 0.8, pts; kmax = 40, engine = DirectSums())
+  @test all(isapprox.(F40, D40; rtol = 1e-8, atol = 1e-10 * maximum(abs, D40)))
   @test (@allocated kernelsums(d, k, 0.8, pts; kmax = 40, engine = WindowSums())) < 10^6
   # an argument that overflows to ±Inf, where the kernel vanishes, adds nothing
   @test kernelsums(SmoothingData([0.0, 1e300]), k, 1e-10, [0.0, 1.0]; kmax = 2, engine = DirectSums()) ==
