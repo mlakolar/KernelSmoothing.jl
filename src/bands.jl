@@ -137,12 +137,19 @@ function _supt(C, se, level, draws, rng)
   E = LinearAlgebra.eigen(LinearAlgebra.Symmetric(R))
   L = E.vectors .* sqrt.(max.(E.values, 0.0))'   # R = L L'
   G = length(keep)
-  z, ξ = zeros(G), zeros(G)
+  # in blocks of draws, with the normal variates of a block drawn at once and one
+  # matrix product each
+  B = min(draws, max(1, 2^16 ÷ G))
+  Ξ, Z = Matrix{Float64}(undef, G, B), Matrix{Float64}(undef, G, B)
   maxima = Vector{Float64}(undef, draws)
-  for t in 1:draws
-    Random.randn!(rng, ξ)
-    LinearAlgebra.mul!(z, L, ξ)
-    maxima[t] = maximum(abs, z)
+  for t0 in 1:B:draws
+    nb = min(B, draws - t0 + 1)
+    nb < B && ((Ξ, Z) = (Matrix{Float64}(undef, G, nb), Matrix{Float64}(undef, G, nb)))
+    Random.randn!(rng, Ξ)
+    LinearAlgebra.mul!(Z, L, Ξ)
+    for t in 1:nb
+      maxima[t0 + t - 1] = maximum(abs, view(Z, :, t))
+    end
   end
   zb = Distributions.quantile(Distributions.Normal(), 1 - (1 - level) / (2G))
   return clamp(Distributions.quantile(maxima, level), zp, zb)
