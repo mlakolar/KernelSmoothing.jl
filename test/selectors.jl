@@ -201,6 +201,10 @@ end
   for k in (EpanechnikovKernel(), GaussianKernel())
     @test bandwidth(LSCV(), SmoothingData([Z; 1e7]), k) ≈ bandwidth(LSCV(), SmoothingData(Z), k) rtol = 0.05
   end
+  # binned Gaussian sums: a grid over the range of the outlier would need more than
+  # 2^20 points, so that the data are binned for each bandwidth, run by run
+  @test bandwidth(LSCV(exact = 0), SmoothingData([Z; 1e7]), GaussianKernel()) ≈
+        bandwidth(LSCV(exact = 0), SmoothingData(Z), GaussianKernel()) rtol = 0.05
 end
 
 @testset "Sheather and Jones with outliers and heavy tails" begin
