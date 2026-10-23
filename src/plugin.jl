@@ -232,7 +232,7 @@ function _msedpi(d, k, c, p, ν, regul, interior, vce, minobs, pilots = nothing)
   bwmax = max(abs(c - xs[1]), abs(c - xs[end]))
   # the preliminary bandwidth for the variances: a normal-reference rule with the
   # unweighted spread of x, as in nprobust
-  sd = N > 1 ? sqrt(sum(abs2, xs .- sum(xs) / N) / (N - 1)) : 0.0
+  sd = N > 1 ? sqrt(sum(abs2, xs .- _sortedmean(xs)) / (N - 1)) : 0.0
   iqr = _unweightedquantile(xs, 0.75) - _unweightedquantile(xs, 0.25)
   cbw = min(_nrconstant(k) * min(sd, iqr / 1.349) * N^(-1 / 5), bwmax)
   bwmin = minobs > 0 ? knn_distance(d, c, min(minobs, N)) : 0.0
@@ -364,7 +364,8 @@ function _coefvar(d, k, f, g, vce)
         ε2 * _dofscale(n, o + 1)^2
       else
         hii = kw * evalpoly(u, lev)
-        vce.type == 2 ? ε2 / (1 - hii) : ε2 / (1 - hii)^2
+        # no residual to estimate the variance from at a leverage of one
+        1 - hii > sqrt(eps()) ? (vce.type == 2 ? ε2 / (1 - hii) : ε2 / (1 - hii)^2) : NaN
       end
     end
     v += (kw * evalpoly(u, g))^2 * s2

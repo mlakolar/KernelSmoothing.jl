@@ -233,4 +233,22 @@ end
   @test _goldenmin(h -> (h - 0.3)^2, 0.0, 1.0) ≈ 0.3 rtol = 1e-5
 end
 
+@testset "Sheather and Jones at extreme scales and on clustered data" begin
+  # the equations are solved for the standardized data, so that neither tiny nor huge
+  # scales underflow or overflow
+  k = GaussianKernel()
+  for method in (:ste, :dpi), exact in (100, 1000)
+    rule = SheatherJones(; method, exact)
+    h = bandwidth(rule, SmoothingData(Z), k)
+    for s in (1e-44, 1e-150, 1e150)
+      @test bandwidth(rule, SmoothingData(s .* Z), k) ≈ s * h rtol = 1e-7
+    end
+  end
+  # the root of tight clusters lies far below the pilots, where the grid of the binned
+  # estimates is refined
+  x = [0.01 .* Z; 10 .+ 0.01 .* reverse(Z)]
+  @test bandwidth(SheatherJones(), SmoothingData(x), k) ≈
+        bandwidth(SheatherJones(; exact = 10^4), SmoothingData(x), k) rtol = 1e-5
+end
+
 end

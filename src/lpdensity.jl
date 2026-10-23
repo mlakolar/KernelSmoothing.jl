@@ -256,7 +256,7 @@ end
 function _lpdensity_nr(d::SmoothingData, k, p, v)
   k isa PolynomialKernel || throw(ArgumentError("lpdensity's bandwidths need a polynomial kernel, got $k"))
   n = nobs(d)
-  x̄ = sum(d.x) / n
+  x̄ = _sortedmean(d.x)
   sdx = sqrt(sum(abs2, d.x .- x̄) / (n - 1))
   z = (d.x .- x̄) ./ sdx
   W = d.sumw
@@ -324,7 +324,7 @@ function _lpdensity_dpi(rule, d::SmoothingData, k, pts, p, v, minobs, compat = f
   imse = rule isa IMSEOptimal
   grid = imse && rule.grid isa Integer ? collect(range(d.x[1], d.x[end]; length = rule.grid)) : pts
   n = nobs(d)
-  x̄ = sum(d.x) / n
+  x̄ = _sortedmean(d.x)
   sdx = sqrt(sum(abs2, d.x .- x̄) / (n - 1))
   dz = SmoothingData((d.x .- x̄) ./ sdx; weights = d.w)
   zs = (grid .- x̄) ./ sdx

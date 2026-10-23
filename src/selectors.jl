@@ -59,17 +59,26 @@ function selectbandwidth(rule::SheatherJones, d::SmoothingData, k::AbstractKerne
   μ2 = _mu2centred(k)
   c1 = roughness(k) / (μ2^2 * n)
   exact = nobs(d) <= rule.exact
-  # normal-reference pilot bandwidths for ψ₄ and ψ₆ (Sheather and Jones 1991)
-  a, b = 1.24 * σ * n^(-1 / 7), 1.23 * σ * n^(-1 / 9)
-  # the details have one shape in every case, so that the selection is inferable
+  # The equations are solved in units of σ, for t = h / σ, with ψ̃ᵣ(t) = σ^(r+1) ψ̂ᵣ(σ t),
+  # the estimates for the standardized data, so that no power of a bandwidth
+  # underflows or overflows at extreme scales of the data. The normal-reference pilot
+  # bandwidths for ψ₄ and ψ₆ (Sheather and Jones 1991) in these units:
+  a, b = 1.24 * n^(-1 / 7), 1.23 * n^(-1 / 9)
+  # the details, in the units of the data, have one shape in every case, so that the
+  # selection is inferable
   details(; pilot = NaN, alpha2 = NaN, psi4 = NaN, psi6 = NaN, iterations = 0, fallback = false) =
-    (scale = σ, pilots = (a, b), pilot = Float64(pilot), alpha2 = Float64(alpha2), psi4 = Float64(psi4),
-     psi6 = Float64(psi6), exact = exact, iterations = iterations, fallback = fallback)
-  # the root finding evaluates ψ₄ at bandwidths down to about a / 5, and rarely above
-  # a few times the larger pilot; the evaluator is one of two closures, so that the
-  # type of its values is asserted for inference
-  evaluator = _psievaluator(d, min(a, b) / 500, exact, 4 * max(a, b))
-  ψ(r, g) = evaluator(r, g)::Float64
+    (scale = σ, pilots = (σ * a, σ * b), pilot = σ * Float64(pilot), alpha2 = Float64(alpha2) * σ^(2 / 7),
+     psi4 = Float64(psi4) / σ^5, psi6 = Float64(psi6) / σ^7, exact = exact, iterations = iterations,
+     fallback = fallback)
+  # ψ̃ᵣ(t) from data binned with at least m grid points per pilot bandwidth, from a
+  # grid with 500 at the smaller pilot; the root finding evaluates ψ₄ down to about
+  # a / 5, and rarely above a few times the larger pilot. The evaluator is one of two
+  # closures, so that the type of its values is asserted for inference. (Local
+  # functions with default arguments would be boxed.)
+  Δ = σ * min(a, b) / 500
+  evaluator = _psievaluator(d, Δ, exact, σ * 4 * max(a, b))
+  ψm(r, t, m) = evaluator(r, σ * t, σ, m)::Float64
+  ψ(r, t) = ψm(r, t, 100)
   TD = -ψ(6, b)
   TD > 0 || return _sparse(rule, d, k, "the estimate of ψ₆ is not negative", details(psi6 = -TD, fallback = true))
   if rule.method == :dpi
@@ -77,16 +86,18 @@ function selectbandwidth(rule::SheatherJones, d::SmoothingData, k::AbstractKerne
     ψ4 = ψ(4, g)
     ψ4 > 0 || return _sparse(rule, d, k, "the estimate of ψ₄ is not positive",
                              details(pilot = g, psi4 = ψ4, psi6 = -TD, fallback = true))
-    return BandwidthSelection((c1 / ψ4)^(1 / 5), rule, details(pilot = g, psi4 = ψ4, psi6 = -TD))
+    return BandwidthSelection(σ * (c1 / ψ4)^(1 / 5), rule, details(pilot = g, psi4 = ψ4, psi6 = -TD))
   end
   SD = ψ(4, a)
   SD > 0 || return _sparse(rule, d, k, "the estimate of ψ₄ is not positive",
                            details(psi4 = SD, psi6 = -TD, fallback = true))
   # g(h) = α₂ h^(5/7) balances the bias and variance of ψ̂₄ at the optimal h
   α2 = (2 * 3 * INV_SQRT_2PI * μ2^2 / roughness(k))^(1 / 7) * (SD / TD)^(1 / 7)
-  hmax = (243 * roughness(k) / (35 * μ2^2 * n))^(1 / 5) * σ   # Terrell's oversmoothed bandwidth
+  hmax = (243 * roughness(k) / (35 * μ2^2 * n))^(1 / 5)   # Terrell's oversmoothed bandwidth
   lower, upper = 0.1 * hmax, hmax
-  f(h) = (c1 / max(ψ(4, α2 * h^(5 / 7)), floatmin()))^(1 / 5) - h
+  # the bracket needs only the signs, which a coarser grid gives
+  fm(h, m) = (c1 / max(ψm(4, α2 * h^(5 / 7), m), floatmin()))^(1 / 5) - h
+  f(h) = fm(h, 50)
   tries = 0
   while f(lower) * f(upper) > 0   # widen the bracket, as R's bw.SJ does
     tries < 100 || return _sparse(rule, d, k, "its equation has no solution",
@@ -96,9 +107,23 @@ function selectbandwidth(rule::SheatherJones, d::SmoothingData, k::AbstractKerne
   end
   # with binned data, ψ̂₄ jitters slightly as the grid changes with g, so the
   # bracket stops earlier
-  h, iterations = _findroot(f, lower, upper; rtol = exact ? 1e-10 : 1e-8)
-  g = α2 * h^(5 / 7)
-  return BandwidthSelection(h, rule, details(; pilot = g, alpha2 = α2, psi4 = ψ(4, g), psi6 = -TD, iterations))
+  t, iterations = _findroot(f, lower, upper; rtol = exact ? 1e-10 : 1e-8)
+  # Clustered or discrete data can put the pilot bandwidth of the root far below the
+  # pilots; where the grid has fewer than 100 points per pilot bandwidth there, the
+  # root is solved again near it on a grid with at least 250.
+  if !exact && σ * α2 * t^(5 / 7) < 100Δ
+    lo, hi = t, t
+    for _ in 1:10
+      lo, hi = lo / 1.02, hi * 1.02
+      if fm(lo, 250) * fm(hi, 250) <= 0
+        t, more = _findroot(h -> fm(h, 250), lo, hi; rtol = 1e-8)
+        iterations += more
+        break
+      end
+    end
+  end
+  g = α2 * t^(5 / 7)
+  return BandwidthSelection(σ * t, rule, details(; pilot = g, alpha2 = α2, psi4 = ψ(4, g), psi6 = -TD, iterations))
 end
 
 # For a sample too sparse for the estimates of Sheather and Jones: the normal-reference
@@ -169,21 +194,29 @@ function _pairsum(p::_PairSums, k, g, cutoff)
   return s
 end
 
-# ψ̂ᵣ(g) with the Gaussian kernel, exactly or from data binned for this g; φ⁽ʳ⁾(u) is
-# below 1e-24 for |u| > 12 and r ≤ 6
-function _psi(d::SmoothingData, r, g, exact::Bool)
+# s^(r+1) ψ̂ᵣ(g) with the Gaussian kernel, exactly or from data binned for this g, for
+# a unit s of the bandwidths; φ⁽ʳ⁾(u) is below 1e-24 for |u| > 12 and r ≤ 6
+function _psi(d::SmoothingData, r, g, exact::Bool, s = 1.0)
   p = _PairSums(d, g, exact)
-  return _pairsum(p, GaussianDerivativeKernel(1.0, r), g, 12.0) / (p.norm * g^(r + 1))
+  return _pairsum(p, GaussianDerivativeKernel(1.0, r), g, 12.0) / (p.norm * (g / s)^(r + 1))
 end
 
-# (r, g) -> ψ̂ᵣ(g) for Sheather and Jones: exact double sums, or the data binned once
-# on grids of spacing Δ with the lagged products of the bin weights, which makes each
-# evaluation cost O(g / Δ). The binning leaves out pairs farther apart than 12 gmax,
-# and a g above gmax bins the data again.
+# (r, g, s, m) -> s^(r+1) ψ̂ᵣ(g) for Sheather and Jones: exact double sums, or the
+# data binned once on a grid of spacing Δ with the lagged products of the bin
+# weights, which makes each evaluation cost O(g / Δ). The binning leaves out pairs
+# farther apart than 12 gmax. A g above gmax, or below m Δ, where the grid is too
+# coarse for the accuracy wanted, takes another grid, of spacing g / 500, which is
+# kept for the following evaluations while it is fine enough and reaches far enough.
 function _psievaluator(d::SmoothingData, Δ, exact::Bool, gmax)
-  exact && return (r, g) -> _psi(d, r, g, true)
+  exact && return (r, g, s, m) -> _psi(d, r, g, true, s)
   p = _LaggedBins(d, Δ, 12gmax)
-  return (r, g) -> 12g <= p.gap ? _psi(p, r, g) : _psi(_LaggedBins(d, g / 100, 12g), r, g)
+  other = Ref(p)
+  fits(q, g, m) = 12g <= q.gap && g >= m * q.Δ
+  return function (r, g, s, m)
+    fits(p, g, m) && return _psi(p, r, g, s)
+    fits(other[], g, m) || (other[] = _LaggedBins(d, g / 500, 48g))
+    return _psi(other[], r, g, s)
+  end
 end
 
 # The weights of linearly binned data on a grid of spacing Δ and their lagged
@@ -247,7 +280,7 @@ function _binlags(x, w, r, Δ)
   return _lagproducts(b)
 end
 
-_psi(p::_LaggedBins, r, g) = _lagsum(p, GaussianDerivativeKernel(1.0, r), g, 12.0) / (p.norm * g^(r + 1))
+_psi(p::_LaggedBins, r, g, s = 1.0) = _lagsum(p, GaussianDerivativeKernel(1.0, r), g, 12.0) / (p.norm * (g / s)^(r + 1))
 
 # ∑ᵢ ∑ⱼ wᵢ wⱼ K((xⱼ - xᵢ) / g), the diagonal included, for a symmetric K that is
 # negligible beyond `cutoff`
