@@ -12,6 +12,7 @@ tests = [
   "kdeinference",
   "bands",
   "honest",
+  "lpdensity",
   "aqua"
 ]
 
