@@ -46,7 +46,8 @@ export
   VarianceEstimator, NNVariance, HCVariance, ClusterVariance,
   InferenceMethod, Conventional, RobustBiasCorrected, Honest, FLCIOptimal, worstcasebias,
   RegressionDiscontinuity, RDOptimal, RDHonestOptimal, DensityDiscontinuity, RDDensityOptimal,
-  coef, confint, coeftable, predict, fitted, residuals, vcov, confband
+  coef, confint, coeftable, predict, fitted, residuals, vcov, confband,
+  localpolynomial, smoothermatrix
 
 include("polynomials.jl")
 include("kernels.jl")

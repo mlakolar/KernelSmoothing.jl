@@ -93,6 +93,22 @@ The default bandwidths follow nprobust: the plug-in bandwidth
 pilot bandwidths anchored on cross-validation; see
 [Bandwidth selection](@ref bandwidths-page).
 
+## Local polynomial smoothing
+
+For smoothing many curves, or for building other estimators on local fits,
+[`localpolynomial`](@ref) gives the estimates of the local polynomial fits at a set
+of points with a given bandwidth, without the floors on the windows and without
+standard errors, from [`kernelsums`](@ref) for all points at once.
+[`smoothermatrix`](@ref) gives their weights: each estimate is a weighted sum of
+the responses, `L * y`, with columns in the input order of the observations, so
+that linear functionals of the fit, hat matrices and their traces follow directly.
+
+```julia
+e = localpolynomial(t, y, grid; bandwidth = 0.1)                 # a smoothed curve on a grid
+L = smoothermatrix(t, t; bandwidth = 0.1)                        # the hat matrix of the observations
+gcv = length(y) * sum(abs2, y - L * y) / (length(y) - sum(LinearAlgebra.diag(L)))^2
+```
+
 ```@autodocs
 Modules = [KernelSmoothing]
 Pages = ["locpoly.jl"]
