@@ -87,6 +87,7 @@ end
   @test coef(m) == m.estimate && stderror(m; method = RobustBiasCorrected()) == m.se_rbc
   @test nobs(m) == 500 && bandwidth(m) == m.h
   @test occursin("robust bias-corrected", sprint(show, MIME("text/plain"), m))
+  @test occursin("IMSEOptimal(), pilots anchored on Sheather–Jones", sprint(show, MIME("text/plain"), fit(PointwiseDensity, X)))
   @test occursin("PointwiseDensity", sprint(show, m))
   # intervals for a density estimate with its own bandwidth
   f = fit(KDE, X; bandwidth = 0.3)

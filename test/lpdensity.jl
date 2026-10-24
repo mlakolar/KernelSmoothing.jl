@@ -110,6 +110,9 @@ end
   @test coef(m) == m.estimate && stderror(m; method = RobustBiasCorrected()) == m.se_rbc
   @test nobs(m) == 500 && bandwidth(m) == m.h
   @test occursin("Local polynomial density", sprint(show, MIME("text/plain"), m))
+  @test occursin("MSEOptimal(), robust scale, pilots over the quantiles", sprint(show, MIME("text/plain"), m))
+  @test occursin("lpdensity compatibility", sprint(show, MIME("text/plain"), fit(LocalPolynomialDensity, XN; compat = true)))
+  @test occursin("NormalReference(), robust scale", sprint(show, MIME("text/plain"), fit(LocalPolynomialDensity, XN; bandwidth = NormalReference())))
   @test occursin("LocalPolynomialDensity", sprint(show, m))
   @test_throws ArgumentError fit(LocalPolynomialDensity, XN; degree = 1, derivative = 1)
   @test_throws ArgumentError fit(LocalPolynomialDensity, XN; kernel = GaussianKernel(), bandwidth = 0.5)

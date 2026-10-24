@@ -610,9 +610,11 @@ end
 
 function Base.show(io::IO, ::MIME"text/plain", m::LocalPolynomialRegression)
   println(io, "Local polynomial regression of degree ", m.degree,
-          m.derivative == 0 ? "" : ", derivative $(m.derivative)")
+          m.derivative == 0 ? "" : ", derivative $(m.derivative)", m.compat ? " (nprobust compatibility)" : "")
   println(io, "  kernel: ", m.kernel, ", variance: ", m.vce, ", ", nobs(m), " observations")
-  m.selection.rule === nothing || println(io, "  bandwidth: ", m.selection.rule)
+  rule = m.selection.rule
+  rule === nothing || println(io, "  bandwidth: ", rule, !(rule isa Union{MSEOptimal,IMSEOptimal,CoverageOptimal}) ? "" :
+                              m.compat ? ", nprobust's pilots" : ", pilots anchored on cross-validation")
   any(m.floored) && println(io, "  the floor of ", m.minobs, " observations raised the bandwidth at ",
                             count(m.floored), " of ", length(m.points), " points")
   _showtable(io, m)

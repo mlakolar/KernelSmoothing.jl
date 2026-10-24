@@ -11,6 +11,11 @@ const XS = round.(7 .* sin.(1:500) .+ cos.(3 .* (1:500)); digits = 1)   # many t
 # heavy tails: the interquartile range is the smaller scale
 const XT = [tan(π * (mod(0.618034i, 1.0) - 0.5)) for i in 1:1000]
 
+# a rule of the user, without a constructor of no arguments
+struct OwnRule <: BandwidthSelector
+  h::Float64
+end
+
 @testset "weighted quantiles and standard deviation" begin
   for x in (XR, XS, XT, [3.0], [1.0, 2.0], [2.0, 2.0, 2.0, 5.0])
     d = SmoothingData(x)
@@ -48,7 +53,7 @@ end
   s = selectbandwidth(NormalReference(), SmoothingData(XT), EpanechnikovKernel())
   @test s.details.scale == s.details.iqr / 1.349 < s.details.sd   # heavy tails
   @test s.rule == NormalReference() && bandwidth(s) == s.h
-  @test sprint(show, s) == "BandwidthSelection($(s.h), NormalReference(robust = true))"
+  @test sprint(show, s) == "BandwidthSelection($(s.h), NormalReference())"
   # weighted samples use the effective sample size
   w = 1.0 .+ mod.(1:2000, 3)
   dw = SmoothingData(XR; weights = w)
@@ -99,6 +104,29 @@ end
   @test abs(mean(fit(KDE, XR .+ 1e10)) - (1e10 + mean(xs))) <= 4eps(1e10)
   @test _std(SmoothingData(XR; weights = 1:2000)) ≈
         _std(SmoothingData(XR .+ 1e10; weights = 1:2000)) rtol = 1e-6
+end
+
+@testset "display of the rules and the exports" begin
+  # a rule prints as its constructor, with the keywords that differ from the defaults
+  for r in (MSEOptimal(), IMSEOptimal(), IMSEOptimal(grid = :points), IMSEOptimal(grid = 12, regularization = 0),
+            MSEOptimal(interior = true), CoverageOptimal(), CoverageOptimal(IMSEOptimal(); convention = :nprobust),
+            CoverageOptimal(convention = :interior), CrossValidation(gridsize = 20), LSCV(exact = 0),
+            SheatherJones(method = :dpi), NormalReference(robust = false), SilvermanRule(), RuleOfThumb(),
+            FLCIOptimal(40), FLCIOptimal(:rot; level = 0.9), Honest(40), Honest(:rot; biascorrected = true))
+    @test eval(Meta.parse(repr(r))) == r
+  end
+  @test repr(IMSEOptimal()) == "IMSEOptimal()" && repr(IMSEOptimal(grid = :points)) == "IMSEOptimal(grid = :points)"
+  @test repr(CoverageOptimal(IMSEOptimal(); convention = :nprobust)) == "CoverageOptimal(IMSEOptimal(); convention = :nprobust)"
+  @test repr(Honest(:rot; biascorrected = true)) == "Honest(:rot; biascorrected = true)"
+  @test endswith(repr(OwnRule(0.5)), "OwnRule(0.5)")
+  # the functions of Distributions.jl and Statistics that a density estimate answers,
+  # exported as the same functions, so that `using Statistics` causes no conflict
+  for f in (:mean, :var, :std, :median, :cquantile)
+    @test f in names(KernelSmoothing)
+  end
+  @test KernelSmoothing.mean === Statistics.mean && KernelSmoothing.median === Statistics.median
+  f = fit(KDE, XR; bandwidth = 0.5)
+  @test std(f) ≈ sqrt(var(f)) && median(f) ≈ quantile(f, 0.5)
 end
 
 end

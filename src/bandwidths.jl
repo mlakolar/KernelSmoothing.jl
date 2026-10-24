@@ -12,6 +12,28 @@ A new rule `R <: BandwidthSelector` implements
 """
 abstract type BandwidthSelector end
 
+# A rule prints as its keyword constructor with the arguments that differ from the
+# defaults, IMSEOptimal(grid = :points) rather than IMSEOptimal(:points, 1.0, false);
+# a rule without a constructor of no arguments prints as Julia prints structs
+function Base.show(io::IO, r::BandwidthSelector)
+  T = typeof(r)
+  default = hasmethod(T, Tuple{}) ? (try T() catch; nothing end) : nothing
+  default isa T || return invoke(show, Tuple{IO,Any}, io, r)
+  print(io, nameof(T), "(")
+  _showkeywords(io, r, default, "")
+  print(io, ")")
+end
+
+# the fields of r that differ from those of default, as keyword arguments after sep
+function _showkeywords(io, r, default, sep)
+  for f in fieldnames(typeof(r))
+    v = getfield(r, f)
+    isequal(v, getfield(default, f)) && continue
+    print(io, sep, f, " = ", repr(v))
+    sep = ", "
+  end
+end
+
 """
     BandwidthSelection
 
@@ -97,8 +119,6 @@ struct NormalReference <: BandwidthSelector
 end
 
 NormalReference(; robust::Bool = true) = NormalReference(robust)
-
-Base.show(io::IO, r::NormalReference) = print(io, "NormalReference(robust = ", r.robust, ")")
 
 function selectbandwidth(rule::NormalReference, d::SmoothingData, k::AbstractKernel)
   _check_mass(k, rule)
