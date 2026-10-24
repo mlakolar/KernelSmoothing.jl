@@ -54,6 +54,43 @@ end
   end
 end
 
+@testset "unidentified regression covariances" begin
+  x = collect(range(0, 1; length = 101))
+  y = sin.(3 .* x) .+ 0.1 .* cos.(31 .* x)
+  for vce in (NNVariance(), HCVariance(0), HCVariance(1), HCVariance(2), HCVariance(3))
+    m = fit(LocalPolynomialRegression, x, y; bandwidth = 0.1, points = [0.25, 5.0], vce, minobs = 0)
+    valid = fit(LocalPolynomialRegression, x, y; bandwidth = 0.1, points = [0.25], vce, minobs = 0)
+    @test isnan(m.se[2]) && m.nwindow[2] == 0
+    for method in (Conventional(), RobustBiasCorrected())
+      C = vcov(m; method)
+      @test all(isnan, C[2, :]) && all(isnan, C[:, 2])
+      @test C[1, 1] == vcov(valid; method)[1, 1]
+      @test C[1, 1] ≈ stderror(m; method)[1]^2 rtol = 1e-12
+      b = confband(m; method, draws = 100, rng = MersenneTwister(1))
+      @test isfinite(b.lower[1]) && isfinite(b.upper[1])
+      @test isnan(b.lower[2]) && isnan(b.upper[2])
+    end
+  end
+  # A nonempty singular window is also undefined, including at disjoint points.
+  xs = vcat(zeros(30), 2 .+ x)
+  ys = sin.(3 .* xs) .+ 0.1 .* cos.(31 .* (1:length(xs)))
+  m = fit(LocalPolynomialRegression, xs, ys; bandwidth = 0.2, points = [0.0, 2.5], minobs = 0)
+  @test m.nwindow[1] == 30 && isnan(m.se[1]) && isfinite(m.se[2])
+  for method in (Conventional(), RobustBiasCorrected())
+    C = vcov(m; method)
+    @test all(isnan, C[1, :]) && all(isnan, C[:, 1])
+    @test isfinite(C[2, 2])
+  end
+  # A missing bias correction leaves the conventional covariance intact.
+  xs = vcat(repeat([0.0, 1.0], inner = 30), 4 .+ x)
+  ys = sin.(3 .* xs) .+ 0.1 .* cos.(31 .* (1:length(xs)))
+  m = fit(LocalPolynomialRegression, xs, ys; bandwidth = 0.8, points = [0.5, 4.5], minobs = 0)
+  @test isfinite(m.se[1]) && isnan(m.se_rbc[1]) && isfinite(m.se_rbc[2])
+  @test all(isfinite, vcov(m))
+  C = vcov(m; method = RobustBiasCorrected())
+  @test all(isnan, C[1, :]) && all(isnan, C[:, 1]) && isfinite(C[2, 2])
+end
+
 @testset "uniform bands" begin
   # far-apart points are independent: P(max |Z| ≤ c) = (2Φ(c) - 1)^G = level
   m = fit(LocalPolynomialRegression, X, Y; bandwidth = 0.05, points = [0.1, 0.3, 0.5, 0.7, 0.9], vce = HCVariance(0))

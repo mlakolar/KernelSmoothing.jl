@@ -4,16 +4,20 @@
     Honest(M; biascorrected = false, class = :default)
 
 Honest confidence intervals for local polynomial regression (Armstrong and Kolesár
-2018, 2020): they cover the regression function with probability at least `level`
-uniformly over the Taylor class of functions whose derivative of order `p + 1`
-is bounded by `M` near the point,
+2018, 2020). Under regularity conditions, they have asymptotic coverage at least
+`level` uniformly over the Taylor class whose remainder about the point is bounded by
+`M |x - x₀|^(p+1) / (p + 1)!` throughout the smoothing windows,
 
     estimate ± cv(B / se) se,   B = M / (p + 1)! ∑ᵢ |ℓᵢ| |xᵢ - x₀|^(p+1),
 
 where `ℓᵢ` are the weights of the estimate, `B` is its worst-case bias over the
 class and `cv(t)` is the `level` quantile of `|N(t, 1)|`. The intervals account
-for the bias instead of removing it, so that they need a bound on the smoothness:
-adapting to unknown smoothness is impossible over such classes. The bound `M` is
+for the bias instead of removing it. A bound `M` on the derivative of order
+`p + 1` throughout the windows is sufficient for the remainder bound; over this
+smaller class, `B` can be conservative. Coverage uses a normal approximation with
+estimated standard errors. With fixed weights, Gaussian errors and the true
+standard error, the coverage bound is finite-sample. The intervals need a bound on
+the smoothness: adapting to unknown smoothness is impossible over such classes. The bound `M` is
 therefore required, chosen before seeing the estimates. With `M = :rot`, it is the
 largest absolute derivative of order `p + 1` of a global polynomial of order
 `p + 3` over the range of the data (of lower order when `x` has fewer than `p + 4`
@@ -34,11 +38,13 @@ struct Honest <: InferenceMethod
 
   function Honest(M::Union{Real,Symbol,Tuple{Real,Real}}, biascorrected::Bool, class::Symbol = :default)
     M isa Symbol && M != :rot && throw(ArgumentError("M must be a nonnegative number or :rot, got :$M"))
-    ok(v) = v >= 0 && isfinite(v)
-    M isa Real && !ok(M) && throw(ArgumentError("M must be a nonnegative number, got $M"))
-    M isa Tuple && !all(ok, M) && throw(ArgumentError("the bounds M must be nonnegative numbers, got $M"))
+    Mv = M isa Real ? Float64(M) : M isa Tuple ? Float64.(M) : M
+    # the bounds as given and as stored, which can overflow
+    ok(v, vf) = v >= 0 && isfinite(vf)
+    M isa Real && !ok(M, Mv) && throw(ArgumentError("M must be a nonnegative number, got $M"))
+    M isa Tuple && !all(ok.(M, Mv)) && throw(ArgumentError("the bounds M must be nonnegative numbers, got $M"))
     class in (:default, :taylor, :holder) || throw(ArgumentError("class must be :taylor or :holder, got :$class"))
-    new(M isa Real ? Float64(M) : M isa Tuple ? Float64.(M) : M, biascorrected, class)
+    new(Mv, biascorrected, class)
   end
 end
 
@@ -147,10 +153,11 @@ struct FLCIOptimal <: BandwidthSelector
   level::Float64
 
   function FLCIOptimal(M::Union{Real,Symbol}, gridsize::Integer, level::Real)
-    Honest(M)   # checks M
+    Mv = Honest(M).M   # checks the stored bound
     gridsize >= 3 || throw(ArgumentError("gridsize must be at least 3, got $gridsize"))
-    0 < level < 1 || throw(ArgumentError("level must be between 0 and 1, got $level"))
-    new(M isa Real ? Float64(M) : M, gridsize, level)
+    lv = Float64(level)
+    0 < lv < 1 || throw(ArgumentError("level must be between 0 and 1, got $level"))
+    new(Mv, gridsize, lv)
   end
 end
 
@@ -171,6 +178,8 @@ function selectbandwidth(rule::FLCIOptimal, d::SmoothingData, k::AbstractKernel;
   d.y === nothing && throw(ArgumentError("FLCIOptimal needs responses; use SmoothingData(x, y)"))
   vce = _variance(vce, d)
   _check_degree(degree, derivative)
+  _check_spread(d, rule)
+  minobs >= 0 || throw(ArgumentError("minobs must be nonnegative, got $minobs"))
   p, ν = Int(degree), Int(derivative)
   pts = points === nothing ? collect(range(d.x[1], d.x[end]; length = 30)) : _checkpoints(points)
   M = rule.M === :rot ? _honestM(d, p) : rule.M::Float64
