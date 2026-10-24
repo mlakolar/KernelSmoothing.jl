@@ -56,12 +56,12 @@ the following.
 |---|---|---|---|
 | `fit(KDE, x)` | Epanechnikov | [`SheatherJones`](@ref) | (no counterpart) |
 | `fit(PointwiseDensity, x)` | Epanechnikov | plug-in, pilots anchored on Sheather–Jones | nprobust's `kdrobust` |
-| `fit(LocalPolynomialRegression, x, y)` | Epanechnikov, degree 1 | plug-in, pilots anchored on cross-validation | nprobust's `lprobust` |
+| `fit(LocalPolynomialRegression, x, y)` | Epanechnikov, degree `derivative + 1` | plug-in, pilots anchored on cross-validation | nprobust's `lprobust` |
 | `fit(LocalPolynomialDensity, x)` | triangular, degree 2 | lpdensity's plug-in, with a bound on the bias | lpdensity |
 
 The plug-in bandwidths are pointwise ([`MSEOptimal`](@ref)) at a single point and
-integrated ([`IMSEOptimal`](@ref)) at several, as in nprobust. In four places the
-defaults depart from the R packages, which `compat = true` reproduces:
+integrated ([`IMSEOptimal`](@ref)) at several, as in nprobust. In the following
+places the defaults depart from the R packages, which `compat = true` reproduces:
 
 1. The density plug-in of nprobust estimates ``f''`` with a pilot bandwidth that
    assumes a normal density. For a bimodal density this pilot can be far too wide:
@@ -87,6 +87,24 @@ defaults depart from the R packages, which `compat = true` reproduces:
    bound, so that an exactly linear regression function on the unit interval gave a
    bandwidth of 966; we keep the regularization and cap the bandwidth at the range of
    the data.
+5. The floor of nprobust raises the bandwidths at each point to the distance of the
+   21st nearest observation. With heavy ties, such a window can hold fewer distinct
+   values than the fit has coefficients, and the estimate is then undefined: with
+   four distinct values of ``x``, the default fit left 12 of its 30 estimates and
+   all bias corrections `NaN`. We raise the bandwidths further where needed, so
+   that the window of ``h`` holds ``p + 1`` distinct values with positive weight
+   and that of the pilot ``b`` holds ``p + 2``.
+6. The nearest-neighbour variance estimator of nprobust takes the neighbours on both
+   sides when they are at the same distance, and compares the two distances exactly.
+   On an equally spaced design, rounding then decides which neighbours count, and a
+   shift of the design changed the standard errors by up to 9 percent. We treat
+   distances that agree to about eight digits as equal.
+7. The coverage-error optimal bandwidths of nprobust rescale the plug-in bandwidths
+   to the rate that is optimal at the boundary, also at interior points, which
+   shrinks local linear bandwidths by ``n^{-1/20}``. For odd ``p - \nu`` the optimal
+   rate at interior points is that of the mean squared error, and
+   [`CoverageOptimal`](@ref) uses it by default, so that it leaves local linear
+   bandwidths unchanged.
 
 The pages of the estimators give the details.
 

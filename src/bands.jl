@@ -19,7 +19,7 @@ changes them slightly near the edges.
 """
 function StatsAPI.vcov(m::LocalPolynomialRegression; method::InferenceMethod = Conventional())
   vs = _pointwise(j -> _localfit(m.data, m.kernel, m.points[j], m.h[j], m.b[j], m.degree, m.derivative,
-                                 m.vce; vectors = true), eachindex(m.points))
+                                 m.vce; vectors = true, nntol = _nntol(m.compat)), eachindex(m.points))
   return _gram([v.range for v in vs], [_usesbc(method) ? v.arb : v.aus for v in vs])
 end
 

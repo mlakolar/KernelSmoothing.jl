@@ -1,7 +1,7 @@
 ## Honest confidence intervals (Armstrong and Kolesár 2020)
 
 """
-    Honest(M = :rot; biascorrected = false)
+    Honest(M; biascorrected = false)
 
 Honest confidence intervals for local polynomial regression (Armstrong and Kolesár
 2018, 2020): they cover the regression function with probability at least `level`
@@ -13,12 +13,12 @@ is bounded by `M` near the point,
 where `ℓᵢ` are the weights of the estimate, `B` is its worst-case bias over the
 class and `cv(t)` is the `level` quantile of `|N(t, 1)|`. The intervals account
 for the bias instead of removing it, so that they need a bound on the smoothness:
-adapting to unknown smoothness is impossible over such classes. With `M = :rot`,
-the bound is the largest absolute derivative of order `p + 1` of a global
-polynomial of order `p + 3` over the range of the data (of lower order when `x`
-has fewer than `p + 4` distinct values), the rule of thumb of Armstrong and Kolesár
-for local linear fits, which they offer as a starting point for sensitivity
-analysis. With `biascorrected = true`, the interval is built
+adapting to unknown smoothness is impossible over such classes. The bound `M` is
+therefore required, chosen before seeing the estimates. With `M = :rot`, it is the
+largest absolute derivative of order `p + 1` of a global polynomial of order
+`p + 3` over the range of the data (of lower order when `x` has fewer than `p + 4`
+distinct values), the rule of thumb of Armstrong and Kolesár for local linear fits,
+which they offer as a starting point for a sensitivity analysis, not as a bound. With `biascorrected = true`, the interval is built
 around the bias-corrected estimate and its weights.
 """
 struct Honest <: InferenceMethod
@@ -32,7 +32,9 @@ struct Honest <: InferenceMethod
   end
 end
 
-Honest(M::Union{Real,Symbol} = :rot; biascorrected::Bool = false) = Honest(M, biascorrected)
+Honest(M::Union{Real,Symbol}; biascorrected::Bool = false) = Honest(M, biascorrected)
+Honest(; biascorrected::Bool = false) = throw(ArgumentError("Honest needs a bound M on the " *
+  "derivative of order p + 1, chosen in advance, such as Honest(40), or Honest(:rot) for the rule of thumb"))
 
 """
     worstcasebias(m::LocalPolynomialRegression, M; biascorrected = false)
@@ -105,11 +107,12 @@ function _honestconfint(m::LocalPolynomialRegression, level, method::Honest)
 end
 
 """
-    FLCIOptimal(M = :rot; gridsize = 40, level = 0.95)
+    FLCIOptimal(M; gridsize = 40, level = 0.95)
 
 The bandwidth at each point that minimizes the length of the [`Honest`](@ref)
 interval with bound `M` and coverage `level`, `cv(B(h) / se(h)) se(h)`, as Armstrong
-and Kolesár (2020) recommend for honest inference. The length is evaluated with the standard errors
+and Kolesár (2020) recommend for honest inference. `M` is required, as for
+[`Honest`](@ref); `:rot` selects the rule of thumb. The length is evaluated with the standard errors
 of the fit's variance estimator on a grid of bandwidths spaced evenly on the log
 scale, from the distance of the `max(minobs, 21)`-th nearest observation to the
 range of the data, and the best one is refined by golden-section search. The lower
@@ -130,11 +133,13 @@ struct FLCIOptimal <: BandwidthSelector
   end
 end
 
-FLCIOptimal(M::Union{Real,Symbol} = :rot; gridsize::Integer = 40, level::Real = 0.95) =
+FLCIOptimal(M::Union{Real,Symbol}; gridsize::Integer = 40, level::Real = 0.95) =
   FLCIOptimal(M, gridsize, level)
+FLCIOptimal(; kwargs...) = throw(ArgumentError("FLCIOptimal needs a bound M on the derivative " *
+  "of order p + 1, chosen in advance, such as FLCIOptimal(40), or FLCIOptimal(:rot) for the rule of thumb"))
 
-function selectbandwidth(rule::FLCIOptimal, d::SmoothingData, k::AbstractKernel; degree::Integer = 1,
-                         derivative::Integer = 0, points = nothing, vce::VarianceEstimator = NNVariance(),
+function selectbandwidth(rule::FLCIOptimal, d::SmoothingData, k::AbstractKernel; derivative::Integer = 0,
+                         degree::Integer = derivative + 1, points = nothing, vce::VarianceEstimator = NNVariance(),
                          minobs::Integer = 21)
   d.y === nothing && throw(ArgumentError("FLCIOptimal needs responses; use SmoothingData(x, y)"))
   _check_degree(degree, derivative)

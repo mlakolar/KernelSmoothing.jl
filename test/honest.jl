@@ -74,7 +74,7 @@ end
   # the second derivative of sin(2πx) is at most 4π² ≈ 39.5; the quartic pilot is rougher
   @test 10 < _honestM(d, 1) < 200
   m = fit(LocalPolynomialRegression, d; bandwidth = 0.15, points = [0.4])
-  @test confint(m; method = Honest()) == confint(m; method = Honest(_honestM(d, 1)))
+  @test confint(m; method = Honest(:rot)) == confint(m; method = Honest(_honestM(d, 1)))
   @test_throws ArgumentError Honest(-1)
   @test_throws ArgumentError Honest(:big)
   @test_throws ArgumentError FLCIOptimal(1.0; gridsize = 2)
@@ -106,7 +106,7 @@ end
   @test_throws ArgumentError worstcasebias(m, -1.0)
   @test_throws ArgumentError FLCIOptimal(1.0; level = 1.5)
   @inferred confint(m; method = Honest(1.0))
-  @inferred confint(m; method = Honest())
+  @inferred confint(m; method = Honest(:rot))
   @inferred worstcasebias(m, :rot)
   d = SmoothingData(X, Y)
   k = EpanechnikovKernel()
@@ -117,6 +117,12 @@ end
                     c = confint(mm; method = Honest(1.0), level); (c[2] - c[1]) / 2)
   @test half(s80.h[1], 0.8) <= half(s95.h[1], 0.8) * (1 + 1e-6)
   @test half(s95.h[1], 0.95) <= half(s80.h[1], 0.95) * (1 + 1e-6)
+end
+
+@testset "the bound M is required" begin
+  @test_throws "chosen in advance" Honest()
+  @test_throws "chosen in advance" FLCIOptimal()
+  @test Honest(:rot).M == :rot && FLCIOptimal(:rot).M == :rot
 end
 
 end
