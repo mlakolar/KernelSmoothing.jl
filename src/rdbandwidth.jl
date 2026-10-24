@@ -129,7 +129,7 @@ function _rdselect(rule::RDOptimal, sides, c, k, p, ν, vce, masspoints, bwcheck
   elseif name === :msecomb1
     (min(hrd, hsum), min(hrd, hsum)), (min(brd, bsum), min(brd, bsum))
   else
-    med(a, b, c) = a + b + c - max(a, b, c) - min(a, b, c)
+    med(a, b, c) = max(min(a, b), min(max(a, b), c))   # exactly one of them, as R's median
     (med(hrd, hsum, htwo[1]), med(hrd, hsum, htwo[2])), (med(brd, bsum, btwo[1]), med(brd, bsum, btwo[2]))
   end
   if String(sel)[1:3] == "cer"
