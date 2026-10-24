@@ -371,6 +371,9 @@ KernelSmoothing.moment(::LaplaceTailKernel, j::Integer) = iseven(j) ? Float64(fa
   @test ccdf.(f, [0.0, 30.0])[2] ≈ exact rtol = 1e-12
   @test ccdf(f, cquantile(f, 1e-20)) ≈ 1e-20 rtol = 1e-10
   @test ccdf(f, Distributions.invlogccdf(f, log(1e-20))) ≈ 1e-20 rtol = 1e-10
+  # the reflection swaps the tails
+  r = _reflect(LaplaceTailKernel())
+  @test ccdf(r, -30.0) == cdf(LaplaceTailKernel(), 30.0) && cdf(r, -30.0) == ccdf(LaplaceTailKernel(), 30.0)
   # the Gaussian log-density far from the data, where the density underflows
   for w in (nothing, [1.0, 2.0, 0.5])
     xs = [0.0, 1.0, 1.5]

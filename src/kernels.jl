@@ -707,8 +707,7 @@ function _reflect(k::PolynomialKernel)
   return PiecewisePolynomialKernel(Centered(), breaks, coefs, smoothness(k); tails = _reflectedtails(k))
 end
 
-_reflectedtails(k::PiecewisePolynomialKernel) = (k.upperccdf, k.lowercdf)
-_reflectedtails(::PolynomialKernel) = nothing
+_reflectedtails(k::PolynomialKernel) = k isa PiecewisePolynomialKernel ? (k.upperccdf, k.lowercdf) : nothing
 
 # other kernels: a lazy reflection
 _reflect(k::AbstractKernel) = _Reflected(k)

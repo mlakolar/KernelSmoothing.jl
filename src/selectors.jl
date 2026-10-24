@@ -110,16 +110,13 @@ function selectbandwidth(rule::SheatherJones, d::SmoothingData, k::AbstractKerne
   t, iterations = _findroot(f, lower, upper; rtol = exact ? 1e-10 : 1e-8)
   # Clustered or discrete data can put the pilot bandwidth of the root far below the
   # pilots; where the grid has fewer than 100 points per pilot bandwidth there, the
-  # root is solved again near it on a grid with at least 250.
+  # root is solved again on a grid with at least 250, within a quarter of the first
+  # root, which is accurate to about 1e-3 there
   if !exact && σ * α2 * t^(5 / 7) < 100Δ
-    lo, hi = t, t
-    for _ in 1:10
-      lo, hi = lo / 1.02, hi * 1.02
-      if fm(lo, 250) * fm(hi, 250) <= 0
-        t, more = _findroot(h -> fm(h, 250), lo, hi; rtol = 1e-8)
-        iterations += more
-        break
-      end
+    lo, hi = t / 1.25, t * 1.25
+    if fm(lo, 250) * fm(hi, 250) <= 0
+      t, more = _findroot(h -> fm(h, 250), lo, hi; rtol = 1e-8)
+      iterations += more
     end
   end
   g = α2 * t^(5 / 7)
