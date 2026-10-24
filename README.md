@@ -29,7 +29,8 @@ development.
   manipulation test of rddensity (Cattaneo, Jansson and Ma 2020).
 - `localpolynomial` and `smoothermatrix`: local polynomial estimates and their
   weights at given points and bandwidths, without inference, for smoothing many
-  curves and for building other estimators.
+  curves and for building other estimators, also for two covariates (covariance
+  surfaces), with leave-one-out or leave-group-out cross-validation.
 - Bandwidth selectors: Sheather and Jones (the default for densities), rules of
   thumb, least-squares and leave-one-out cross-validation, the plug-in bandwidths
   of nprobust and lpdensity, coverage-error-optimal rescalings and the bandwidths
