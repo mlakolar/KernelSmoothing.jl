@@ -80,6 +80,7 @@ end
 function fit(::Type{PointwiseDensity}, d::SmoothingData; points = nothing,
              kernel::AbstractKernel = EpanechnikovKernel(), bandwidth = nothing, pilot = nothing,
              rho::Real = 1, minobs::Integer = 21, compat::Bool = false)
+  _noclusters(d, "PointwiseDensity")
   d = _withouty(d)
   _check_density_kernel(kernel)
   isapprox(moment(kernel, 1), 0; atol = 1e-12) && isapprox(moment(kernel, 3), 0; atol = 1e-12) ||

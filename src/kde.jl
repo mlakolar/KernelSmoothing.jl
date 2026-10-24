@@ -70,6 +70,7 @@ end
 
 function fit(::Type{KDE}, d::SmoothingData; kernel::AbstractKernel = EpanechnikovKernel(),
              bandwidth = SheatherJones(), engine::Union{Nothing,SumEngine} = nothing)
+  _noclusters(d, "KDE")
   d = _withouty(d)
   bandwidth === nothing && (bandwidth = SheatherJones())   # the default, as for the other fits
   engine === nothing || _check_engine(engine, kernel)

@@ -1,10 +1,10 @@
 """
     SmoothingData(x; weights = nothing)
-    SmoothingData(x, y; weights = nothing)
+    SmoothingData(x, y; weights = nothing, cluster = nothing)
 
 A sample prepared for kernel smoothing: the observations `x`, sorted once,
-together with the responses `y` of a regression and the weights, in the same
-order. Ties are kept and recorded: the distinct values of `x` and where each one
+together with the responses `y` of a regression, the weights and the clusters of a
+regression, in the same order. Ties are kept and recorded: the distinct values of `x` and where each one
 starts in the sorted order.
 
 Sorting once makes local questions cheap. [`window`](@ref) finds the
@@ -19,7 +19,10 @@ All values must be finite real numbers, also after their conversion to `Float64`
 Vectors containing `missing` are rejected, so remove incomplete observations first.
 Weights must be nonnegative with a positive sum; only their ratios matter, and
 observations with zero weight are dropped, as are those whose weight is below the
-range of `Float64` next to the largest weight. Values are stored as `Float64`, with
+range of `Float64` next to the largest weight. The clusters, which the
+cluster-robust variances of [`ClusterVariance`](@ref) need, are identifiers of any
+type, one per observation, such as integers or strings; observations with equal
+identifiers form a cluster. Values are stored as `Float64`, with
 `-0.0` stored as `0.0`. Weights whose largest value lies outside `[2^-200, 2^200]`
 are stored divided by a power of two, so that products of weights neither overflow
 nor underflow; [`weightsum`](@ref) undoes the division.
@@ -34,6 +37,8 @@ The fields, all in sorted order:
 - `valueindex`: `x[i] == values[valueindex[i]]`
 - `cumw`: cumulative weights, `cumw[i + 1] = w[1] + ⋯ + w[i]` and `cumw[1] = 0`,
   rounded, with their rounding errors in `cumwlo` (empty without weights)
+- `cluster`: the clusters as numbers `1, …, G` in the order in which they first
+  appear in the input, or `nothing` when none are given
 
 # Examples
 ```julia
@@ -49,7 +54,8 @@ julia> window(d, 0.25, 0.1)
 2:4
 ```
 """
-struct SmoothingData{Y<:Union{Nothing,Vector{Float64}},W<:Union{Nothing,Vector{Float64}}}
+struct SmoothingData{Y<:Union{Nothing,Vector{Float64}},W<:Union{Nothing,Vector{Float64}},
+                     C<:Union{Nothing,Vector{Int}}}
   x::Vector{Float64}        # sorted observations
   y::Y                      # responses in the order of x, or nothing
   w::W                      # weights in the order of x, or nothing for equal weights
@@ -62,13 +68,14 @@ struct SmoothingData{Y<:Union{Nothing,Vector{Float64}},W<:Union{Nothing,Vector{F
   sumw::Float64             # total weight
   neff::Float64             # Kish's effective sample size
   wexp::Int                 # the weights are stored divided by 2^wexp
+  cluster::C                # the clusters, numbered 1, …, G, or nothing
 end
 
-SmoothingData(x::AbstractVector; weights = nothing) = _smoothingdata(x, nothing, weights)
-SmoothingData(x::AbstractVector, y::AbstractVector; weights = nothing) =
-  _smoothingdata(x, y, weights)
+SmoothingData(x::AbstractVector; weights = nothing) = _smoothingdata(x, nothing, weights, nothing)
+SmoothingData(x::AbstractVector, y::AbstractVector; weights = nothing, cluster = nothing) =
+  _smoothingdata(x, y, weights, cluster)
 
-function _smoothingdata(x, y, weights)
+function _smoothingdata(x, y, weights, cluster)
   _check_values(x, "x")
   isempty(x) && throw(ArgumentError("x must contain at least one observation"))
   if y !== nothing
@@ -83,6 +90,13 @@ function _smoothingdata(x, y, weights)
       "weights has $(length(weights)) values for $(length(x)) observations"))
     any(<(0), weights) && throw(ArgumentError("weights must be nonnegative"))
     any(>(0), weights) || throw(ArgumentError("weights must have a positive sum"))
+  end
+  if cluster !== nothing
+    Base.require_one_based_indexing(cluster)
+    length(cluster) == length(x) || throw(DimensionMismatch(
+      "cluster has $(length(cluster)) values for $(length(x)) observations"))
+    Missing <: eltype(cluster) && any(ismissing, cluster) &&
+      throw(ArgumentError("cluster contains missing values; remove the incomplete observations first"))
   end
   # Weights whose products would overflow or underflow, as with weights of 1e-170,
   # are divided by a power of two, exactly, in their own type, before they become
@@ -99,6 +113,7 @@ function _smoothingdata(x, y, weights)
   xs = [Float64(x[i]) + 0.0 for i in perm]   # adding 0.0 turns -0.0 into 0.0
   ys = y === nothing ? nothing : Float64[y[i] for i in perm]
   ws = weights === nothing ? nothing : Float64[wf[i] for i in perm]
+  cs = cluster === nothing ? nothing : _clustercodes(cluster, keep, perm)
 
   starts = [1]
   valueindex = Vector{Int}(undef, length(xs))
@@ -112,7 +127,17 @@ function _smoothingdata(x, y, weights)
   n = length(xs)
   cumw, cumwlo = ws === nothing ? (collect(0.0:n), Float64[]) : _cumsum0(ws)
   neff = ws === nothing ? Float64(n) : cumw[end]^2 / sum(abs2, ws)
-  return SmoothingData(xs, ys, ws, perm, values, starts, valueindex, cumw, cumwlo, cumw[end], neff, wexp)
+  return SmoothingData(xs, ys, ws, perm, values, starts, valueindex, cumw, cumwlo, cumw[end], neff, wexp, cs)
+end
+
+# the clusters of the observations perm, numbered 1, 2, … in the order in which they
+# first appear among the observations keep, which are in increasing order
+function _clustercodes(cluster, keep, perm)
+  codes = Dict{eltype(cluster),Int}()
+  for i in keep
+    get!(codes, cluster[i], length(codes) + 1)
+  end
+  return [codes[cluster[i]] for i in perm]
 end
 
 # The weights as Float64, divided by 2^wexp where their products would overflow or
@@ -180,17 +205,25 @@ end
 
 function Base.show(io::IO, d::SmoothingData)
   print(io, "SmoothingData(", nobs(d), " observations, ", nunique(d), " distinct values",
-        d.w === nothing ? "" : ", weighted", d.y === nothing ? "" : ", with responses", ")")
+        d.w === nothing ? "" : ", weighted", d.y === nothing ? "" : ", with responses",
+        d.cluster === nothing ? "" : ", $(_nclusters(d)) clusters", ")")
 end
 
 nobs(d::SmoothingData) = length(d.x)
 
-# the same sample without its responses, sharing the arrays: the density estimators
-# ignore responses, and the plug-in rules choose between densities and regression by
-# whether there are any
+# the number of clusters
+_nclusters(d::SmoothingData) = d.cluster === nothing ? 0 : maximum(d.cluster)
+
+# the same sample without its responses and clusters, sharing the arrays: the
+# density estimators ignore responses, and the plug-in rules choose between
+# densities and regression by whether there are any
 _withouty(d::SmoothingData) = d.y === nothing ? d :
   SmoothingData(d.x, nothing, d.w, d.perm, d.values, d.starts, d.valueindex, d.cumw, d.cumwlo, d.sumw,
-                d.neff, d.wexp)
+                d.neff, d.wexp, nothing)
+
+# the density estimators have no cluster-robust variances
+_noclusters(d::SmoothingData, name) = d.cluster === nothing || throw(ArgumentError(
+  "$name has no cluster-robust variances; cluster-robust standard errors are available for LocalPolynomialRegression"))
 
 """
     effective_nobs(d::SmoothingData)

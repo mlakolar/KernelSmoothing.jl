@@ -127,6 +127,13 @@ places the defaults depart from the R packages, which `compat = true` reproduces
     such points. For a covariate with heavy tails, most of them lie where few
     observations are left. We evaluate between the quantiles of order 0.025 and
     0.975, and average over 30 quantiles of order 0.05 to 0.95.
+12. For clustered data, nprobust adjusts the residuals of the bias-corrected
+    estimate for CR2 and CR3 with a matrix that is not a block of a hat matrix and
+    changes with the units of ``x``: at the boundary, measuring ``x`` in other units
+    changed these standard errors by five orders of magnitude. We adjust them with
+    the hat matrix of the fit of order ``p``, as for HC2 and HC3. Furthermore,
+    nprobust's covariances between points ignore the clusters off the diagonal;
+    ours sum over clusters also with `compat = true`.
 
 The pages of the estimators give the details.
 

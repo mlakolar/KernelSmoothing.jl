@@ -5,7 +5,8 @@
 
 Supertype of the estimators of the conditional variances `σ²(xᵢ)` of the
 responses that standard errors of local polynomial fits are built from:
-[`NNVariance`](@ref) and [`HCVariance`](@ref).
+[`NNVariance`](@ref), [`HCVariance`](@ref) and, for clustered data,
+[`ClusterVariance`](@ref).
 """
 abstract type VarianceEstimator end
 
@@ -52,6 +53,64 @@ struct HCVariance <: VarianceEstimator
     0 <= type <= 3 || throw(ArgumentError("type must be 0, 1, 2 or 3, got $type"))
     new(type)
   end
+end
+
+"""
+    ClusterVariance(type = 1)
+
+Cluster-robust variances, for observations that are independent across clusters
+but may be dependent within them. The variance of an estimate `∑ ℓᵢ yᵢ` is
+estimated by `c ∑_g (∑_{i ∈ g} ℓᵢ ε̃ᵢ)²`, a sum over the clusters `g` with
+observations in the window, where `ε̃ᵢ` are the residuals `ε̂ᵢ` of the local fit,
+adjusted for `type = 2` and `type = 3`:
+
+- `type = 0`: `ε̃ = ε̂` and `c = 1`;
+- `type = 1` (CR1, the default): `ε̃ = ε̂` and `c = (n - 1) / (n - k) ⋅ G / (G - 1)`;
+- `type = 2` (CR2, Bell and McCaffrey 2002): `ε̃_g = (I - H_gg)^(-1/2) ε̂_g` and `c = 1`;
+- `type = 3` (CR3): `ε̃_g = (I - H_gg)^(-1) ε̂_g` and `c = (G - 1) / G`.
+
+Here `n` is the number of observations and `G` the number of clusters in the
+window, `k` the number of coefficients, `ε̂_g` the residuals of cluster `g`, and
+`H_gg` its block of the hat matrix of the local fit. The clusters come with the
+data, `fit(LocalPolynomialRegression, x, y; cluster)` or
+`SmoothingData(x, y; cluster)`, and with clusters the default variance estimator
+is `ClusterVariance(1)`, as in nprobust. As for [`HCVariance`](@ref), conventional
+standard errors use the residuals of the fit of order `p` with bandwidth `h`, and
+robust bias-corrected ones those of the fit of order `p + 1` with bandwidth `b`,
+both adjusted with the hat matrix of the first fit. With one observation per
+cluster, types 0, 1 and 2 give the standard errors of `HCVariance(type)`, and type
+3 those of `HCVariance(3)` times `√((n - 1) / n)`.
+
+Standard errors are `NaN` where the window holds fewer than two clusters, and for
+types 2 and 3 where one cluster alone determines part of the fit, so that
+`I - H_gg` is singular. For the bias-corrected estimate, nprobust adjusts the
+residuals with a matrix that changes with the units of `x`; `compat = true`
+reproduces it, and its treatment of singular blocks. The plug-in bandwidth rules
+estimate their variance constants in the same way; with `compat = true`, they use
+nprobust's: the residuals of `HCVariance(type)` with the factor `c` of type 1.
+"""
+struct ClusterVariance <: VarianceEstimator
+  type::Int
+
+  function ClusterVariance(type::Integer = 1)
+    0 <= type <= 3 || throw(ArgumentError("type must be 0, 1, 2 or 3, got $type"))
+    new(type)
+  end
+end
+
+# the variance estimator of a fit: by default nprobust's, nearest neighbours or, for
+# clustered data, CR1; with clusters it must be cluster-robust
+_variance(::Nothing, d::SmoothingData) = d.cluster === nothing ? NNVariance() : ClusterVariance()
+
+function _variance(vce::VarianceEstimator, d::SmoothingData)
+  if d.cluster === nothing
+    vce isa ClusterVariance && throw(ArgumentError(
+      "ClusterVariance needs the clusters of the observations; pass them as cluster"))
+  else
+    vce isa ClusterVariance || throw(ArgumentError("the data have clusters, so the variances " *
+      "must be cluster-robust; use ClusterVariance(type), the counterpart of HCVariance(type)"))
+  end
+  return vce
 end
 
 """
@@ -130,7 +189,8 @@ end
 """
     fit(LocalPolynomialRegression, x, y; derivative = 0, degree = derivative + 1,
         kernel = EpanechnikovKernel(), bandwidth = nothing, pilot = nothing, rho = 1,
-        points = nothing, vce = NNVariance(), minobs = 21, weights = nothing, compat = false)
+        points = nothing, vce = nothing, minobs = 21, weights = nothing, cluster = nothing,
+        compat = false)
     fit(LocalPolynomialRegression, d::SmoothingData; kwargs...)
 
 Fits local polynomials of order `degree` to the responses `y` at `points`, by
@@ -148,8 +208,11 @@ same order of bias at the boundary as in the interior.
   bias; by default `b = h / rho`, so that `rho = 1` uses the same bandwidth for
   both, as nprobust does. With `pilot = :selected`, the fit uses the pilot
   bandwidths that the bandwidth selector estimated.
-- `vce` estimates the conditional variances: [`NNVariance`](@ref) (default) or
-  [`HCVariance`](@ref).
+- `vce` estimates the conditional variances: [`NNVariance`](@ref) (the default) or
+  [`HCVariance`](@ref), or for clustered data [`ClusterVariance`](@ref) (the default
+  with clusters).
+- `cluster` gives the cluster of each observation, as identifiers of any type, for
+  cluster-robust standard errors.
 - `minobs` raises `h` and `b` at each point, where needed, to the distance of the
   `minobs`-th nearest observation, so that every window holds enough data, and
   further where ties leave too few distinct values with positive weight: `p + 1`
@@ -180,16 +243,17 @@ julia> round.(coef(m); digits = 3)
 ```
 """
 function fit(::Type{LocalPolynomialRegression}, x::AbstractVector, y::AbstractVector;
-             weights = nothing, kwargs...)
-  return fit(LocalPolynomialRegression, SmoothingData(x, y; weights); kwargs...)
+             weights = nothing, cluster = nothing, kwargs...)
+  return fit(LocalPolynomialRegression, SmoothingData(x, y; weights, cluster); kwargs...)
 end
 
 function fit(::Type{LocalPolynomialRegression}, d::SmoothingData; derivative::Integer = 0,
              degree::Integer = derivative + 1, kernel::AbstractKernel = EpanechnikovKernel(),
              bandwidth = nothing, pilot = nothing, rho::Real = 1, points = nothing,
-             vce::VarianceEstimator = NNVariance(), minobs::Integer = 21, compat::Bool = false)
+             vce::Union{Nothing,VarianceEstimator} = nothing, minobs::Integer = 21, compat::Bool = false)
   d.y === nothing && throw(ArgumentError(
     "local polynomial regression needs responses; prepare the data as SmoothingData(x, y)"))
+  vce = _variance(vce, d)
   p, ν = Int(degree), Int(derivative)
   _check_degree(p, ν)
   minobs >= 0 || throw(ArgumentError("minobs must be nonnegative, got $minobs"))
@@ -206,8 +270,7 @@ function fit(::Type{LocalPolynomialRegression}, d::SmoothingData; derivative::In
     h ./ rho
   end
   floored = _floor!(h, b, d, pts, minobs, compat ? nothing : p)
-  nntol = _nntol(compat)
-  fits = _pointwise(j -> _localfit(d, kernel, pts[j], h[j], b[j], p, ν, vce; nntol), eachindex(pts))
+  fits = _pointwise(j -> _localfit(d, kernel, pts[j], h[j], b[j], p, ν, vce; compat), eachindex(pts))
   return LocalPolynomialRegression(d, kernel, p, ν, vce, sel, Int(minobs), compat, pts, h, b,
     [f.estimate for f in fits], [f.se for f in fits], [f.estimate_bc for f in fits],
     [f.se_rbc for f in fits], [f.nwindow for f in fits], [f.nunique for f in fits], floored)
@@ -376,8 +439,9 @@ _count(f) = f()
 # The estimates and standard errors at x0; with `vectors = true` also the vectors
 # scale ℓᵢ ε̂ᵢ and scale ℓᵢᵇᶜ ε̂ᵢᵇ over the window
 function _localfit(d::SmoothingData, k::AbstractKernel, x0, h, b, p, ν, vce; vectors::Bool = false,
-                   setup = nothing, nntol = _nntol(false))
+                   setup = nothing, compat::Bool = false)
   f = setup === nothing ? _localsetup(d, k, x0, h, b, p, ν) : setup
+  nntol = _nntol(compat)
   nwin = f.e - f.a + 1   # the observations with positive weight for the larger bandwidth
   if !f.ok
     fit = _LocalFit(NaN, NaN, NaN, NaN, nwin, f.nuniq)
@@ -625,7 +689,8 @@ end
 function Base.show(io::IO, ::MIME"text/plain", m::LocalPolynomialRegression)
   println(io, "Local polynomial regression of degree ", m.degree,
           m.derivative == 0 ? "" : ", derivative $(m.derivative)", m.compat ? " (nprobust compatibility)" : "")
-  println(io, "  kernel: ", m.kernel, ", variance: ", m.vce, ", ", nobs(m), " observations")
+  println(io, "  kernel: ", m.kernel, ", variance: ", m.vce, ", ", nobs(m), " observations",
+          m.data.cluster === nothing ? "" : " in $(_nclusters(m.data)) clusters")
   rule = m.selection.rule
   rule === nothing || println(io, "  bandwidth: ", rule, !(rule isa Union{MSEOptimal,IMSEOptimal,CoverageOptimal}) ? "" :
                               m.compat ? ", nprobust's pilots" : ", pilots anchored on cross-validation")
