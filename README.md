@@ -24,8 +24,9 @@ development.
   between points and uniform sup-t bands.
 - `fit(RegressionDiscontinuity, x, y; cutoff)`: sharp, fuzzy and kink regression
   discontinuity designs, with covariates and rdrobust's bandwidth selectors, as
-  rdrobust (Calonico, Cattaneo and Titiunik 2014), and `fit(DensityDiscontinuity, x;
-  cutoff)`, the manipulation test of rddensity (Cattaneo, Jansson and Ma 2020).
+  rdrobust (Calonico, Cattaneo and Titiunik 2014), with the honest intervals and
+  bandwidths of RDHonest, and `fit(DensityDiscontinuity, x; cutoff)`, the
+  manipulation test of rddensity (Cattaneo, Jansson and Ma 2020).
 - Bandwidth selectors: Sheather and Jones (the default for densities), rules of
   thumb, least-squares and leave-one-out cross-validation, the plug-in bandwidths
   of nprobust and lpdensity, coverage-error-optimal rescalings and the bandwidths

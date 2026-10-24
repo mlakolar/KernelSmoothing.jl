@@ -15,6 +15,7 @@ tests = [
   "clusters",
   "rd",
   "rddensity",
+  "rdhonest",
   "lpdensity",
   "recipes",
   "aqua"
