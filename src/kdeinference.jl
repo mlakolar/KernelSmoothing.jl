@@ -149,6 +149,29 @@ function _secondderivative(k)
   return -μ2 * c2, c2
 end
 
+# Keep the usual product unchanged; evaluate exceptional Gaussian tails and
+# overflowing products in logs, after removing exactly zero contributions.
+@inline function _densitybias(k, v, ρ, c0, c2, κ)
+  kv = k(v)
+  if iszero(kv) && !(k isa GaussianFamily)
+    return zero(kv)
+  end
+  q = c0 + c2 * v^2
+  t = ρ^3 * κ * kv * q
+  isfinite(t) && !(k isa GaussianFamily && iszero(kv)) && return t
+  iszero(q) && return zero(q)
+  logq = isfinite(q) ? log(abs(q)) : log(abs(c2)) + 2log(abs(v))
+  logk = if k isa GaussianFamily
+    σ = first(_scale_order(k))
+    z = v / σ
+    isinf(z^2) && return zero(kv)
+    log(_amplitude(k) * INV_SQRT_2PI) - log(σ) - z^2 / 2
+  else
+    log(kv)
+  end
+  return copysign(exp(3log(ρ) + log(κ) + logk + logq), q)
+end
+
 # the estimates and their standard errors at one point, summed over the window of
 # the larger bandwidth; with sᵣ = ∑ wᵢʳ kᵢ and s₂ = ∑ wᵢ² kᵢ², as for KDE. Unless
 # compat, a standard error without an observation of nonzero weight, where the sum
@@ -165,7 +188,8 @@ function _densityfit(d::SmoothingData, k, x0, h, b, c0, c2, κ, compat::Bool)
     u = (x0 - xs[i]) / h
     kv = k(u)
     v = ρ * u
-    m = kv - ρ^3 * κ * k(v) * (c0 + c2 * v^2)
+    bias = compat ? ρ^3 * κ * k(v) * (c0 + c2 * v^2) : _densitybias(k, v, ρ, c0, c2, κ)
+    m = kv - bias
     w = _weight(d.w, i)
     s0 += w * kv
     s1 += w^2 * kv

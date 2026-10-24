@@ -54,7 +54,7 @@ function StatsAPI.vcov(m::PointwiseDensity; method::InferenceMethod = Convention
   κ = m.compat ? (c0 * moment(k, 4) + c2 * moment(k, 6)) / 24 : moment(k, 2) / 2
   bc = _usesbc(_densitymethod(method))
   vs = _pointwise(eachindex(m.points)) do j
-    _densityvector(d, k, m.points[j], m.h[j], m.b[j], c0, c2, κ, bc)
+    _densityvector(d, k, m.points[j], m.h[j], m.b[j], c0, c2, κ, bc, m.compat)
   end
   W, sw2 = d.sumw, d.sumw^2 / d.neff
   C = _gram([v.range for v in vs], [v.wg for v in vs])
@@ -68,7 +68,7 @@ function StatsAPI.vcov(m::PointwiseDensity; method::InferenceMethod = Convention
 end
 
 # wᵢ gᵢⱼ over the window of point j, and s1 = ∑ wᵢ² gᵢⱼ
-function _densityvector(d, k, x0, h, b, c0, c2, κ, bc)
+function _densityvector(d, k, x0, h, b, c0, c2, κ, bc, compat = false)
   xs = d.x
   ρ = h / b
   r = _densitywindow(d, k, x0, h, bc ? ρ : 1.0)
@@ -78,7 +78,8 @@ function _densityvector(d, k, x0, h, b, c0, c2, κ, bc)
   for i in r
     u = (x0 - xs[i]) / h
     v = ρ * u
-    g = (bc ? k(u) - ρ^3 * κ * k(v) * (c0 + c2 * v^2) : k(u)) / h
+    bias = !bc ? 0.0 : compat ? ρ^3 * κ * k(v) * (c0 + c2 * v^2) : _densitybias(k, v, ρ, c0, c2, κ)
+    g = (bc ? k(u) - bias : k(u)) / h
     w = _weight(d.w, i)
     wg[i - a + 1] = w * g
     s1 += w^2 * g
