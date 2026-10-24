@@ -49,6 +49,7 @@ points(x, h) = sort!(unique!(vcat(range(minimum(x) - 2h, maximum(x) + 2h; length
     # elementwise, so that an error at a single point shows
     @test all(isapprox.([pdf(f, t) for t in ts], P; rtol = 1e-12, atol = 1e-14 * maximum(P)))   # point by point
     @test all(isapprox.(pdf.(f, ts), P; rtol = 1e-11, atol = 1e-13 * maximum(P)))        # with an engine
+    @test pdf.(Ref(f), ts) == pdf.(f, ts)   # a reference takes the same route
     @test all(isapprox.([cdf(f, t) for t in ts], C; atol = 1e-13))
     @test all(isapprox.(cdf.(f, ts), C; atol = 1e-12))
     @test all(isapprox.([stderror(f, t) for t in ts], S; rtol = 1e-10, atol = 1e-13 * maximum(S)))
