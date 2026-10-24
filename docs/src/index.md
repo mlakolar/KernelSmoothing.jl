@@ -14,7 +14,7 @@ It provides:
   its derivatives, with conventional, robust bias-corrected and honest intervals,
   covariances between points and uniform bands;
 - [regression discontinuity](@ref rd-page) estimates for sharp, fuzzy and kink
-  designs, with covariates;
+  designs, with covariates, and the manipulation test of the density at the cutoff;
 - [bandwidth selectors](@ref bandwidths-page): rules of thumb, Sheather and Jones,
   cross-validation and plug-in bandwidths.
 

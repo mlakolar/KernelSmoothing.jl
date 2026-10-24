@@ -553,28 +553,32 @@ function _rsolvable(G)
 end
 
 # G[i, j] = ∫∫_{x<y} x^i y^(j-1) k(x) k(y) + ∫∫_{x>y} x^(i-1) y^j k(x) k(y), i, j = 1, …, p + 1,
-# by Gauss–Legendre quadrature on the pieces of the kernel, exact for these polynomials
-function _cjmG(k, p)
-  breaks = collect(first(pieces(k)))
-  xs, ws = _gausslegendre(24)
-  # ∫ f over [a, b], split at the breakpoints of the kernel
-  function integral(f, a, b)
-    a >= b && return 0.0
-    cuts = [a; [t for t in breaks if a < t < b]; b]
-    s = 0.0
-    for c in 1:length(cuts)-1
-      m, r = (cuts[c] + cuts[c + 1]) / 2, (cuts[c + 1] - cuts[c]) / 2
-      s += r * sum(ws[l] * f(m + r * xs[l]) for l in eachindex(xs))
-    end
-    return s
-  end
-  a0, b0 = first(breaks), last(breaks)
+# over [a0, b0]² (by default the support of the kernel), by Gauss–Legendre quadrature on
+# the pieces of the kernel, exact for these polynomials
+function _cjmG(k, p, a0 = first(first(pieces(k))), b0 = last(first(pieces(k))))
   G = zeros(p + 1, p + 1)
   for i in 1:p+1, j in 1:p+1
-    G[i, j] = integral(y -> y^(j - 1) * k(y) * integral(x -> x^i * k(x), a0, y), a0, b0) +
-              integral(y -> y^j * k(y) * integral(x -> x^(i - 1) * k(x), y, b0), a0, b0)
+    G[i, j] = _kintegral(k, y -> y^(j - 1) * k(y) * _kintegral(k, x -> x^i * k(x), a0, y), a0, b0) +
+              _kintegral(k, y -> y^j * k(y) * _kintegral(k, x -> x^(i - 1) * k(x), y, b0), a0, b0)
   end
   return G
+end
+
+const _GL24 = _gausslegendre(24)
+
+# ∫ f over [a, b] by Gauss–Legendre quadrature on the pieces of the kernel k, exact for
+# polynomials times the kernel
+function _kintegral(k, f, a, b)
+  a >= b && return 0.0
+  breaks = first(pieces(k))
+  xs, ws = _GL24
+  cuts = [a; [t for t in breaks if a < t < b]; b]
+  s = 0.0
+  for c in 1:length(cuts)-1
+    m, r = (cuts[c] + cuts[c + 1]) / 2, (cuts[c + 1] - cuts[c]) / 2
+    s += r * sum(ws[l] * f(m + r * xs[l]) for l in eachindex(xs))
+  end
+  return s
 end
 
 

@@ -24,7 +24,8 @@ development.
   between points and uniform sup-t bands.
 - `fit(RegressionDiscontinuity, x, y; cutoff)`: sharp, fuzzy and kink regression
   discontinuity designs, with covariates and rdrobust's bandwidth selectors, as
-  rdrobust (Calonico, Cattaneo and Titiunik 2014).
+  rdrobust (Calonico, Cattaneo and Titiunik 2014), and `fit(DensityDiscontinuity, x;
+  cutoff)`, the manipulation test of rddensity (Cattaneo, Jansson and Ma 2020).
 - Bandwidth selectors: Sheather and Jones (the default for densities), rules of
   thumb, least-squares and leave-one-out cross-validation, the plug-in bandwidths
   of nprobust and lpdensity, coverage-error-optimal rescalings and the bandwidths
@@ -36,7 +37,7 @@ development.
   threads (`julia --threads=auto`).
 
 With given bandwidths, the estimates and standard errors agree with nprobust,
-lpdensity, rdrobust and RDHonest to rounding. The default plug-in bandwidths depart from
+lpdensity, rdrobust, rddensity and RDHonest to rounding. The default plug-in bandwidths depart from
 these packages where their pilot estimates or their squared bias fail, and
 `compat = true` reproduces them; the
 [documentation](https://mlakolar.github.io/KernelSmoothing.jl/dev/) explains the

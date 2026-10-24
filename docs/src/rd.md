@@ -6,7 +6,8 @@ the two sides of the cutoff, with conventional and robust bias-corrected inferen
 (Calonico, Cattaneo and Titiunik 2014). It covers sharp, fuzzy and kink designs and
 adjustment for covariates, and selects its bandwidths by the plug-in rules of
 rdrobust. The estimates, standard errors and bandwidths agree with rdrobust to
-rounding.
+rounding. `fit(DensityDiscontinuity, x; cutoff)` gives the manipulation test of
+rddensity.
 
 ```julia
 using KernelSmoothing
@@ -89,7 +90,36 @@ observations and keeps at least 10 distinct values in every window. A bandwidth 
 also be given, as one number or a pair for the left and the right side, with
 `pilot` (by default ``b = h``) or `rho` (``b = h / \rho``).
 
+## The manipulation test
+
+A regression discontinuity design assumes that units cannot sort themselves around
+the cutoff, which would make the density of the running variable jump there.
+`fit(DensityDiscontinuity, x; cutoff)` gives the test of Cattaneo, Jansson and Ma
+(2020), as rddensity: local polynomial estimates of the density on the two sides
+of the cutoff and the test that they are equal.
+
+```julia
+m = fit(DensityDiscontinuity, x; cutoff = 0)
+m.pvalue                                 # the test of continuity of the density
+coeftable(m)                             # the densities on the two sides and the jump
+m.binomial                               # binomial tests in windows around the cutoff
+```
+
+On each side, the density is the slope at the cutoff of the local polynomial fit to
+the empirical distribution function, as for
+[`LocalPolynomialDensity`](@ref), with separate polynomials on the two sides, or
+with `restricted = true` a distribution function that is continuous at the cutoff
+and has common coefficients of order two and higher. The test uses the fits of
+order `degree + 1` at bandwidths that minimize the mean squared error of the fits of
+order `degree`, so that their bias does not distort its size, and the jackknife or
+plug-in standard errors of rddensity. [`RDDensityOptimal`](@ref) chooses the
+bandwidths as rddensity's `rdbwdensity`. With ties in ``x``, tied observations
+share the value of the empirical distribution function. The binomial tests compare
+the numbers of observations on the two sides in windows that grow from the
+smallest one with 20 observations on each side up to the bandwidths. The results
+agree with rddensity to rounding.
+
 ```@autodocs
 Modules = [KernelSmoothing]
-Pages = ["rd.jl", "rdbandwidth.jl"]
+Pages = ["rd.jl", "rdbandwidth.jl", "rddensity.jl"]
 ```
