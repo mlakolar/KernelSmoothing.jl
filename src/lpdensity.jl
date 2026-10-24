@@ -89,15 +89,25 @@ vanishing at the inflection points of the normal density, where lpdensity's
 bandwidth jumps to the range of the data. The lower ends of the intervals for the
 density itself are clamped at zero.
 
-With `compat = true`, the fit agrees with lpdensity 3.0.1 with `massPoints = TRUE`:
-the default points are unweighted quantiles, points outside the data are
-extrapolated, the rules are lpdensity's, plug-in fits whose matrix R's `solve`
-rejects as ill-conditioned fall back to the floors, and intervals are not clamped.
+With `compat = true`, the fit agrees with lpdensity 3.0.1 with `massPoints = TRUE`.
+The default points are unweighted quantiles of the input, before observations
+with zero weight are dropped. Points outside the data are extrapolated, the rules
+are lpdensity's, plug-in fits whose matrix R's `solve` rejects as ill-conditioned
+fall back to the floors, and intervals are not clamped.
+For a prepared `SmoothingData`, the default points use its retained observations,
+since observations it already dropped are unavailable.
 The kernel must be compactly supported and nonnegative; lpdensity uses the
 triangular, Epanechnikov and uniform kernels.
 """
-function fit(::Type{LocalPolynomialDensity}, x::AbstractVector; weights = nothing, kwargs...)
-  return fit(LocalPolynomialDensity, SmoothingData(x; weights); kwargs...)
+function fit(::Type{LocalPolynomialDensity}, x::AbstractVector; weights = nothing,
+             points = nothing, compat::Bool = false, kwargs...)
+  d = SmoothingData(x; weights)
+  if compat && points === nothing && nobs(d) < length(x)
+    # lpdensity chooses the default grid before it drops zero sampling weights
+    xs = sort!(Float64[t for t in x])
+    points = [_unweightedquantile(xs, q) for q in 0.05:0.05:0.95]
+  end
+  return fit(LocalPolynomialDensity, d; points, compat, kwargs...)
 end
 
 function fit(::Type{LocalPolynomialDensity}, d::SmoothingData; points = nothing, degree::Integer = 2,

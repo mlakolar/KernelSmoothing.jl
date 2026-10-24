@@ -22,7 +22,7 @@ const SELECTION = Dict("mse-rot" => NormalReference(), "mse-dpi" => MSEOptimal()
     x = c.data == :xn ? XN : XE
     selected = !isempty(c.selection)
     m = fit(LocalPolynomialDensity, x; weights = c.weighted ? W : nothing, points = c.grid, degree = c.p,
-            derivative = c.v - 1, kernel = K[c.kernel], bandwidth = selected ? SELECTION[c.selection] : c.bw[1],
+            derivative = c.v - 1, kernel = K[c.kernel], bandwidth = selected ? SELECTION[c.selection] : c.bw,
             minobs = selected ? c.p + 21 : 0, compat = true)
     # R integrates the kernel constants numerically, to about 1e-7 for the triangular kernel,
     # which the minimizations of the plug-in rules can amplify to 1e-5
@@ -35,7 +35,28 @@ const SELECTION = Dict("mse-rot" => NormalReference(), "mse-dpi" => MSEOptimal()
     @test all(isapprox.(m.se, c.se_p; rtol = tol))
     @test all(isapprox.(m.se_rbc, c.se_q; rtol = tol))
     @test vcov(m) ≈ c.cov_p rtol = tol
+    @test vcov(m; method = RobustBiasCorrected()) ≈ c.cov_q rtol = tol
   end
+end
+
+@testset "compatibility default points before zero-weight trimming" begin
+  # lpdensity 3.0.1 chooses these quantiles before dropping zero Pweights
+  x = collect(1.0:100.0)
+  w = [zeros(50); ones(50)]
+  m = fit(LocalPolynomialDensity, x; weights = w, bandwidth = 30.0, minobs = 0, compat = true)
+  @test m.points ≈ nquantile(x, 0.05:0.05:0.95)
+  @test m.nwindow[1:4] == zeros(Int, 4)
+  @test all(isnan, m.estimate[1:4])
+  # prepared data cannot recover observations that have already been dropped
+  d = SmoothingData(x; weights = w)
+  md = fit(LocalPolynomialDensity, d; bandwidth = 30.0, minobs = 0, compat = true)
+  @test md.points ≈ nquantile(x[51:100], 0.05:0.05:0.95)
+  explicit = fit(LocalPolynomialDensity, d; points = m.points, bandwidth = 30.0,
+                 minobs = 0, compat = true)
+  @test isequal(m.estimate, explicit.estimate)
+  @test isequal(m.se_rbc, explicit.se_rbc)
+  @test fit(LocalPolynomialDensity, x; weights = w, bandwidth = 30.0, minobs = 0).points ==
+        fit(LocalPolynomialDensity, d; bandwidth = 30.0, minobs = 0).points
 end
 
 @testset "boundary adaptivity" begin
