@@ -9,6 +9,7 @@ tests = [
   "kde",
   "locpoly",
   "smoother",
+  "surface",
   "plugin",
   "kdeinference",
   "bands",

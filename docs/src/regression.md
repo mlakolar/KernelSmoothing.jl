@@ -109,9 +109,23 @@ L = smoothermatrix(t, t; bandwidth = 0.1)                        # the hat matri
 gcv = length(y) * sum(abs2, y - L * y) / (length(y) - sum(LinearAlgebra.diag(L)))^2
 ```
 
+For a regression function of two covariates, as the covariance surfaces of
+functional data, `localpolynomial((x1, x2), y, (g1, g2); bandwidth)` gives the
+bivariate local constant or local linear estimates on a grid, with a product kernel
+and a bandwidth for each covariate, and `smoothermatrix((x1, x2), points)` their
+weights. `selectbandwidth(CrossValidation(), (x1, x2), y)` chooses the bandwidth by
+leave-one-out cross-validation, or with `groups`, as the curves of functional data,
+by leaving out whole groups, so that the dependence within a curve does not lead to
+too small bandwidths.
+
+```julia
+s = selectbandwidth(CrossValidation(), (t1, t2), products; groups = curve)
+C = localpolynomial((t1, t2), products, (grid, grid); bandwidth = s.h)   # a covariance surface
+```
+
 ```@autodocs
 Modules = [KernelSmoothing]
-Pages = ["locpoly.jl"]
+Pages = ["locpoly.jl", "surface.jl"]
 ```
 
 ## Honest intervals
