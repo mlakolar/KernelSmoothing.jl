@@ -10,7 +10,8 @@ const _Fit = Union{LocalPolynomialRegression,PointwiseDensity,LocalPolynomialDen
 # A pointwise fit: the estimates at the points as a line, over the shaded confidence
 # intervals, or the uniform band with `uniform = true`; for regression, `data = true`
 # adds the observations.
-@recipe function f(m::_Fit; level = 0.95, method = RobustBiasCorrected(), uniform = false, data = false)
+# (the coverage of Julia 1.10 counts the definitions of the recipes as lines never run)
+@recipe function f(m::_Fit; level = 0.95, method = RobustBiasCorrected(), uniform = false, data = false)  # COV_EXCL_LINE
   x = m.points
   lower, upper = if uniform
     b = confband(m; level, method)
@@ -50,7 +51,7 @@ const _Fit = Union{LocalPolynomialRegression,PointwiseDensity,LocalPolynomialDen
 end
 
 # A density estimate as a curve over the central 99.9% of its probability
-@recipe function f(k::KDE; npoints = 401)
+@recipe function f(k::KDE; npoints = 401)  # COV_EXCL_LINE
   grid = range(quantile(k, 0.0005), quantile(k, 0.9995); length = npoints)
   seriestype --> :path
   label --> "density"
