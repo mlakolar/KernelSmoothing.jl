@@ -219,8 +219,8 @@ julia> moment(k, 0), moment(k, 2)
 ```
 
 The [`smoothness`](@ref) is found by checking which derivatives are continuous
-at the breakpoints. The type is not exported, because KernelFunctions.jl exports
-a different type of the same name.
+at the breakpoints. KernelFunctions.jl exports a different type of the same name;
+when both packages are loaded, qualify this one as `KernelSmoothing.PiecewisePolynomialKernel`.
 
 The coefficients are converted in 256-bit precision, set with `setprecision`,
 which is local to the task from Julia 1.11 on but global on Julia 1.10; there,
