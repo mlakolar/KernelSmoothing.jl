@@ -54,19 +54,20 @@ function _localfit(d::SmoothingData, k::AbstractKernel, x0, h, b, p, ν, vce::Cl
   end
   cl = view(d.cluster, a:e)
   ord = _clusterorder(cl)
-  keys, sh = _clustersums(cl, ord, ℓ, εh, Y, KY, vce.type, compat)
+  rule = _crrule(compat)
+  keys, sh = _clustersums(cl, ord, ℓ, εh, Y, KY, vce.type, rule)
   sb = if nb
     # nprobust's matrix for the bias-corrected residuals, Q Γ⁻¹ Q' in its variables, is
     # q̃ᵢ'Γ_p⁻¹q̃ⱼ / h with q̃ᵢ = khᵢ r_p(uᵢ) - ρ kbᵢ c'r_q(vᵢ) Λ: its 1/h, from the
     # kernel weights k(u)/h, makes it change with the units of x
     z = _lsolve!(copy(Λ), U)
     A = (KY .- ρ .* z .* kc') ./ sqrt(h)
-    last(_clustersums(cl, ord, ℓbc, εb, A, A, vce.type, compat))
+    last(_clustersums(cl, ord, ℓbc, εb, A, A, vce.type, rule))
   else
-    last(_clustersums(cl, ord, ℓbc, εb, Y, KY, vce.type, compat))
+    last(_clustersums(cl, ord, ℓbc, εb, Y, KY, vce.type, rule))
   end
   G = length(keys)
-  ch, cb = _crscale(vce.type, m, G, p + 1, compat), _crscale(vce.type, m, G, p + 2, compat)
+  ch, cb = _crscale(vce.type, m, G, p + 1, rule), _crscale(vce.type, m, G, p + 2, rule)
   vh, vb = ch * sum(abs2, sh), cb * sum(abs2, sb)
   fit = _LocalFit(scale * βp[ν + 1], scale * sqrt(vh), scale * (βp[ν + 1] - ρ * s * γ[p + 2]),
                   scale * sqrt(vb), m, f.nuniq)
@@ -103,8 +104,9 @@ end
 # and B belongs to observation i. Since f(I - A'B) = I + A'φ(BA')B with
 # φ(λ) = (f(1 - λ) - 1) / λ, S_g = ∑ ℓᵢ εᵢ + (∑ ℓᵢ aᵢ)'φ(K)(∑ bᵢ εᵢ) with K = ∑ bᵢ aᵢ',
 # so that each cluster needs the eigendecomposition of a small matrix only, whatever
-# its size; K is symmetric for the matrices used here.
-function _clustersums(cl, ord, ℓ, ε, A, B, type, compat)
+# its size; K is symmetric for the matrices used here. The rule (see _crrule) sets the
+# treatment of singular blocks.
+function _clustersums(cl, ord, ℓ, ε, A, B, type, rule)
   keys, sums = Int[], Float64[]
   adjust = type >= 2
   P = adjust ? size(A, 1) : 0
@@ -131,25 +133,30 @@ function _clustersums(cl, ord, ℓ, ε, A, B, type, compat)
       end
       i += 1
     end
-    adjust && (S += _cradjustment!(K, la, w, type, compat, n > P, λ, V))
+    adjust && (S += _cradjustment!(K, la, w, type, rule, n > P, λ, V))
     push!(keys, key)
     push!(sums, S)
   end
   return keys, sums
 end
 
+# The rules for singular blocks I - H_gg and the factors c: ours, and those of nprobust
+# and of rdrobust, which treats the bias-corrected residuals at h != b differently
+_crrule(compat::Bool) = compat ? :nprobust : :default
+
 # la'φ(K)w for the symmetric K, whose upper triangle is used and which is
 # overwritten, from its eigenvalues λ and eigenvectors V, which are overwritten too.
 # The eigenvalues of I - H_gg are s = 1 - λ and, where the cluster has more
 # observations than K has rows, one.
-function _cradjustment!(K, la, w, type, compat, ones, λ, V)
+function _cradjustment!(K, la, w, type, rule, ones, λ, V)
   _jacobi!(λ, V, K)
+  rule in (:rdrobust, :rdrobustqq) && return _rdcradjustment(λ, V, la, w, type, rule)
   smin, lo, hi = Inf, Inf, 0.0
   for q in eachindex(λ)
     sq = 1 - λ[q]
     smin, lo, hi = min(smin, sq), min(lo, abs(sq)), max(hi, abs(sq))
   end
-  if compat
+  if rule === :nprobust
     # nprobust raises the eigenvalues of I - H_gg below 1e-12 to 1e-12 for CR2, and
     # for CR3 where solve finds I - H_gg singular, with a reciprocal condition number
     # below the machine epsilon
@@ -166,6 +173,33 @@ function _cradjustment!(K, la, w, type, compat, ones, λ, V)
     sq = raise ? max(s, 1e-12) : s
     φ = sq == s ? (type == 2 ? 1 / (sqrt(sq) * (1 + sqrt(sq))) : 1 / sq) :
                   ((type == 2 ? 1 / sqrt(sq) : 1 / sq) - 1) / λ[q]
+    a = b = 0.0
+    for r in eachindex(la)
+      a += V[r, q] * la[r]
+      b += V[r, q] * w[r]
+    end
+    t += φ * a * b
+  end
+  return t
+end
+
+# la'φ(K)w as rdrobust computes it: for CR2, it raises 1 - λ to 1e-8 and drops
+# eigenvalues below 1e-14, or for the bias-corrected residuals at h != b clamps λ to
+# [0, 1 - 1e-10]; for CR3 it inverts I - H_gg, and we drop the directions in which
+# it is singular, where rdrobust falls back on a pseudo-inverse or on CR1
+function _rdcradjustment(λ, V, la, w, type, rule)
+  t = 0.0
+  for q in eachindex(λ)
+    φ = if type == 3
+      s = 1 - λ[q]
+      abs(s) > eps() ? 1 / s : 0.0
+    elseif rule === :rdrobust
+      σ2 = max(λ[q], 0.0)
+      σ2 < 1e-14 ? 0.0 : (1 / sqrt(max(1 - σ2, 1e-8)) - 1) / σ2
+    else
+      τ = clamp(λ[q], 0.0, 1 - 1e-10)
+      τ == 0 ? 0.0 : (1 / sqrt(1 - τ) - 1) / λ[q]
+    end
     a = b = 0.0
     for r in eachindex(la)
       a += V[r, q] * la[r]
@@ -226,12 +260,12 @@ end
 
 # The factor c of the cluster-robust variance with n observations and G clusters in
 # the window and k coefficients: NaN without two clusters, or for CR1 without more
-# observations than coefficients, except under compat, where nprobust's arithmetic
-# gives Inf or NaN
-function _crscale(type, n, G, k, compat)
-  compat || (G >= 2 && (type != 1 || n > k)) || return NaN
+# observations than coefficients, except under nprobust's and rdrobust's rules, whose
+# arithmetic gives Inf or NaN; rdrobust has no factor for CR3
+function _crscale(type, n, G, k, rule)
+  rule === :default && !(G >= 2 && (type != 1 || n > k)) && return NaN
   type == 1 && return (n - 1) / (n - k) * (G / (G - 1))
-  type == 3 && return (G - 1) / G
+  type == 3 && rule in (:default, :nprobust) && return (G - 1) / G
   return 1.0
 end
 
@@ -313,6 +347,6 @@ function _coefvar(d, k, f, g, vce::ClusterVariance, compat::Bool)
   end
   type = compat ? 1 : vce.type
   cl = view(d.cluster, a:e)
-  keys, sums = _clustersums(cl, _clusterorder(cl), ℓ, ε, Y, KY, type, compat)
-  return _crscale(type, m, length(keys), P, compat) * sum(abs2, sums)
+  keys, sums = _clustersums(cl, _clusterorder(cl), ℓ, ε, Y, KY, type, _crrule(compat))
+  return _crscale(type, m, length(keys), P, _crrule(compat)) * sum(abs2, sums)
 end

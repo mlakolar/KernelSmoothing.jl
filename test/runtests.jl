@@ -13,6 +13,7 @@ tests = [
   "bands",
   "honest",
   "clusters",
+  "rd",
   "lpdensity",
   "recipes",
   "aqua"

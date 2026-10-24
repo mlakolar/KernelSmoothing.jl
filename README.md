@@ -20,8 +20,11 @@ development.
 - `fit(LocalPolynomialRegression, x, y)`: local polynomial estimates of a
   regression function or its derivatives, as nprobust's `lprobust`, with
   conventional, robust bias-corrected and honest intervals (Armstrong and Kolesár),
-  nearest-neighbour and HC0–HC3 variances, covariances between points and uniform
-  sup-t bands.
+  nearest-neighbour, HC0–HC3 and cluster-robust CR0–CR3 variances, covariances
+  between points and uniform sup-t bands.
+- `fit(RegressionDiscontinuity, x, y; cutoff)`: sharp, fuzzy and kink regression
+  discontinuity designs, with covariates and rdrobust's bandwidth selectors, as
+  rdrobust (Calonico, Cattaneo and Titiunik 2014).
 - Bandwidth selectors: Sheather and Jones (the default for densities), rules of
   thumb, least-squares and leave-one-out cross-validation, the plug-in bandwidths
   of nprobust and lpdensity, coverage-error-optimal rescalings and the bandwidths
@@ -33,7 +36,7 @@ development.
   threads (`julia --threads=auto`).
 
 With given bandwidths, the estimates and standard errors agree with nprobust,
-lpdensity and RDHonest to rounding. The default plug-in bandwidths depart from
+lpdensity, rdrobust and RDHonest to rounding. The default plug-in bandwidths depart from
 these packages where their pilot estimates or their squared bias fail, and
 `compat = true` reproduces them; the
 [documentation](https://mlakolar.github.io/KernelSmoothing.jl/dev/) explains the
