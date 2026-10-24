@@ -58,7 +58,22 @@ The conditional variances ``\hat\sigma_i^2`` come from [`NNVariance`](@ref), the
 default, which compares each response with the mean of its nearest neighbours in
 the window, or from [`HCVariance`](@ref), which uses the residuals of the local fits
 with the corrections HC0 to HC3. In small samples at the boundary, HC0 understates
-the variance more than the nearest-neighbour estimator and HC3. At each point,
+the variance more than the nearest-neighbour estimator and HC3.
+
+For observations that are independent across clusters but may be dependent within
+them, pass the cluster of each observation as `cluster`. The default variance
+estimator is then [`ClusterVariance`](@ref)`(1)`, the CR1 estimator of nprobust,
+which squares the sums of ``\ell_i \hat\varepsilon_i`` over the clusters in the
+window instead of the single products, with the factor
+``(n - 1) / (n - k) \cdot G / (G - 1)`` for ``n`` observations and ``G`` clusters in
+the window and ``k`` coefficients. Types 2 and 3 adjust the residuals of each
+cluster with its block of the hat matrix, as Bell and McCaffrey (2002) do for CR2,
+and type 0 leaves them as they are. The covariances of [`vcov`](@ref) and the bands
+of [`confband`](@ref) sum over clusters in the same way, and so do the variance
+constants of the plug-in bandwidths. With one observation per cluster, types 0 to 2
+reduce to [`HCVariance`](@ref) of the same type.
+
+At each point,
 the bandwidths are raised where needed to the distance of the `minobs`-th nearest
 observation, 21 by default as nprobust's `bwcheck`. With ties, such a window can
 still hold too few distinct values: the fit of order ``p`` needs ``p + 1`` distinct

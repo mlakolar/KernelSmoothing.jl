@@ -103,6 +103,7 @@ end
 function fit(::Type{LocalPolynomialDensity}, d::SmoothingData; points = nothing, degree::Integer = 2,
              derivative::Integer = 0, kernel::AbstractKernel = TriangularKernel(), bandwidth = MSEOptimal(),
              minobs::Integer = degree + 21, compat::Bool = false)
+  _noclusters(d, "LocalPolynomialDensity")
   d = _withouty(d)
   p, v = Int(degree), Int(derivative) + 1
   derivative >= 0 || throw(ArgumentError("derivative must be nonnegative, got $derivative"))

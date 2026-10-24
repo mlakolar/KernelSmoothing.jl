@@ -41,7 +41,7 @@ export
   NormalReference, SilvermanRule, SheatherJones, LSCV, CrossValidation,
   KDE, fit, pdf, logpdf, quantile, cquantile, mean, var, std, median, stderror,
   LocalPolynomialRegression, PointwiseDensity, LocalPolynomialDensity, RuleOfThumb, MSEOptimal, IMSEOptimal, CoverageOptimal,
-  VarianceEstimator, NNVariance, HCVariance,
+  VarianceEstimator, NNVariance, HCVariance, ClusterVariance,
   InferenceMethod, Conventional, RobustBiasCorrected, Honest, FLCIOptimal, worstcasebias,
   coef, confint, coeftable, predict, fitted, residuals, vcov, confband
 
@@ -53,6 +53,7 @@ include("bandwidths.jl")
 include("selectors.jl")
 include("kde.jl")
 include("locpoly.jl")
+include("clusters.jl")
 include("plugin.jl")
 include("kdeinference.jl")
 include("bands.jl")

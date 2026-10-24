@@ -15,12 +15,16 @@ not overlap are uncorrelated; density estimates are then slightly negatively
 correlated, since every observation counts towards the total weight. For
 regression, these are the covariances of nprobust's `covgrid` with HC variances;
 nprobust recomputes nearest-neighbour residuals on the union of two windows, which
-changes them slightly near the edges.
+changes them slightly near the edges. With [`ClusterVariance`](@ref), the vectors
+hold sums over clusters, so that estimates whose windows share a cluster are
+correlated; nprobust's `covgrid` ignores the clusters off the diagonal.
 """
 function StatsAPI.vcov(m::LocalPolynomialRegression; method::InferenceMethod = Conventional())
   vs = _pointwise(j -> _localfit(m.data, m.kernel, m.points[j], m.h[j], m.b[j], m.degree, m.derivative,
-                                 m.vce; vectors = true, nntol = _nntol(m.compat)), eachindex(m.points))
-  return _gram([v.range for v in vs], [_usesbc(method) ? v.arb : v.aus for v in vs])
+                                 m.vce; vectors = true, compat = m.compat), eachindex(m.points))
+  vals = [_usesbc(method) ? v.arb : v.aus for v in vs]
+  # with clusters, the vectors hold the sums over the clusters in the windows
+  return m.vce isa ClusterVariance ? _clustergram([v.keys for v in vs], vals) : _gram([v.range for v in vs], vals)
 end
 
 # C[j, l] = ∑ᵢ A[j][i] A[l][i] over the overlap of the index ranges of j and l

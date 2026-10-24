@@ -147,9 +147,10 @@ function Base.show(io::IO, r::FLCIOptimal)
 end
 
 function selectbandwidth(rule::FLCIOptimal, d::SmoothingData, k::AbstractKernel; derivative::Integer = 0,
-                         degree::Integer = derivative + 1, points = nothing, vce::VarianceEstimator = NNVariance(),
-                         minobs::Integer = 21)
+                         degree::Integer = derivative + 1, points = nothing,
+                         vce::Union{Nothing,VarianceEstimator} = nothing, minobs::Integer = 21)
   d.y === nothing && throw(ArgumentError("FLCIOptimal needs responses; use SmoothingData(x, y)"))
+  vce = _variance(vce, d)
   _check_degree(degree, derivative)
   p, ν = Int(degree), Int(derivative)
   pts = points === nothing ? collect(range(d.x[1], d.x[end]; length = 30)) : _checkpoints(points)

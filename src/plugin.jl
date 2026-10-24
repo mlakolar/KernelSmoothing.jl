@@ -190,13 +190,14 @@ _regression_selection(rule::Union{MSEOptimal,IMSEOptimal,CoverageOptimal}, d, k,
   selectbandwidth(rule, d, k; degree = p, derivative = ν, points = pts, vce, minobs, compat)
 
 function selectbandwidth(rule::MSEOptimal, d::SmoothingData, k::AbstractKernel; derivative::Integer = 0,
-                         degree::Integer = derivative + 1, points = nothing, vce::VarianceEstimator = NNVariance(),
-                         minobs::Integer = 21, compat::Bool = false)
+                         degree::Integer = derivative + 1, points = nothing,
+                         vce::Union{Nothing,VarianceEstimator} = nothing, minobs::Integer = 21, compat::Bool = false)
   d.y === nothing && return _densityplugin(rule, d, k, points === nothing ? nothing : _checkpoints(points),
                                            minobs, compat, Val(false))
   _check_spread(d, rule)
   _check_responses(d, rule)
   _check_degree(degree, derivative)
+  vce = _variance(vce, d)
   pts = points === nothing ? _regressionpoints(d, compat) : _checkpoints(points)
   p, ν = Int(degree), Int(derivative)
   pilots = compat ? nothing : _regressionpilots(d, k, p)
@@ -207,13 +208,14 @@ function selectbandwidth(rule::MSEOptimal, d::SmoothingData, k::AbstractKernel; 
 end
 
 function selectbandwidth(rule::IMSEOptimal, d::SmoothingData, k::AbstractKernel; derivative::Integer = 0,
-                         degree::Integer = derivative + 1, points = nothing, vce::VarianceEstimator = NNVariance(),
-                         minobs::Integer = 21, compat::Bool = false)
+                         degree::Integer = derivative + 1, points = nothing,
+                         vce::Union{Nothing,VarianceEstimator} = nothing, minobs::Integer = 21, compat::Bool = false)
   d.y === nothing && return _densityplugin(rule, d, k, points === nothing ? nothing : _checkpoints(points),
                                            minobs, compat, Val(true))
   _check_spread(d, rule)
   _check_responses(d, rule)
   _check_degree(degree, derivative)
+  vce = _variance(vce, d)
   p, ν = Int(degree), Int(derivative)
   q = p + 1
   grid = rule.grid === :points ? _checkpoints(_gridpoints(points)) : _regressiongrid(d, something(rule.grid, 30), compat)
@@ -327,7 +329,7 @@ function _msedpi(d, k, c, p, ν, regul, interior, vce, minobs, pilots = nothing)
   h = clamp_bw(optimal(ch, p, ν, regul))
   isfinite(h) || throw(ArgumentError("the plug-in bandwidth at x = $c is not defined, since a " *
     "local fit of its stages has fewer distinct values of x with positive weight than " *
-    "coefficients; pass a bandwidth"))
+    "coefficients" * (d.cluster === nothing ? "" : ", or fewer than two clusters") * "; pass a bandwidth"))
   # the constants that IMSEOptimal averages; nprobust leaves out the regularization,
   # which the adaptive rule keeps, as MSEOptimal does
   Vh, Bh = if !needB2
@@ -367,7 +369,7 @@ end
 # identified widens its window, and neighbours at distances that differ by rounding
 # are tied; under compat, as in nprobust, neither.
 function _lpbw(d, k, c, o, ν, oB, hV, hB1, hB2, scale, vce, needB2::Bool, compat::Bool)
-  widen, tol = !compat, _nntol(compat)
+  widen = !compat
   N = nobs(d)
   rB, rV = 2(o + 1 - ν), 2ν + 1
   fV = _lfit(d, k, c, hV, o, 2, widen)
@@ -379,13 +381,13 @@ function _lpbw(d, k, c, o, ν, oB, hV, hB1, hB2, scale, vce, needB2::Bool, compa
   # the bandwidths of the fits, which a fit that is not identified raises
   hV, hB1, hB2 = fV.h, fB1.h, fB2 === nothing ? hB2 : fB2.h
   g = fV.C \ [j == ν ? 1.0 : 0.0 for j in 0:o]
-  VV = _coefvar(d, k, fV, g, vce, tol) / hV^(2ν)
+  VV = _coefvar(d, k, fV, g, vce, compat) / hV^(2ν)
   BConst1 = sum(g[j + 1] * fV.s[o + j + 2] for j in 0:o)   # e_ν' Γ⁻¹ ∑ wk(u) u^(o+1) r(u)
   BConst2 = sum(g[j + 1] * fV.s[o + j + 3] for j in 0:o)
   Rreg = 0.0
   if scale > 0
     gB = fB1.C \ [j == o + 1 ? 1.0 : 0.0 for j in 0:oB]
-    Rreg = 3 * BConst1^2 * _coefvar(d, k, fB1, gB, vce, tol) / hB1^(2(o + 1))
+    Rreg = 3 * BConst1^2 * _coefvar(d, k, fB1, gB, vce, compat) / hB1^(2(o + 1))
   end
   B1 = BConst1 * fB1.β[o + 2] / hB1^(o + 1)
   B2 = fB2 === nothing ? NaN : BConst2 * fB2.β[o + 3] / hB2^(o + 2)
@@ -423,9 +425,9 @@ end
 
 # ∑ᵢ (wᵢ k(uᵢ) g'r(uᵢ))² σ̂ᵢ² over the window of a fit, with σ̂ᵢ² from the variance
 # estimator: nearest neighbours in the window, or the residuals of this fit
-function _coefvar(d, k, f, g, vce, tol)
+function _coefvar(d, k, f, g, vce, compat::Bool)
   a, e, h, o, c = f.a, f.e, f.h, f.o, f.c
-  σ2 = vce isa NNVariance ? _nnvariances(d, a, e, vce.matches, tol) : nothing
+  σ2 = vce isa NNVariance ? _nnvariances(d, a, e, vce.matches, _nntol(compat)) : nothing
   lev = vce isa HCVariance && vce.type >= 2 ? _leveragepoly(f.C, o) : nothing
   n = e - a + 1
   v = 0.0
