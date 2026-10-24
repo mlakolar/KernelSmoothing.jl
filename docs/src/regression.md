@@ -101,9 +101,10 @@ Pages = ["locpoly.jl"]
 ## Honest intervals
 
 Robust bias correction removes an estimate of the bias, while [`Honest`](@ref)
-intervals (Armstrong and Kolesár 2018, 2020) bound it. For the class of regression
-functions whose derivative of order ``p + 1`` is bounded by ``M`` near ``x_0``, the
-worst-case bias of the linear estimate ``\sum_i \ell_i y_i`` is
+intervals (Armstrong and Kolesár 2018, 2020) bound it. The Taylor class bounds the
+remainder of the order-``p`` Taylor polynomial at ``x_0`` by
+``M |x - x_0|^{p+1}/(p+1)!`` throughout the smoothing windows. Its worst-case bias
+for the linear estimate ``\sum_i \ell_i y_i`` is
 
 ```math
 B = \frac{M}{(p+1)!} \sum_{i=1}^n |\ell_i|\, |x_i - x_0|^{p+1},
@@ -112,7 +113,12 @@ B = \frac{M}{(p+1)!} \sum_{i=1}^n |\ell_i|\, |x_i - x_0|^{p+1},
 since the estimate reproduces polynomials of order ``p``. The interval is
 ``\hat\theta \pm \mathrm{cv}(B/\widehat{\mathrm{se}})\, \widehat{\mathrm{se}}``,
 where ``\mathrm{cv}(t)`` is the quantile of ``|N(t, 1)|`` at the level of the
-interval, so that it covers for every function in the class. The intervals need
+interval. With estimated standard errors, coverage is asymptotic under the normal
+approximation and its regularity conditions. With fixed weights, Gaussian errors
+and the true standard error, the coverage bound is finite-sample. A bound ``M`` on
+the derivative of order ``p + 1`` throughout the windows implies the Taylor
+remainder bound; over this smaller class, the displayed bias bound can be
+conservative. The intervals need
 ``M``, chosen before seeing the estimates, since adapting to unknown smoothness is
 impossible over such classes, and [`Honest`](@ref) has no default for it.
 `Honest(:rot)` takes ``M`` from a global polynomial of order ``p + 3``, the rule of

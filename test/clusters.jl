@@ -124,12 +124,28 @@ end
             points = [0.05, 0.5], minobs = 0)
     @test isnan(m.se[1]) && isnan(m.se_rbc[1])
     @test isfinite(m.estimate[1]) && all(isfinite, (m.se[2], m.se_rbc[2]))
+    for method in (Conventional(), RobustBiasCorrected())
+      C = vcov(m; method)
+      @test all(isnan, C[1, :]) && all(isnan, C[:, 1])
+      @test C[2, 2] ≈ stderror(m; method)[2]^2 rtol = 1e-12
+    end
   end
   # where the fit is not identified, in a window with one distinct value or none
   m = fit(LocalPolynomialRegression, X, Y; cluster = G, bandwidth = [0.006, 0.004], points = [0.5, 0.505], minobs = 0)
   @test all(isnan, m.estimate) && all(isnan, m.se) && m.nwindow[2] == 0
-  C = vcov(m)
-  @test isnan(C[1, 1]) && C[2, 2] == 0
+  for method in (Conventional(), RobustBiasCorrected())
+    @test all(isnan, vcov(m; method))
+  end
+  # Missing bias correction leaves the identified conventional cluster covariance.
+  xs = vcat(repeat([0.0, 1.0], inner = 30), collect(range(4, 5; length = 101)))
+  ys = sin.(3 .* xs) .+ 0.1 .* cos.(31 .* (1:length(xs)))
+  groups = mod.(eachindex(xs), 17)
+  m = fit(LocalPolynomialRegression, xs, ys; cluster = groups, vce = ClusterVariance(0),
+          bandwidth = 0.8, points = [0.5, 4.5], minobs = 0)
+  @test isfinite(m.se[1]) && isnan(m.se_rbc[1]) && isfinite(m.se_rbc[2])
+  @test all(isfinite, vcov(m))
+  C = vcov(m; method = RobustBiasCorrected())
+  @test all(isnan, C[1, :]) && all(isnan, C[:, 1]) && isfinite(C[2, 2])
   # and the plug-in rules cannot estimate their variance constants there
   e = try
     selectbandwidth(MSEOptimal(), SmoothingData(X, Y; cluster = X .< 0.5), EpanechnikovKernel(); points = [0.05])
