@@ -145,6 +145,7 @@ sums over the observations within 38.62 standard deviations, beyond which the
 kernel underflows to zero, so that they equal [`DirectSums`](@ref) exactly; and
 [`DirectSums`](@ref) for other kernels. [`BinnedSums`](@ref) approximates. A
 [`SumsWorkspace`](@ref) passed as `workspace` provides reusable buffers.
+Gaussian derivatives whose cached scale factor overflows or vanishes use full sums.
 
 # Examples
 ```julia
@@ -284,6 +285,10 @@ _kernelsums!(out, ::_ZeroWindowSums, xs, vals, k, h, points, kmax, ws) =
 
 # exp(-z²/2) is zero in Float64 for |z| > 38.604, which holds for |u| ≥ 38.62 σ
 _zeroradius(k::GaussianFamily) = 38.62 * first(_scale_order(k))
+function _zeroradius(k::GaussianDerivativeKernel)
+  (!isfinite(k.c) || (iszero(k.c) && !iszero(k.a))) && return Inf
+  return 38.62 * k.σ
+end
 
 # the interval outside which a kernel is exactly zero in Float64: its support, or for
 # Gaussian kernels the interval where the exponential has not underflowed
