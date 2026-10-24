@@ -22,6 +22,7 @@ const R_BWSJ_Y = 0.241278958679031
 const R_BWSJ_Y_DPI = 0.241188342451224
 const R_BWSJ_Z = 0.00255067563899276
 const R_BWSJ_Z_DPI = 0.104129646272677
+include("data/sj_compat_golden.jl")
 
 # ψ̂ᵣ(g) and the Sheather–Jones equation by their definitions
 phi4(u) = (u^4 - 6u^2 + 3) * exp(-u^2 / 2) / sqrt(2π)
@@ -110,6 +111,24 @@ end
   @test KernelSmoothing._zeroin(x -> x - 1, 1.0, 2.0, 0.0, 1.0, 1e-12) == (1.0, 0)            # a root at an end
 end
 
+@testset "R's bw.SJ binning threshold, reflection, translation and failures" begin
+  kernels = (GaussianKernel(), EpanechnikovKernel(), UniformKernel(),
+             TriangularKernel(), BiweightKernel(), TriweightKernel())
+  for row in SJ_COMPAT
+    x = [quantile(Normal(), mod(i * 0.6180339887498949, 1)) + 0.3sin(2.71i) for i in 1:row.n]
+    row.variant == :reflected && (x = -x)
+    row.variant == :shifted && (x = x .+ 13.25)
+    d = SmoothingData(x)
+    for (method, reference) in ((:ste, row.ste), (:dpi, row.dpi)), k in kernels
+      h = bandwidth(SheatherJones(; method, compat = true), d, k)
+      @test h * sqrt(moment(k, 2)) ≈ reference rtol = 1e-12
+    end
+  end
+  for x in (fill(2.0, 50), [zeros(49); 1.0]), method in (:ste, :dpi)
+    @test_throws ArgumentError bandwidth(SheatherJones(; method, compat = true), SmoothingData(x), GaussianKernel())
+  end
+end
+
 @testset "small positive definite solves" begin
   for p in 0:3
     A = [1.0 / (a + b - 1) for a in 1:p+1, b in 1:p+1] + 0.1 * LinearAlgebra.I   # a shifted Hilbert matrix
@@ -132,7 +151,7 @@ end
   # a far outlier would need a grid of more than 2^20 points, so that the data are binned for each g
   x = [Q; 1e7]
   @test bandwidth(SheatherJones(exact = 0), SmoothingData(x), GaussianKernel()) ≈
-        bandwidth(SheatherJones(), SmoothingData(x), GaussianKernel()) rtol = 1e-4
+        bandwidth(SheatherJones(exact = 1000), SmoothingData(x), GaussianKernel()) rtol = 1e-4
 end
 
 # a kernel defined outside the package, without a convolution
@@ -362,6 +381,27 @@ end
     @test _cvcriterion(d, g, h, 1, SumsWorkspace(), trues(3000), true) ≈ _cvcriterion(d, g, h, 1, SumsWorkspace()) rtol = 2e-4
   end
   @test bandwidth(CrossValidation(), d, g) ≈ bandwidth(CrossValidation(exact = 10^4), d, g) rtol = 5e-3
+end
+
+@testset "Gaussian cross-validation declines infeasible FFT grids" begin
+  x = [sin(1.618i) + 0.3cos(2.71i) for i in 1:300]
+  y = sin.(x) .+ 0.1cos.(7.3 .* (1:300))
+  g = GaussianKernel()
+  for outlier in (1e20, 1e50)
+    d = SmoothingData([x; outlier], [y; 0.0])
+    @test !KernelSmoothing._fftfaster(d, g, 0.1, 1, eachindex(d.x))
+    scored = d.x .< outlier
+    @test _cvcriterion(d, g, 0.1, 1, SumsWorkspace(), scored, true) ==
+          _cvcriterion(d, g, 0.1, 1, SumsWorkspace(), scored, false)
+    sb = selectbandwidth(CrossValidation(gridsize = 8, exact = 0), d, g)
+    se = selectbandwidth(CrossValidation(gridsize = 8, exact = 1000), d, g)
+    @test sb.h == se.h && sb.details.scored == se.details.scored == 300
+    @test isequal(sb.details.criterion, se.details.criterion)
+  end
+  d = SmoothingData(x, y)
+  @test !KernelSmoothing._fftfaster(d, g, nextfloat(0.0), 1, eachindex(d.x))
+  wide = KernelSmoothing.GaussianDerivativeKernel(1e308, 0)
+  @test !KernelSmoothing._fftfaster(d, wide, 2.0, 1, eachindex(d.x))
 end
 
 @testset "least-squares cross-validation on clusters, lognormal and rounded data" begin

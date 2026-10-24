@@ -305,6 +305,17 @@ end
   @test fetch.(tasks) == [1, 2] || fetch.(tasks) == [2, 1]
 end
 
+@testset "bandwidths stay positive and finite after conversion" begin
+  d, k = SmoothingData([0.0, 1.0]), EpanechnikovKernel()
+  for h in (big"1e-400", big"1e400")
+    @test_throws ArgumentError kernelsums(d, k, h, [0.0])
+    @test_throws ArgumentError kernelsums(d, k, [h], [0.0])
+    @test_throws ArgumentError fit(KDE, d; bandwidth = h)
+  end
+  @test kernelsums(d, k, big"0.5", [0.0]) == kernelsums(d, k, 0.5, [0.0])
+  @test kernelsums(d, k, [big"0.5"], [0.0]) == kernelsums(d, k, [0.5], [0.0])
+end
+
 @testset "the engine choice samples the points in their sorted order" begin
   d = SmoothingData([7 * sin(1.618i) + 0.3 * cos(2.7i) for i in 1:100_000])
   grid = collect(range(-5, 5; length = 200))
