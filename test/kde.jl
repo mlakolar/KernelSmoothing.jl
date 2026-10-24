@@ -97,6 +97,23 @@ end
         2 + 0.5 * 1.959963984540054 rtol = 1e-12
 end
 
+@testset "quantiles with extreme finite brackets" begin
+  # Same-sign brackets overflow their sum, and the bracket crossing zero can
+  # overflow its width. Both still enclose finite quantiles of these mixtures.
+  for x in ([9e307, 1e308], [-1e308, -9e307], [-9e307, 9e307])
+    f = fit(KDE, x; bandwidth = 1e306)
+    @test isfinite(minimum(f)) && isfinite(maximum(f))
+    for p in (0.1, 0.5, 0.9)
+      q = quantile(f, p)
+      @test isfinite(q) && minimum(f) <= q <= maximum(f)
+      @test cdf(f, q) ≈ p rtol = 1e-12
+      cq = cquantile(f, p)
+      @test isfinite(cq) && minimum(f) <= cq <= maximum(f)
+      @test ccdf(f, cq) ≈ p rtol = 1e-12
+    end
+  end
+end
+
 @testset "sampling" begin
   rng = MersenneTwister(20261023)
   N = 100_000

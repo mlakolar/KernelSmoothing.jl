@@ -282,6 +282,46 @@ end
   end
 end
 
+@testset "Gaussian derivatives with an overflowing normalizer" begin
+  # These Hermite formulas give an independent reference without overflowing the
+  # scale factor or underflowing the Gaussian before multiplying them.
+  hermite(r, z) = r == 0 ? one(z) : r == 1 ? z : r == 2 ? z^2 - 1 : z^4 - 6z^2 + 3
+  function reference(σ, r, a, u)
+    setprecision(BigFloat, 256) do
+      sb, zb = BigFloat(σ), BigFloat(u) / BigFloat(σ)
+      Float64(BigFloat(a) * (-1)^r * hermite(r, zb) * exp(-zb^2 / 2) /
+              (sqrt(2 * BigFloat(π)) * sb^(r + 1)))
+    end
+  end
+  for (σ, r, a) in ((1e-150, 2, 1.0), (1e-200, 1, 1.0), (1e-320, 0, 1.0),
+                    (1e-100, 4, -0.75), (1e-150, 2, 0.0))
+    k = GaussianDerivativeKernel(σ, r, a)
+    @test !isfinite(k.c)
+    for z in (0.0, 1.0, 2.0, -40.0, 40.0)
+      u = z * σ
+      expected = reference(σ, r, a, u)
+      if isfinite(expected)
+        @test k(u) ≈ expected rtol = 2e-12
+      else
+        @test k(u) == expected
+      end
+    end
+    @test k(Inf) == 0 && k(-Inf) == 0 && k(1.0) == 0
+    @test isnan(k(NaN))
+  end
+  k = GaussianDerivativeKernel(1e-150, 2)
+  u = 40 * k.σ
+  expected = k(u)
+  @test isfinite(expected) && expected > 1e100
+  @inferred k(u)
+  # Evaluation uses no BigFloat precision context, including concurrent calls.
+  setprecision(BigFloat, 80) do
+    tasks = [Threads.@spawn k(u) for _ in 1:16]
+    @test all(==(expected), fetch.(tasks))
+    @test precision(BigFloat) == 80
+  end
+end
+
 @testset "convolutions and products on narrow pieces" begin
   # breakpoints that coincide only up to rounding, -0.7 + 1 and 0.3, make a piece one
   # unit in the last place wide; the convolution must not drop it
