@@ -125,6 +125,11 @@ end
     @test isnan(m.se[1]) && isnan(m.se_rbc[1])
     @test isfinite(m.estimate[1]) && all(isfinite, (m.se[2], m.se_rbc[2]))
   end
+  # where the fit is not identified, in a window with one distinct value or none
+  m = fit(LocalPolynomialRegression, X, Y; cluster = G, bandwidth = [0.006, 0.004], points = [0.5, 0.505], minobs = 0)
+  @test all(isnan, m.estimate) && all(isnan, m.se) && m.nwindow[2] == 0
+  C = vcov(m)
+  @test isnan(C[1, 1]) && C[2, 2] == 0
   # and the plug-in rules cannot estimate their variance constants there
   e = try
     selectbandwidth(MSEOptimal(), SmoothingData(X, Y; cluster = X .< 0.5), EpanechnikovKernel(); points = [0.05])

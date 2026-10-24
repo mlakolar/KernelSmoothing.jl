@@ -41,7 +41,11 @@ function _localfit(d::SmoothingData, k::AbstractKernel, x0, h, b, p, ν, vce::Cl
     if adjust
       y = _powers!(view(Y, :, j), u)
       if nb
-        _addpowers!(Λ, kh * u^P, u)   # Λ = ∑ khᵢ uᵢ^(p+1) r_p(uᵢ)
+        t = kh * u^P   # Λ = ∑ khᵢ uᵢ^(p+1) r_p(uᵢ)
+        for r in 1:P
+          Λ[r] += t
+          t *= u
+        end
         kc[j] = kb * evalpoly(v, c)
       end
       _lsolve!(y, U)
@@ -214,15 +218,6 @@ function _powers!(y, u)
   for j in eachindex(y)
     y[j] = v
     v *= u
-  end
-  return y
-end
-
-# adds t u^(j-1) to y[j]
-function _addpowers!(y, t, u)
-  for j in eachindex(y)
-    y[j] += t
-    t *= u
   end
   return y
 end
