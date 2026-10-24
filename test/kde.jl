@@ -409,6 +409,9 @@ end
     f = fit(KDE, x; kernel = k, bandwidth = 0.4, weights)
     @test stderror.(f, pts) == [stderror(f, t) for t in pts]
   end
+  # an engine fixed by the estimate sums the three sums with it
+  fw = fit(KDE, x; bandwidth = 0.4, weights = w, engine = WindowSums())
+  @test all(isapprox.(stderror.(fw, pts), [stderror(fw, t) for t in pts]; rtol = 1e-12, atol = 1e-15))
 end
 
 end
