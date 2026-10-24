@@ -620,11 +620,12 @@ struct GaussianDerivativeKernel <: AbstractKernel
   c::Float64      # a (-1)^r / (sqrt(2π) σ^(r+1))
 
   function GaussianDerivativeKernel(σ::Real, r::Integer, a::Real = 1.0)
-    isfinite(σ) && σ > 0 ||
+    σf, af = Float64(σ), Float64(a)
+    isfinite(σf) && σf > 0 ||
       throw(ArgumentError("standard deviation σ must be positive and finite, got $σ"))
     _check_order(r)
-    isfinite(a) || throw(ArgumentError("amplitude a must be finite, got $a"))
-    new(σ, r, a, 1 / σ, a * (-1)^r * INV_SQRT_2PI / Float64(σ)^(r + 1))
+    isfinite(af) || throw(ArgumentError("amplitude a must be finite, got $a"))
+    new(σf, r, af, 1 / σf, af * (-1)^r * INV_SQRT_2PI / σf^(r + 1))
   end
 end
 

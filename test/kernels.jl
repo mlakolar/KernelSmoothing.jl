@@ -215,6 +215,18 @@ end
   @test derivative(s, 1)(0.4) ≈ 3 * derivative(base, 1)(0.4)
   @test_throws ArgumentError GaussianDerivativeKernel(1.0, 0, Inf)
   @test_throws ArgumentError GaussianDerivativeKernel(Inf, 0)
+  for σ in (big"1e-400", big"1e400")
+    @test_throws ArgumentError GaussianDerivativeKernel(σ, 0)
+  end
+  for a in (big"1e400", -big"1e400")
+    @test_throws ArgumentError GaussianDerivativeKernel(1.0, 0, a)
+  end
+  k = GaussianDerivativeKernel(big"1.5", 2, big"3.0")
+  @test k.σ === 1.5 && k.a === 3.0
+  @test k(0.4) == GaussianDerivativeKernel(1.5, 2, 3.0)(0.4)
+  for σ in (nextfloat(0.0), floatmin(Float64), floatmax(Float64))
+    @test GaussianDerivativeKernel(σ, 0).σ === σ
+  end
 end
 
 @testset "products" begin
