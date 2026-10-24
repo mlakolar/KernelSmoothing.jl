@@ -146,10 +146,12 @@ nearly the whole range and the bandwidths are too large where the curvature is
 local.
 
 [`IMSEOptimal`](@ref) averages the variance and squared-bias constants over a grid,
-30 equally spaced points between the smallest and the largest observation as in
-nprobust, or the evaluation points with `grid = :points`, and gives one bandwidth,
-at most the range of the data. Unlike nprobust's, whose rule `compat = true`
-reproduces, the squared bias keeps the regularization.
+30 quantiles of the covariate of order 0.05 to 0.95, or the evaluation points with
+`grid = :points`, and gives one bandwidth, at most the range of the data. nprobust,
+whose rule `compat = true` reproduces, averages over 30 equally spaced points
+between the smallest and the largest observation, which for a covariate with heavy
+tails lie mostly where few observations are left, and its squared bias leaves out
+the regularization.
 [`CoverageOptimal`](@ref) rescales the plug-in bandwidths by a power of the sample
 size, which makes the coverage error of robust bias-corrected intervals shrink at
 the fastest rate (Calonico, Cattaneo and Farrell 2018, 2022). For odd ``p - \nu``

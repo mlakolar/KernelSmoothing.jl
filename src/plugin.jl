@@ -85,10 +85,14 @@ The direct plug-in estimate of the bandwidth that minimizes the integrated mean
 squared error of a local polynomial fit, one bandwidth for all points: the
 variance and squared bias constants of [`MSEOptimal`](@ref), with its
 regularization, are averaged over a grid of points, and the bandwidth is capped at
-the range of the data. For regression, the grid is by default 30 equally spaced
-points between the smallest and the largest observation, as in nprobust's
-`imse-dpi`; `grid = m` takes `m` such points, and `grid = :points` the evaluation
-points of the fit. The pilot bandwidths are those of [`MSEOptimal`](@ref),
+the range of the data. For regression, the grid is by default 30 quantiles of the
+covariate, of order 0.05 to 0.95, so that the average estimates the error at a
+typical observation; `grid = m` takes `m` such quantiles, and `grid = :points` the
+evaluation points of the fit. nprobust's `imse-dpi`, which `compat = true`
+reproduces, averages over equally spaced points between the smallest and the largest
+observation. For a covariate with heavy tails these lie mostly where few
+observations are left, and the constants estimated there, which are large and
+unstable, dominate the average. The pilot bandwidths are those of [`MSEOptimal`](@ref),
 adaptive by default, and `b` is in `details.b`. With `compat = true` the rule is
 nprobust's, whose pilots are its own, whose averaged squared bias leaves out the
 regularization and whose bandwidth has no cap, which for an exactly linear
@@ -118,6 +122,23 @@ end
 
 IMSEOptimal(; grid::Union{Nothing,Integer,Symbol} = nothing, regularization::Real = 1, interior::Bool = false) =
   IMSEOptimal(grid, regularization, interior)
+
+# The default evaluation points of regression: 30 equally spaced points between the
+# quantiles of order 0.025 and 0.975 of the covariate, or between its extremes as
+# nprobust under compat (or where these quantiles coincide). Between the extremes, a
+# covariate with heavy tails put every point outside the central 95 percent of the
+# data: for a t₃ sample of 200 with an observation at -377, the points nearest the
+# data were -7.8 and 5.4.
+function _regressionpoints(d, compat)
+  lo, hi = compat ? (d.x[1], d.x[end]) : (_quantile(d, 0.025), _quantile(d, 0.975))
+  lo < hi || ((lo, hi) = (d.x[1], d.x[end]))
+  return collect(range(lo, hi; length = 30))
+end
+
+# the grid of the integrated rule for regression: m quantiles of order 0.05 to 0.95 of
+# the covariate, or m equally spaced points between its extremes as nprobust
+_regressiongrid(d, m, compat) = compat ? collect(range(d.x[1], d.x[end]; length = m)) :
+  [_quantile(d, q) for q in range(0.05, 0.95; length = m)]
 
 # the evaluation points for grid = :points, which must be given
 function _gridpoints(points)
@@ -176,7 +197,7 @@ function selectbandwidth(rule::MSEOptimal, d::SmoothingData, k::AbstractKernel; 
   _check_spread(d, rule)
   _check_responses(d, rule)
   _check_degree(degree, derivative)
-  pts = points === nothing ? collect(range(d.x[1], d.x[end]; length = 30)) : _checkpoints(points)
+  pts = points === nothing ? _regressionpoints(d, compat) : _checkpoints(points)
   p, ν = Int(degree), Int(derivative)
   pilots = compat ? nothing : _regressionpilots(d, k, p)
   r = _msedpis(d, k, pts, p, ν, rule, vce, minobs, pilots)
@@ -195,8 +216,7 @@ function selectbandwidth(rule::IMSEOptimal, d::SmoothingData, k::AbstractKernel;
   _check_degree(degree, derivative)
   p, ν = Int(degree), Int(derivative)
   q = p + 1
-  grid = rule.grid === :points ? _checkpoints(_gridpoints(points)) :
-    collect(range(d.x[1], d.x[end]; length = something(rule.grid, 30)))
+  grid = rule.grid === :points ? _checkpoints(_gridpoints(points)) : _regressiongrid(d, something(rule.grid, 30), compat)
   pilots = compat ? nothing : _regressionpilots(d, k, p)
   r = _msedpis(d, k, grid, p, ν, rule, vce, minobs, pilots)
   N, R = nobs(d), d.x[end] - d.x[1]

@@ -134,7 +134,8 @@ end
     fit(LocalPolynomialRegression, d::SmoothingData; kwargs...)
 
 Fits local polynomials of order `degree` to the responses `y` at `points`, by
-default 30 equally spaced points between the smallest and the largest `x`, and
+default 30 equally spaced points between the quantiles of order 0.025 and 0.975 of
+`x` (between the smallest and the largest `x` with `compat = true`, as nprobust), and
 estimates the regression function or its derivative of order `derivative`. The
 default order, `derivative + 1`, is nprobust's: an odd `degree - derivative` has the
 same order of bias at the boundary as in the interior.
@@ -192,7 +193,7 @@ function fit(::Type{LocalPolynomialRegression}, d::SmoothingData; derivative::In
   p, ν = Int(degree), Int(derivative)
   _check_degree(p, ν)
   minobs >= 0 || throw(ArgumentError("minobs must be nonnegative, got $minobs"))
-  pts = points === nothing ? collect(range(d.x[1], d.x[end]; length = 30)) : _checkpoints(points)
+  pts = points === nothing ? _regressionpoints(d, compat) : _checkpoints(points)
   sel = _anyselection(_regression_selection(bandwidth, d, kernel, p, ν, pts, vce, minobs; compat))
   h = _pointbandwidths(sel.h, length(pts))
   b = if pilot === :selected
