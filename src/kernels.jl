@@ -219,8 +219,8 @@ julia> moment(k, 0), moment(k, 2)
 ```
 
 The [`smoothness`](@ref) is found by checking which derivatives are continuous
-at the breakpoints. The type is not exported, because KernelFunctions.jl exports
-a different type of the same name.
+at the breakpoints. KernelFunctions.jl exports a different type of the same name;
+when both packages are loaded, qualify this one as `KernelSmoothing.PiecewisePolynomialKernel`.
 
 The coefficients are converted in 256-bit precision, set with `setprecision`,
 which is local to the task from Julia 1.11 on but global on Julia 1.10; there,
@@ -251,6 +251,7 @@ struct PiecewisePolynomialKernel <: PolynomialKernel
     all(cj -> all(isfinite, cj), coefs) || throw(ArgumentError("coefficients must be finite"))
     smoothness >= 0 || throw(ArgumentError("smoothness must be nonnegative, got $smoothness"))
     b, c = Vector{Float64}(breaks), [Vector{Float64}(cj) for cj in coefs]
+    all(cj -> all(isfinite, cj), c) || throw(ArgumentError("coefficients must be finite as Float64 values"))
     cc, mass, lower, upper = if eltype(first(coefs)) <: BigFloat
       setprecision(BigFloat, 256) do
         cb = [BigFloat.(cj) for cj in coefs]

@@ -657,6 +657,96 @@ function _estimates(d, k, h, points, p, ν)
   return out
 end
 
+
+## Local polynomial smoothing, without inference
+
+"""
+    localpolynomial(x, y, points; bandwidth, derivative = 0, degree = derivative + 1,
+                    kernel = EpanechnikovKernel(), weights = nothing)
+    localpolynomial(d::SmoothingData, points; bandwidth, kwargs...)
+
+The local polynomial estimates of the regression function, or of its derivative of
+order `derivative`, at `points`, with a given `bandwidth`, a number or one per
+point: the estimates of [`LocalPolynomialRegression`](@ref), without floors on the
+windows and without standard errors. Estimates whose window holds fewer distinct
+values of `x` with positive weight than coefficients are `NaN`. The sums come from
+[`kernelsums`](@ref) for all points at once, so that smoothing many curves, or
+building other estimators on local fits, costs little. [`smoothermatrix`](@ref)
+gives the weights of the estimates.
+
+# Examples
+```julia
+julia> x = collect(range(0, 1; length = 200)); y = sin.(2π .* x);
+
+julia> round.(localpolynomial(x, y, [0.25, 0.5]; bandwidth = 0.1); digits = 3)
+2-element Vector{Float64}:
+ 0.961
+ 0.0
+```
+"""
+function localpolynomial(x::AbstractVector, y::AbstractVector, points; weights = nothing, kwargs...)
+  return localpolynomial(SmoothingData(x, y; weights), points; kwargs...)
+end
+
+function localpolynomial(d::SmoothingData, points; bandwidth, derivative::Integer = 0,
+                         degree::Integer = derivative + 1, kernel::AbstractKernel = EpanechnikovKernel())
+  d.y === nothing && throw(ArgumentError("local polynomial smoothing needs responses; use SmoothingData(x, y)"))
+  p, ν = Int(degree), Int(derivative)
+  _check_degree(p, ν)
+  pts = _checkpoints(points)
+  return _estimates(d, kernel, _pointbandwidths(bandwidth, length(pts)), pts, p, ν)
+end
+
+"""
+    smoothermatrix(x, points; bandwidth, derivative = 0, degree = derivative + 1,
+                   kernel = EpanechnikovKernel(), weights = nothing)
+    smoothermatrix(d::SmoothingData, points; bandwidth, kwargs...)
+
+The matrix `L` of the linear smoother of [`localpolynomial`](@ref): the estimate at
+`points[j]` is `∑ᵢ L[j, i] yᵢ`, so that `L * y` gives the estimates. The columns
+follow the observations in the input order of `x` (observations with zero weight
+get zero columns), or for `d::SmoothingData` the sorted order of `d.x`. For the
+regression function, every row sums to one and reproduces polynomials of order
+`degree` exactly. Rows of estimates that are not identified are `NaN`.
+"""
+function smoothermatrix(x::AbstractVector, points; weights = nothing, kwargs...)
+  d = SmoothingData(x; weights)
+  Ls = smoothermatrix(d, points; kwargs...)
+  L = zeros(size(Ls, 1), length(x))
+  L[:, d.perm] = Ls
+  return L
+end
+
+function smoothermatrix(d::SmoothingData, points; bandwidth, derivative::Integer = 0,
+                        degree::Integer = derivative + 1, kernel::AbstractKernel = EpanechnikovKernel())
+  p, ν = Int(degree), Int(derivative)
+  _check_degree(p, ν)
+  pts = _checkpoints(points)
+  h = _pointbandwidths(bandwidth, length(pts))
+  rows = _pointwise(j -> _smootherrow(d, kernel, pts[j], h[j], p, ν), eachindex(pts))
+  L = zeros(length(pts), nobs(d))
+  for j in eachindex(rows)
+    r, ℓ = rows[j]
+    L[j, r] = ℓ
+  end
+  return L
+end
+
+# the weights of the estimate at x0 over the observations r with positive weight
+function _smootherrow(d, k, x0, h, p, ν)
+  r = _poswindow(d, k, x0, h)
+  S = zeros(2p + 1)
+  for i in r
+    u = (d.x[i] - x0) / h
+    _powersums!(S, _weight(d.w, i) * k(u), u)
+  end
+  C, ok = _gramfactor([S[i + j + 1] for i in 0:p, j in 0:p], () -> nunique(d, r))
+  ok || return (1:nobs(d), fill(NaN, nobs(d)))
+  g = C \ [j == ν ? 1.0 : 0.0 for j in 0:p]
+  scale = factorial(ν) / h^ν
+  return (r, [scale * _weight(d.w, i) * k((d.x[i] - x0) / h) * evalpoly((d.x[i] - x0) / h, g) for i in r])
+end
+
 """
     fitted(m::LocalPolynomialRegression)
 

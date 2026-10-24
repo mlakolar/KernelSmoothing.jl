@@ -89,15 +89,25 @@ vanishing at the inflection points of the normal density, where lpdensity's
 bandwidth jumps to the range of the data. The lower ends of the intervals for the
 density itself are clamped at zero.
 
-With `compat = true`, the fit agrees with lpdensity 3.0.1 with `massPoints = TRUE`:
-the default points are unweighted quantiles, points outside the data are
-extrapolated, the rules are lpdensity's, plug-in fits whose matrix R's `solve`
-rejects as ill-conditioned fall back to the floors, and intervals are not clamped.
+With `compat = true`, the fit agrees with lpdensity 3.0.1 with `massPoints = TRUE`.
+The default points are unweighted quantiles of the input, before observations
+with zero weight are dropped. Points outside the data are extrapolated, the rules
+are lpdensity's, plug-in fits whose matrix R's `solve` rejects as ill-conditioned
+fall back to the floors, and intervals are not clamped.
+For a prepared `SmoothingData`, the default points use its retained observations,
+since observations it already dropped are unavailable.
 The kernel must be compactly supported and nonnegative; lpdensity uses the
 triangular, Epanechnikov and uniform kernels.
 """
-function fit(::Type{LocalPolynomialDensity}, x::AbstractVector; weights = nothing, kwargs...)
-  return fit(LocalPolynomialDensity, SmoothingData(x; weights); kwargs...)
+function fit(::Type{LocalPolynomialDensity}, x::AbstractVector; weights = nothing,
+             points = nothing, compat::Bool = false, kwargs...)
+  d = SmoothingData(x; weights)
+  if compat && points === nothing && nobs(d) < length(x)
+    # lpdensity chooses the default grid before it drops zero sampling weights
+    xs = sort!(Float64[t for t in x])
+    points = [_unweightedquantile(xs, q) for q in 0.05:0.05:0.95]
+  end
+  return fit(LocalPolynomialDensity, d; points, compat, kwargs...)
 end
 
 function fit(::Type{LocalPolynomialDensity}, d::SmoothingData; points = nothing, degree::Integer = 2,
@@ -553,28 +563,32 @@ function _rsolvable(G)
 end
 
 # G[i, j] = ∫∫_{x<y} x^i y^(j-1) k(x) k(y) + ∫∫_{x>y} x^(i-1) y^j k(x) k(y), i, j = 1, …, p + 1,
-# by Gauss–Legendre quadrature on the pieces of the kernel, exact for these polynomials
-function _cjmG(k, p)
-  breaks = collect(first(pieces(k)))
-  xs, ws = _gausslegendre(24)
-  # ∫ f over [a, b], split at the breakpoints of the kernel
-  function integral(f, a, b)
-    a >= b && return 0.0
-    cuts = [a; [t for t in breaks if a < t < b]; b]
-    s = 0.0
-    for c in 1:length(cuts)-1
-      m, r = (cuts[c] + cuts[c + 1]) / 2, (cuts[c + 1] - cuts[c]) / 2
-      s += r * sum(ws[l] * f(m + r * xs[l]) for l in eachindex(xs))
-    end
-    return s
-  end
-  a0, b0 = first(breaks), last(breaks)
+# over [a0, b0]² (by default the support of the kernel), by Gauss–Legendre quadrature on
+# the pieces of the kernel, exact for these polynomials
+function _cjmG(k, p, a0 = first(first(pieces(k))), b0 = last(first(pieces(k))))
   G = zeros(p + 1, p + 1)
   for i in 1:p+1, j in 1:p+1
-    G[i, j] = integral(y -> y^(j - 1) * k(y) * integral(x -> x^i * k(x), a0, y), a0, b0) +
-              integral(y -> y^j * k(y) * integral(x -> x^(i - 1) * k(x), y, b0), a0, b0)
+    G[i, j] = _kintegral(k, y -> y^(j - 1) * k(y) * _kintegral(k, x -> x^i * k(x), a0, y), a0, b0) +
+              _kintegral(k, y -> y^j * k(y) * _kintegral(k, x -> x^(i - 1) * k(x), y, b0), a0, b0)
   end
   return G
+end
+
+const _GL24 = _gausslegendre(24)
+
+# ∫ f over [a, b] by Gauss–Legendre quadrature on the pieces of the kernel k, exact for
+# polynomials times the kernel
+function _kintegral(k, f, a, b)
+  a >= b && return 0.0
+  breaks = first(pieces(k))
+  xs, ws = _GL24
+  cuts = [a; [t for t in breaks if a < t < b]; b]
+  s = 0.0
+  for c in 1:length(cuts)-1
+    m, r = (cuts[c] + cuts[c + 1]) / 2, (cuts[c + 1] - cuts[c]) / 2
+    s += r * sum(ws[l] * f(m + r * xs[l]) for l in eachindex(xs))
+  end
+  return s
 end
 
 

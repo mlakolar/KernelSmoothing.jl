@@ -13,7 +13,9 @@ and [`IMSEOptimal`](@ref) at several, the plug-in bandwidths of Calonico, Cattan
 and Farrell (2019), with pilot bandwidths anchored on cross-validation.
 [`CoverageOptimal`](@ref) rescales them for robust bias-corrected inference,
 [`FLCIOptimal`](@ref) chooses bandwidths for honest intervals, and
-[`RuleOfThumb`](@ref) and [`CrossValidation`](@ref) are alternatives.
+[`RuleOfThumb`](@ref) and [`CrossValidation`](@ref) are alternatives. For
+regression discontinuity, [`RDOptimal`](@ref) gives the plug-in bandwidths of
+rdrobust; see [Regression discontinuity](@ref rd-page).
 
 ```julia
 d = SmoothingData(randn(1000))

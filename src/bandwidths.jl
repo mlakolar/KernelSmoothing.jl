@@ -227,6 +227,8 @@ _weight(w::Vector{Float64}, i) = @inbounds w[i]
 # order does not matter. With equal weights τᵢ = (i - 1) / (n - 1), R's type 7.
 function _quantile(d::SmoothingData, p::Real)
   x, c, n = d.x, d.cumw, nobs(d)
+  p == 0 && return x[1]
+  p == 1 && return x[end]
   n == 1 && return x[1]
   function m(i)
     g = d.valueindex[i]

@@ -198,16 +198,19 @@ end
 
 # one bandwidth as a Float64, or a vector of them, checked
 function _bandwidths(h::Real, m)
-  isfinite(h) && h > 0 || throw(ArgumentError("bandwidth h must be positive and finite, got $h"))
-  return Float64(h)
+  hf = Float64(h)
+  isfinite(hf) && hf > 0 || throw(ArgumentError(
+    "bandwidth h must be positive and finite as a Float64, got $h"))
+  return hf
 end
 
 function _bandwidths(h::AbstractVector{<:Real}, m)
   Base.require_one_based_indexing(h)
   length(h) == m || throw(DimensionMismatch("h has $(length(h)) bandwidths for $m points"))
-  all(b -> isfinite(b) && b > 0, h) ||
-    throw(ArgumentError("bandwidths must be positive and finite"))
-  return Vector{Float64}(h)
+  hf = Vector{Float64}(h)
+  all(b -> isfinite(b) && b > 0, hf) ||
+    throw(ArgumentError("bandwidths must be positive and finite as Float64 values"))
+  return hf
 end
 
 _bw(h::Float64, j) = h
@@ -540,7 +543,12 @@ end
 function _fftfaster(d, k::GaussianFamily, h, p, order; binsperh = 50)
   xs, n = d.x, nobs(d)
   s = h * first(_scale_order(k))
-  N = nextpow(2, floor(Int, (xs[end] - xs[1]) / (s / binsperh)) + 2 + 12binsperh + 1)
+  δ = s / binsperh
+  isfinite(δ) && δ > 0 || return false
+  cells = (xs[end] - xs[1]) / δ
+  # Leave room for the padding and the next power of two before converting to Int.
+  cells < typemax(Int) ÷ 4 || return false
+  N = nextpow(2, floor(Int, cells) + 2 + 12binsperh + 1)
   r = _zeroradius(k)
   sample = view(order, 1:max(1, n ÷ 32):n)
   terms = sum(sample) do j

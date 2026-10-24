@@ -177,6 +177,9 @@ end
   @test_throws ArgumentError PiecewisePolynomialKernel([-1, 1], [Float64[]])
   @test_throws ArgumentError PiecewisePolynomialKernel([-1, 1], [[NaN]])
   @test_throws ArgumentError PiecewisePolynomialKernel([-1, 1], [[1.0, Inf]])
+  @test_throws ArgumentError PiecewisePolynomialKernel([-1, 1], [[big"1e400"]])
+  @test_throws ArgumentError PiecewisePolynomialKernel([-1, 1], [[big"0.5", -big"1e400"]])
+  @test PiecewisePolynomialKernel([-1, 1], [[big"0.5"]]) == PiecewisePolynomialKernel([-1, 1], [[0.5]])
   # a constant piece still propagates NaN
   @test isnan(PiecewisePolynomialKernel([-1, 1], [[0.5]])(NaN))
   # the smoothness test does not depend on the scale of u: the biweight on [-10³, 10³]
