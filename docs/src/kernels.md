@@ -23,7 +23,7 @@ Every kernel can be evaluated as `k(u)` and supports the following functions.
 
 | function | value |
 |---|---|
-| `support(k)` | the interval `(lo, hi)` outside which ``K`` vanishes |
+| `support(k)` | the interval `(lo, hi)` outside which ``K`` vanishes, as a tuple |
 | `insupport(k, u)` | whether `lo ≤ u ≤ hi` |
 | `cdf(k, u)` | ``\int_{-\infty}^{u} K(t)\,dt`` |
 | `ccdf(k, u)` | ``\int_{u}^{\infty} K(t)\,dt``, accurate where it is small |
@@ -36,7 +36,10 @@ Every kernel can be evaluated as `k(u)` and supports the following functions.
 
 Several packages export a function named `derivative`, Polynomials.jl among them.
 With one of them loaded as well, Julia asks for the name to be qualified, as in
-`KernelSmoothing.derivative(k, 2)`.
+`KernelSmoothing.derivative(k, 2)`. The same holds for `GaussianKernel` and
+`PiecewisePolynomialKernel` with KernelFunctions.jl, whose kernels of the same names
+are covariance functions of Gaussian processes. Since `support(k)` is a tuple,
+`u in support(k)` compares `u` with the ends; `insupport(k, u)` tests membership.
 
 Since derivatives, convolutions and products are kernels again, the estimators
 treat them like any other kernel. A kernel has smoothness ``s`` if

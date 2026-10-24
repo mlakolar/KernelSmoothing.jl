@@ -388,9 +388,11 @@ end
 """
     support(k::AbstractKernel)
 
-The interval `(lo, hi)` outside which the kernel `k` is zero: `(-1.0, 1.0)` for
-the compactly supported named kernels and `(-Inf, Inf)` for the Gaussian. See
-also [`insupport`](@ref).
+The interval `(lo, hi)` outside which the kernel `k` is zero, as a tuple:
+`(-1.0, 1.0)` for the compactly supported named kernels and `(-Inf, Inf)` for the
+Gaussian. Since it is a tuple, `u in support(k)` asks whether `u` equals one of the
+ends; test membership with [`insupport`](@ref)`(k, u)`. (The support of a
+[`KDE`](@ref), a distribution, is an interval, for which `in` works.)
 """
 support(k::PolynomialKernel) = (b = first(pieces(k)); (first(b), last(b)))
 

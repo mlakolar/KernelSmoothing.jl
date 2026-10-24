@@ -133,8 +133,11 @@ end
     @test all(isfinite, selectbandwidth(MSEOptimal(), d, kk; points = [0.0, 1.0]).h)
     @test fit(PointwiseDensity, d; points = [0.0], kernel = kk).selection.rule == MSEOptimal()
   end
-  @test fit(PointwiseDensity, d; points = [0.0], kernel = BiweightKernel(), compat = true).selection.rule ==
-        SheatherJones()
+  # nprobust's kdrobust accepts the Epanechnikov and uniform kernels only
+  @test_throws ArgumentError fit(PointwiseDensity, d; points = [0.0], kernel = BiweightKernel(), compat = true)
+  @test_throws ArgumentError fit(PointwiseDensity, d; points = [0.0], kernel = BiweightKernel(), bandwidth = 0.5,
+                                 compat = true)
+  @test fit(PointwiseDensity, d; points = [0.0], kernel = UniformKernel(), compat = true).selection.rule == MSEOptimal()
   @test_throws ArgumentError selectbandwidth(MSEOptimal(), d, BiweightKernel(); points = [0.0], compat = true)
 end
 

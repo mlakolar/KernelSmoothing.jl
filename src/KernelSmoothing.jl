@@ -31,7 +31,7 @@ using PrecompileTools: @setup_workload, @compile_workload
 export
   AbstractKernel,
   UniformKernel, TriangularKernel, EpanechnikovKernel, BiweightKernel,
-  TriweightKernel, GaussianKernel,
+  TriweightKernel, GaussianKernel, PiecewisePolynomialKernel,
   derivative, roughness, smoothness,
   cdf, ccdf, support, insupport, convolve, moment,
   SmoothingData, nobs, effective_nobs, nunique, weightsum, window, knn_distance,
