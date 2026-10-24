@@ -53,8 +53,8 @@ Estimates the density of `x`, or its derivative of order `derivative`, at `point
 (by default the quantiles of order 0.05, 0.10, …, 0.95, weighted for weighted
 data) with local polynomial fits of order `degree` to the empirical distribution
 function, and the robust bias-corrected estimates of order `degree + 1`. The
-estimates are `NaN` at points farther outside the range of the data than the 21
-most extreme observations on that side extend, where the fits extrapolate; a
+estimates are `NaN` at points outside the range of the data whose nearest
+observation lies more than half a bandwidth away, where the fits extrapolate; a
 natural boundary just beyond the data, as 0 for positive data, keeps its estimate.
 
 - `bandwidth` is a number, a vector with one bandwidth per point, or a rule of
@@ -129,7 +129,7 @@ function fit(::Type{LocalPolynomialDensity}, d::SmoothingData; points = nothing,
     end
   end
   aux = _lpdaux(d)
-  r = _pointwise(j -> _lpdfit(d, kernel, aux, pts[j], h[j], p, v; compat, inside = _lpdinside(d, pts[j], compat)),
+  r = _pointwise(j -> _lpdfit(d, kernel, aux, pts[j], h[j], p, v; compat, inside = _lpdinside(d, pts[j], h[j], compat)),
                  eachindex(pts))
   return LocalPolynomialDensity(d, kernel, p, v - 1, sel, Int(minobs), compat, pts, h, copy(h),
     [t.estimate for t in r], [t.se for t in r], [t.estimate_bc for t in r], [t.se_rbc for t in r],
@@ -157,17 +157,15 @@ _lpdfloor(d, x0, minobs) = max(knn_distance(d, x0, min(minobs, nobs(d))),
 _lpdpoints(d, compat) = compat ? [_unweightedquantile(d.x, q) for q in 0.05:0.05:0.95] :
   [_quantile(d, q) for q in 0.05:0.05:0.95]
 
-# Whether the fits at x0 are reported: unless compat, a point farther outside the
-# range of the data than the 21 most extreme observations on that side extend is
-# NaN, since the fit there extrapolates (66 ± 106 at -1 for exponential data). A
-# natural boundary just beyond the extreme observation, as 0 for positive data,
-# stays: the gap to it is of the order of the spacing of the extreme observations.
-function _lpdinside(d, x0, compat)
-  compat && return true
-  x, n = d.x, nobs(d)
-  m = min(21, n)
-  return x[1] - (x[m] - x[1]) <= x0 <= x[n] + (x[n] - x[n - m + 1])
-end
+# Whether the fit at x0 with bandwidth h is reported: unless compat, a point outside
+# the range of the data whose nearest observation lies more than h/2 away is NaN,
+# since most of its window is empty and the fit extrapolates (66 ± 106 at -1 for
+# exponential data). A natural boundary just beyond the extreme observation, as 0
+# for positive data, stays. At the floor of minobs observations this asks that the
+# gap be at most the span of the extreme observations; a rule by that span alone
+# made the boundary of Beta(2, 2), where the density vanishes, NaN in 0.4 percent
+# of the samples.
+_lpdinside(d, x0, h, compat) = compat || d.x[1] - h / 2 <= x0 <= d.x[end] + h / 2
 
 # For each distinct value g: its total weight Pg normalized so that all weights sum
 # to n, the empirical distribution function at it, and the sum of the squared
@@ -275,7 +273,7 @@ function StatsAPI.vcov(m::LocalPolynomialDensity; method::InferenceMethod = Conv
   bc = _usesbc(_densitymethod(method))
   infl = _pointwise(eachindex(m.points)) do j
     r = _lpdfit(d, m.kernel, aux, m.points[j], m.h[j], m.degree, v; values = true, compat = m.compat,
-                inside = _lpdinside(d, m.points[j], m.compat))
+                inside = _lpdinside(d, m.points[j], m.h[j], m.compat))
     f = bc ? r.q : r.p
     scale = factorial(v) / m.h[j]^v
     # a fit that is not identified has no influence function

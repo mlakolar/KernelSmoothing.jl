@@ -165,9 +165,9 @@ Third, it uses ``(B_1 + a B_2)^2``, which vanishes at ``a = -B_1/B_2`` when the
 estimates have opposite signs, so that it can choose bandwidths of the order of the
 range of the data. `NormalReference()` gives the rule of thumb for normal data, with
 the next term of the bias, which keeps the bandwidth finite at the inflection points
-of the normal density. The estimates at points far outside the data, where the fits
-extrapolate, are `NaN`, and the lower ends of the intervals for the density are
-clamped at zero.
+of the normal density. The estimates at points outside the data whose nearest
+observation lies more than half a bandwidth away, where the fits extrapolate, are
+`NaN`, and the lower ends of the intervals for the density are clamped at zero.
 
 ```julia
 using Random

@@ -208,6 +208,11 @@ end
   @test isnan(mo.estimate[1]) && isnan(mo.se_rbc[1]) && all(isfinite, mo.estimate[2:3])
   @test all(isnan, vcov(mo)[1, :]) && isfinite(vcov(mo)[2, 2])
   @test all(isfinite, fit(LocalPolynomialDensity, XE; points = [-1.0, 0.0, 0.5], compat = true).estimate)
+  # the rule is by the bandwidth: with data from 0.1, the window of 0 with h = 0.5 holds
+  # data on most of its right half, that of -1 none
+  mb = fit(LocalPolynomialDensity, 0.1 .+ collect(range(0, 1; length = 500)); points = [0.0, -1.0], bandwidth = 0.5,
+           minobs = 0)
+  @test isfinite(mb.estimate[1]) && isnan(mb.estimate[2])
   # the lower ends of the intervals and bands for the density are clamped at zero,
   # those for its derivative are not
   mt = fit(LocalPolynomialDensity, XE; points = [4.0, 5.0, 6.0])
