@@ -27,6 +27,9 @@ development.
   rdrobust (Calonico, Cattaneo and Titiunik 2014), with the honest intervals and
   bandwidths of RDHonest, and `fit(DensityDiscontinuity, x; cutoff)`, the
   manipulation test of rddensity (Cattaneo, Jansson and Ma 2020).
+- `fit(VaryingCoefficient, u, X, y)` and `fit(PartiallyLinear, u, X, y)`:
+  varying-coefficient models and partially linear models (Robinson's double
+  residuals), with sandwich standard errors and cross-validated bandwidths.
 - `localpolynomial` and `smoothermatrix`: local polynomial estimates and their
   weights at given points and bandwidths, without inference, for smoothing many
   curves and for building other estimators, also for two covariates (covariance
