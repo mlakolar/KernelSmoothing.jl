@@ -11,8 +11,12 @@ bandwidth ``h``, the kernel density estimate is
 
 `fit(KDE, x)` returns it as a continuous univariate distribution of
 Distributions.jl, so that `pdf`, `logpdf`, `cdf`, `ccdf`, `quantile`, `cquantile`,
-`rand`, `mean`, `var`, `minimum`, `maximum` and `insupport` work as for any
-distribution. The density is
+`rand`, `mean`, `var`, `std`, `median`, `minimum`, `maximum` and `insupport` work as
+for any distribution. KernelSmoothing exports the functions among these that it
+extends or that a summary of a density needs, `mean`, `var`, `std`, `median` and
+`cquantile` included, so that they work without `using Distributions`; they are the
+functions of Distributions.jl and Statistics, so that loading those packages as
+well causes no conflict. The density is
 computed exactly from the observations, without a grid. A point costs a binary
 search in the sorted data and a sum over the observations within ``h`` of it, and
 broadcasting `pdf.(f, xs)` over many points uses the engines of

@@ -156,6 +156,13 @@ end
 CoverageOptimal(base::Union{MSEOptimal,IMSEOptimal} = MSEOptimal(); convention::Union{Nothing,Symbol} = nothing) =
   CoverageOptimal(base, convention)
 
+function Base.show(io::IO, r::CoverageOptimal)
+  print(io, "CoverageOptimal(")
+  r.base == MSEOptimal() || show(io, r.base)
+  r.convention === nothing || print(io, r.base == MSEOptimal() ? "" : "; ", "convention = ", repr(r.convention))
+  print(io, ")")
+end
+
 # the plug-in rules take the choice between the adaptive pilots and nprobust's
 _regression_selection(rule::Union{MSEOptimal,IMSEOptimal,CoverageOptimal}, d, k, p, ν, pts, vce, minobs;
                       compat = false) =

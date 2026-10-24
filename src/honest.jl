@@ -36,6 +36,8 @@ Honest(M::Union{Real,Symbol}; biascorrected::Bool = false) = Honest(M, biascorre
 Honest(; biascorrected::Bool = false) = throw(ArgumentError("Honest needs a bound M on the " *
   "derivative of order p + 1, chosen in advance, such as Honest(40), or Honest(:rot) for the rule of thumb"))
 
+Base.show(io::IO, m::Honest) = print(io, "Honest(", repr(m.M), m.biascorrected ? "; biascorrected = true" : "", ")")
+
 """
     worstcasebias(m::LocalPolynomialRegression, M; biascorrected = false)
 
@@ -137,6 +139,12 @@ FLCIOptimal(M::Union{Real,Symbol}; gridsize::Integer = 40, level::Real = 0.95) =
   FLCIOptimal(M, gridsize, level)
 FLCIOptimal(; kwargs...) = throw(ArgumentError("FLCIOptimal needs a bound M on the derivative " *
   "of order p + 1, chosen in advance, such as FLCIOptimal(40), or FLCIOptimal(:rot) for the rule of thumb"))
+
+function Base.show(io::IO, r::FLCIOptimal)
+  print(io, "FLCIOptimal(", repr(r.M))
+  _showkeywords(io, r, FLCIOptimal(r.M), "; ")
+  print(io, ")")
+end
 
 function selectbandwidth(rule::FLCIOptimal, d::SmoothingData, k::AbstractKernel; derivative::Integer = 0,
                          degree::Integer = derivative + 1, points = nothing, vce::VarianceEstimator = NNVariance(),

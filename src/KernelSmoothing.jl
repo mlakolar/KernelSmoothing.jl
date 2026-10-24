@@ -19,7 +19,8 @@ of the estimators and bandwidth selectors are built from, see [`kernelsums`](@re
 module KernelSmoothing
 
 import Distributions
-import Distributions: cdf, ccdf, cquantile, support, convolve, moment, pdf, logpdf, quantile, insupport, mean, var
+import Distributions: cdf, ccdf, cquantile, support, convolve, moment, pdf, logpdf, quantile, insupport, mean, var,
+  std, median
 import LinearAlgebra
 import StatsAPI
 import StatsAPI: fit, nobs, stderror, coef, confint, coeftable, predict, fitted, residuals, vcov
@@ -38,7 +39,7 @@ export
   SumsWorkspace,
   BandwidthSelector, BandwidthSelection, selectbandwidth, bandwidth,
   NormalReference, SilvermanRule, SheatherJones, LSCV, CrossValidation,
-  KDE, fit, pdf, logpdf, quantile, stderror,
+  KDE, fit, pdf, logpdf, quantile, cquantile, mean, var, std, median, stderror,
   LocalPolynomialRegression, PointwiseDensity, LocalPolynomialDensity, RuleOfThumb, MSEOptimal, IMSEOptimal, CoverageOptimal,
   VarianceEstimator, NNVariance, HCVariance,
   InferenceMethod, Conventional, RobustBiasCorrected, Honest, FLCIOptimal, worstcasebias,

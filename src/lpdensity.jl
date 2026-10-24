@@ -339,9 +339,10 @@ end
 
 function Base.show(io::IO, ::MIME"text/plain", m::LocalPolynomialDensity)
   println(io, "Local polynomial density estimates of degree ", m.degree,
-          m.derivative == 0 ? "" : ", derivative $(m.derivative)")
+          m.derivative == 0 ? "" : ", derivative $(m.derivative)", m.compat ? " (lpdensity compatibility)" : "")
   println(io, "  kernel: ", m.kernel, ", ", nobs(m), " observations")
-  m.selection.rule === nothing || println(io, "  bandwidth: ", m.selection.rule)
+  rule = m.selection.rule
+  rule === nothing || println(io, "  bandwidth: ", rule, _lpdrulenote(rule, m.compat))
   any(m.floored) && println(io, "  the floor of ", m.minobs, " observations raised the bandwidth at ",
                             count(m.floored), " of ", length(m.points), " points")
   _showtable(io, m)
@@ -349,6 +350,10 @@ end
 
 
 ## lpdensity's bandwidth selectors
+
+# how the rules of a fit differ from lpdensity's, for its display
+_lpdrulenote(rule, compat) = compat || !(rule isa Union{MSEOptimal,IMSEOptimal,NormalReference}) ? "" :
+  rule isa NormalReference ? (rule.robust ? ", robust scale" : "") : ", robust scale, pilots over the quantiles of the data"
 
 # The center and the scale that standardize the data for lpdensity's rules: the
 # unweighted mean and standard deviation, as lpdensity, or with `robust` the

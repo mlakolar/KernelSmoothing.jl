@@ -74,6 +74,9 @@ the kernel density estimate.
 Throws an `ArgumentError` when `r` exceeds [`smoothness`](@ref)`(k)`. The
 Epanechnikov kernel, for example, has a first derivative but no second, because
 its first derivative jumps at `±1`.
+
+Other packages, such as Polynomials.jl, export a `derivative` of their own; with
+one of them loaded, qualify the name as `KernelSmoothing.derivative`.
 """
 function derivative end
 

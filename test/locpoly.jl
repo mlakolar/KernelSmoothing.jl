@@ -220,6 +220,8 @@ end
   @test all(length(v) == 6 for v in t) && t.upper_rbc == c[:, 2]
   @test nobs(m) == 400 && bandwidth(m) == m.h
   @test occursin("95% robust interval", sprint(show, MIME("text/plain"), m))
+  @test occursin("IMSEOptimal(), pilots anchored on cross-validation", sprint(show, MIME("text/plain"), fit(LocalPolynomialRegression, XS, YS)))
+  @test occursin("nprobust's pilots", sprint(show, MIME("text/plain"), fit(LocalPolynomialRegression, XS, YS; compat = true)))
   @test length(split(sprint(show, MIME("text/plain"), fit(LocalPolynomialRegression, XS, YS; compat = true)), '\n')) == 18
   @test occursin("degree 1", sprint(show, m))
   @test_throws ArgumentError confint(m; level = 1.5)

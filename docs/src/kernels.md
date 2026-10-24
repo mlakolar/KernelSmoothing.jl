@@ -34,6 +34,10 @@ Every kernel can be evaluated as `k(u)` and supports the following functions.
 | `convolve(k1, k2)` | ``K_1 * K_2``, as a kernel |
 | `k1 * k2` | the product ``K_1 K_2``, as a kernel |
 
+Several packages export a function named `derivative`, Polynomials.jl among them.
+With one of them loaded as well, Julia asks for the name to be qualified, as in
+`KernelSmoothing.derivative(k, 2)`.
+
 Since derivatives, convolutions and products are kernels again, the estimators
 treat them like any other kernel. A kernel has smoothness ``s`` if
 ``K \in C^{s-1}`` and ``K^{(s)}`` exists as a function, possibly with jumps; then

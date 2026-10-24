@@ -232,7 +232,9 @@ function Base.show(io::IO, ::MIME"text/plain", m::PointwiseDensity)
   println(io, "Kernel density estimates with robust bias-corrected inference",
           m.compat ? " (nprobust compatibility)" : "")
   println(io, "  kernel: ", m.kernel, ", ", nobs(m), " observations")
-  m.selection.rule === nothing || println(io, "  bandwidth: ", m.selection.rule)
+  rule = m.selection.rule
+  rule === nothing || println(io, "  bandwidth: ", rule, !(rule isa Union{MSEOptimal,IMSEOptimal,CoverageOptimal}) ? "" :
+                              m.compat ? ", nprobust's pilots" : ", pilots anchored on Sheather–Jones")
   any(m.floored) && println(io, "  the floor of ", m.minobs, " observations raised the bandwidth at ",
                             count(m.floored), " of ", length(m.points), " points")
   _showtable(io, m)
