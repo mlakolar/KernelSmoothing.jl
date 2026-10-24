@@ -33,6 +33,14 @@ end
   @test all(_quantile(d, p) ≈ -_quantile(dr, 1 - p) for p in 0:0.05:1)
 end
 
+@testset "weighted quantiles keep their exact endpoints" begin
+  for w in ([1.0, 1e-20, 1e-20], [1e-20, 1e-20, 1.0], [1e-20, 1.0, 1e-20])
+    d = SmoothingData([0.0, 1.0, 2.0]; weights = w)
+    @test _quantile(d, 0.0) == first(d.x)
+    @test _quantile(d, 1.0) == last(d.x)
+  end
+end
+
 @testset "rules of thumb" begin
   for x in (XR, XT)
     d = SmoothingData(x)

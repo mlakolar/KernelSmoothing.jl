@@ -1,7 +1,7 @@
 ## Honest confidence intervals (Armstrong and Kolesár 2020)
 
 """
-    Honest(M; biascorrected = false)
+    Honest(M; biascorrected = false, class = :default)
 
 Honest confidence intervals for local polynomial regression (Armstrong and Kolesár
 2018, 2020). Under regularity conditions, they have asymptotic coverage at least
@@ -24,24 +24,42 @@ largest absolute derivative of order `p + 1` of a global polynomial of order
 distinct values), the rule of thumb of Armstrong and Kolesár for local linear fits,
 which they offer as a starting point for a sensitivity analysis, not as a bound. With `biascorrected = true`, the interval is built
 around the bias-corrected estimate and its weights.
+
+For [`RegressionDiscontinuity`](@ref), the class is by default the Hölder class of
+functions whose second derivative is bounded by `M` on each side of the cutoff, as
+in RDHonest, and `class = :taylor` gives the Taylor class; a fuzzy design takes a
+pair `M = (M_Y, M_T)` of bounds for the outcome and the treatment, and `:rot` the
+rule of thumb of RDHonest.
 """
 struct Honest <: InferenceMethod
-  M::Union{Float64,Symbol}
+  M::Union{Float64,NTuple{2,Float64},Symbol}
   biascorrected::Bool
+  class::Symbol
 
-  function Honest(M::Union{Real,Symbol}, biascorrected::Bool)
+  function Honest(M::Union{Real,Symbol,Tuple{Real,Real}}, biascorrected::Bool, class::Symbol = :default)
     M isa Symbol && M != :rot && throw(ArgumentError("M must be a nonnegative number or :rot, got :$M"))
-    Mv = M isa Real ? Float64(M) : M
-    M isa Real && !(M >= 0 && isfinite(Mv)) && throw(ArgumentError("M must be a nonnegative number, got $M"))
-    new(Mv, biascorrected)
+    Mv = M isa Real ? Float64(M) : M isa Tuple ? Float64.(M) : M
+    # the bounds as given and as stored, which can overflow
+    ok(v, vf) = v >= 0 && isfinite(vf)
+    M isa Real && !ok(M, Mv) && throw(ArgumentError("M must be a nonnegative number, got $M"))
+    M isa Tuple && !all(ok.(M, Mv)) && throw(ArgumentError("the bounds M must be nonnegative numbers, got $M"))
+    class in (:default, :taylor, :holder) || throw(ArgumentError("class must be :taylor or :holder, got :$class"))
+    new(Mv, biascorrected, class)
   end
 end
 
-Honest(M::Union{Real,Symbol}; biascorrected::Bool = false) = Honest(M, biascorrected)
+Honest(M::Union{Real,Symbol,Tuple{Real,Real}}; biascorrected::Bool = false, class::Symbol = :default) =
+  Honest(M, biascorrected, class)
 Honest(; biascorrected::Bool = false) = throw(ArgumentError("Honest needs a bound M on the " *
   "derivative of order p + 1, chosen in advance, such as Honest(40), or Honest(:rot) for the rule of thumb"))
 
-Base.show(io::IO, m::Honest) = print(io, "Honest(", repr(m.M), m.biascorrected ? "; biascorrected = true" : "", ")")
+function Base.show(io::IO, m::Honest)
+  print(io, "Honest(", repr(m.M))
+  kw = [m.biascorrected ? "biascorrected = true" : "", m.class === :default ? "" : "class = $(repr(m.class))"]
+  kw = filter(!isempty, kw)
+  isempty(kw) || print(io, "; ", join(kw, ", "))
+  print(io, ")")
+end
 
 """
     worstcasebias(m::LocalPolynomialRegression, M; biascorrected = false)
@@ -52,6 +70,7 @@ in [`Honest`](@ref); `M = :rot` uses the rule of thumb.
 """
 function worstcasebias(m::LocalPolynomialRegression, M; biascorrected::Bool = false)
   Honest(M)   # checks M
+  M isa Tuple && throw(ArgumentError("a pair of bounds M is for fuzzy regression discontinuity designs"))
   Mv = M === :rot ? _honestM(m.data, m.degree) : Float64(M)::Float64
   p, ν = m.degree, m.derivative
   return _pointwise(eachindex(m.points)) do j
@@ -106,6 +125,7 @@ end
 function _honestconfint(m::LocalPolynomialRegression, level, method::Honest)
   0 < level < 1 || throw(ArgumentError("level must be between 0 and 1, got $level"))
   bc = method.biascorrected
+  method.class === :holder && throw(ArgumentError("honest intervals for local polynomial regression use the Taylor class"))
   B = worstcasebias(m, method.M; biascorrected = bc)
   est, se = bc ? (m.estimate_bc, m.se_rbc) : (m.estimate, m.se)
   # cv(B / se) se tends to B as se tends to 0

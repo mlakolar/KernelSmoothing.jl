@@ -8,12 +8,20 @@ tests = [
   "selectors",
   "kde",
   "locpoly",
+  "smoother",
+  "surface",
+  "semiparametric",
+  "locallik",
   "plugin",
   "kdeinference",
   "bands",
   "honest",
   "clusters",
+  "rd",
+  "rddensity",
+  "rdhonest",
   "lpdensity",
+  "recipes",
   "aqua"
 ]
 

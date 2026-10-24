@@ -13,6 +13,8 @@ It provides:
 - [local polynomial regression](@ref regression-page) of a regression function or
   its derivatives, with conventional, robust bias-corrected and honest intervals,
   covariances between points and uniform bands;
+- [regression discontinuity](@ref rd-page) estimates for sharp, fuzzy and kink
+  designs, with covariates, and the manipulation test of the density at the cutoff;
 - [bandwidth selectors](@ref bandwidths-page): rules of thumb, Sheather and Jones,
   cross-validation and plug-in bandwidths.
 
@@ -154,6 +156,23 @@ its bandwidth is a standard deviation. KernelDensity.jl, KDEpy and R's `density`
 instead scale every kernel to unit variance; their bandwidth `h_sd` corresponds
 to the half-width `h_sd / sqrt(moment(k, 2))` here, for example `h_sd √5` for the
 Epanechnikov kernel.
+
+## Plotting
+
+Loading Plots.jl, or another package that uses RecipesBase, adds plot recipes.
+`plot(m)` draws the estimates of a pointwise fit ([`LocalPolynomialRegression`](@ref),
+[`PointwiseDensity`](@ref) or [`LocalPolynomialDensity`](@ref)) over its shaded
+robust bias-corrected intervals, and `plot(f)` the density estimate of a
+[`KDE`](@ref). The keywords `level` and `method` choose the intervals as for
+[`confint`](@ref), `uniform = true` draws the uniform band of [`confband`](@ref)
+instead, and `data = true` adds the observations of a regression.
+
+```julia
+using KernelSmoothing, Plots
+m = fit(LocalPolynomialRegression, x, y)
+plot(m; data = true)
+plot(m; uniform = true, level = 0.9)
+```
 
 ## Threads
 

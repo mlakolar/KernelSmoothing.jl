@@ -133,6 +133,10 @@ end
   for level in (0.0, 1.0, Inf, NaN, big"1e-400", 1 - big"1e-40")
     @test_throws ArgumentError FLCIOptimal(1.0; level)
   end
+  # a pair of bounds for fuzzy designs is checked as stored, too
+  @test_throws ArgumentError Honest((1.0, big"1e400"))
+  @test_throws ArgumentError Honest((-big"1e-400", 1.0))
+  @test Honest((big"2.5", 1)).M === (2.5, 1.0)
   for M in (0.0, 1.0, floatmax(Float64))
     @test Honest(M).M === M
     @test FLCIOptimal(M).M === M
