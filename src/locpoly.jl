@@ -331,8 +331,9 @@ _count(f) = f()
 
 # The estimates and standard errors at x0; with `vectors = true` also the vectors
 # scale ℓᵢ ε̂ᵢ and scale ℓᵢᵇᶜ ε̂ᵢᵇ over the window
-function _localfit(d::SmoothingData, k::AbstractKernel, x0, h, b, p, ν, vce; vectors::Bool = false)
-  f = _localsetup(d, k, x0, h, b, p, ν)
+function _localfit(d::SmoothingData, k::AbstractKernel, x0, h, b, p, ν, vce; vectors::Bool = false,
+                   setup = nothing)
+  f = setup === nothing ? _localsetup(d, k, x0, h, b, p, ν) : setup
   nwin = f.e - f.a + 1
   if !f.ok
     fit = _LocalFit(NaN, NaN, NaN, NaN, nwin, f.nuniq)

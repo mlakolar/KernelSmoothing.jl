@@ -357,17 +357,44 @@ function _densityse(s0, s1, s2, h, W, neff)
 end
 
 # The variance is a small difference of sums where the estimate is nearly zero, and
-# the square root magnifies the rounding of fast sums there, so the sums are taken
-# over the windows unless the estimate fixes an engine.
+# the square root magnifies the rounding of fast sums there, so the three sums are
+# taken over the windows, in one pass at each point, as the scalar method takes them,
+# unless the estimate fixes an engine.
 function _stderror(f::KDE, x)
-  k = f.reflected
-  engine = f.engine === nothing && all(isfinite, support(k)) ? WindowSums() : f.engine
   return _evaluate(t -> stderror(f, t), x) do p
+    f.engine === nothing && return _windowstderror(f, p)
+    k, engine = f.reflected, f.engine
     s0 = _sums(f, k, p; engine)
     s1 = f.data.w === nothing ? s0 : _sums(f, k, p; z = f.data.w, engine)
     s2 = _sums(f, _square(k), p; z = f.data.w, engine)
     _kdese.(Ref(f), s0, s1, s2)
   end
+end
+
+# stderror(f, x) at the points p, with the windows found by galloping through the
+# points in increasing order, in tasks as the engines run
+function _windowstderror(f::KDE, p)
+  d, k, h = f.data, f.reflected, f.h
+  xs, n = d.x, nobs(d)
+  lo, hi = _zerosupport(k)
+  out = Vector{Float64}(undef, length(p))
+  _foreachchunk(issorted(p) ? collect(eachindex(p)) : sortperm(p)) do chunk
+    a = b = 1
+    for j in chunk
+      x = p[j]
+      a = isfinite(lo) ? _gallop(i -> (xs[i] - x) / h >= lo, a, n) : 1
+      b = isfinite(hi) ? _gallop(i -> (xs[i] - x) / h > hi, b, n) : n + 1
+      s0 = s1 = s2 = 0.0
+      @inbounds for i in a:b-1
+        w, ki = _weight(d.w, i), k((xs[i] - x) / h)
+        s0 += w * ki
+        s1 += w^2 * ki
+        s2 += w^2 * ki^2
+      end
+      out[j] = _kdese(f, s0, s1, s2)
+    end
+  end
+  return out
 end
 
 """

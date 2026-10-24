@@ -397,6 +397,10 @@ KernelSmoothing.support(::LapKernel) = (-Inf, Inf)
   end
   @test roughness(CosKernel()) ≈ π^2 / 16 rtol = 1e-12
   @test roughness(LapKernel()) ≈ 1 / 4 rtol = 1e-12
+  # the lazy square, for kernels without a closed form of k²
+  g = derivative(GaussianKernel(), 1)
+  q = KernelSmoothing._square(g)
+  @test q isa KernelSmoothing._Squared && q(0.7) == g(0.7)^2 && support(q) == support(g)
   r = KernelSmoothing._reflect(CosKernel())
   @test moment(r, 3) == -moment(CosKernel(), 3) && moment(r, 2) == moment(CosKernel(), 2)
   # the binomial coefficients of high orders overflowed integers

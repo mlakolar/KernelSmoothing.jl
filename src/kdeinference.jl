@@ -274,22 +274,20 @@ function _densityplugin(rule, d, k, points, minobs, compat; imse::Bool)
   hsj = bandwidth(SheatherJones(), d, k)
   b = hsj * bnr / hnr
   regul = rule.regularization
+  # the pilot estimates of f'' and f at the points c from kernel sums over the
+  # windows, exact term by term, instead of loops over all observations
   function constants(c)
-    fb = fh = 0.0
-    for i in eachindex(xs)
-      w = _weight(d.w, i)
-      v = (xs[i] - c) / b
-      fb += w * k(v) * (c0 + c2 * v^2)
-      fh += w * k((xs[i] - c) / hsj)
+    Sb, Sh = _pilotsums(d, k, b, c, 2), _pilotsums(d, k, hsj, c, 0)
+    return map(eachindex(c)) do j
+      f, fpp = Sh[1, j] / (d.sumw * hsj), (c0 * Sb[1, j] + c2 * Sb[3, j]) / (d.sumw * b^3)
+      (V = R * f, B2 = (μ2 / 2 * fpp)^2, Rreg = 3 * (μ2 / 2)^2 * RD * max(f, 0.0) / (N * b^5))
     end
-    f, fpp = fh / (d.sumw * hsj), fb / (d.sumw * b^3)
-    return (V = R * f, B2 = (μ2 / 2 * fpp)^2, Rreg = 3 * (μ2 / 2)^2 * RD * max(f, 0.0) / (N * b^5))
   end
   hopt(V, B2, Rr) = (V / (4N * (B2 + regul * Rr)))^(1 / 5)
   if imse
     grid = points === nothing || rule.grid isa Integer ?
       [_quantile(d, q) for q in range(0.1, 0.9; length = rule.grid isa Integer ? rule.grid : 30)] : points
-    cs = map(constants, grid)
+    cs = constants(grid)
     h = hopt(sum(c.V for c in cs), sum(c.B2 for c in cs), sum(c.Rreg for c in cs))
     # where the pilot estimates vanish on the whole grid, the Sheather–Jones bandwidth
     h > 0 && isfinite(h) || (h = hsj)
@@ -297,14 +295,21 @@ function _densityplugin(rule, d, k, points, minobs, compat; imse::Bool)
   end
   pts = points === nothing ? [_quantile(d, q) for q in range(0.1, 0.9; length = 30)] : points
   h, bs = similar(pts), similar(pts)
+  all_cs = constants(pts)
   for (j, c) in enumerate(pts)
-    cs = constants(c)
+    cs = all_cs[j]
     floor = minobs > 0 ? knn_distance(d, c, min(minobs, nobs(d))) : 0.0
     cap = max(abs(c - xs[1]), abs(c - xs[end]))
     h[j], bs[j] = _clampdensity(hopt(cs.V, cs.B2, cs.Rreg), floor, cap), max(b, floor)
   end
   return BandwidthSelection(h, rule, (b = bs, points = pts, sheatherjones = hsj))
 end
+
+# ∑ᵢ wᵢ k(uᵢ) uᵢ^r for r ≤ kmax at the points c, uᵢ = (xᵢ - c) / h, summed over the
+# windows for compactly supported kernels and by the exact choice of the engines
+# otherwise
+_pilotsums(d, k, h, c, kmax) =
+  kernelsums(d, k, h, c; kmax, engine = all(isfinite, support(k)) ? WindowSums() : nothing)
 
 # The bandwidth at a point between the floor and the cap. Where the pilot estimates
 # vanish, as between two clusters, the rule gives NaN or zero, and the floor is
@@ -326,22 +331,18 @@ function _kdbwselect(rule, d, k, points, minobs; imse::Bool)
   hrot, brot = sd * Ch * N^(-1 / 5), sd * Cb * N^(-1 / 13)
   c0, c2 = _secondderivative(k)
   μ2, R = moment(k, 2), roughness(k)
-  # the squared-bias and variance constants at a point, from pilot estimates of f'' and f
+  # the squared-bias and variance constants at the points c, from pilot estimates of
+  # f'' and f
   function constants(c)
-    fb = fh = 0.0
-    for i in eachindex(xs)
-      w = _weight(d.w, i)
-      v = (xs[i] - c) / brot
-      fb += w * k(v) * (c0 + c2 * v^2)
-      fh += w * k((xs[i] - c) / hrot)
-    end
-    return fb / (d.sumw * brot^3) * μ2 / 2, fh / (d.sumw * hrot) * R
+    Sb, Sh = _pilotsums(d, k, brot, c, 2), _pilotsums(d, k, hrot, c, 0)
+    return [((c0 * Sb[1, j] + c2 * Sb[3, j]) / (d.sumw * brot^3) * μ2 / 2, Sh[1, j] / (d.sumw * hrot) * R)
+            for j in eachindex(c)]
   end
   hopt(V, B2) = (V / (4 * N * B2))^(1 / 5)
   if imse
     grid = points === nothing || rule.grid isa Integer ?
       [_quantile(d, q) for q in range(0.1, 0.9; length = rule.grid isa Integer ? rule.grid : 30)] : points
-    cs = map(constants, grid)
+    cs = constants(grid)
     B = [c[1] for c in cs]
     V = sum(c[2] for c in cs) / length(cs)
     # nprobust squares the average bias, which can cancel where f'' changes sign
@@ -350,8 +351,9 @@ function _kdbwselect(rule, d, k, points, minobs; imse::Bool)
   end
   pts = points === nothing ? [_quantile(d, q) for q in range(0.1, 0.9; length = 30)] : points
   h, b = similar(pts), similar(pts)
+  all_cs = constants(pts)
   for (j, c) in enumerate(pts)
-    B, V = constants(c)
+    B, V = all_cs[j]
     floor = minobs > 0 ? knn_distance(d, c, min(minobs, nobs(d))) : 0.0
     # nprobust has no cap, which only replaces a bandwidth that the rule leaves undefined
     h[j] = _clampdensity(hopt(V, B^2), floor, Inf)

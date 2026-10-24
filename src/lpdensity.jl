@@ -209,25 +209,74 @@ function StatsAPI.coeftable(m::LocalPolynomialDensity; level::Real = 0.95)
           upper_rbc = r[:, 2])
 end
 
-# Covariances from the influence functions: ν!² ∑g Qg valsⱼ(g) valsₗ(g) / (n² hⱼ^ν hₗ^ν)
+# Covariances from the influence functions: ν!² ∑g Qg valsⱼ(g) valsₗ(g) / (n² hⱼ^ν hₗ^ν).
+# The influence values of a point are constant below its window and above it, so
+# that each covariance is a sum over the windows of the two points and, where both
+# are constant, a product of the constants with a cumulative sum of Q. With many
+# distinct values this avoids a dense matrix of distinct values by points, five times
+# the memory; with few, one product of that matrix is faster.
 function StatsAPI.vcov(m::LocalPolynomialDensity; method::InferenceMethod = Conventional())
   d, U, n, v = m.data, nunique(m.data), nobs(m.data), m.derivative + 1
   aux = _lpdaux(d)
   bc = _usesbc(method)
-  dense = _pointwise(eachindex(m.points)) do j
+  infl = _pointwise(eachindex(m.points)) do j
     r = _lpdfit(d, m.kernel, aux, m.points[j], m.h[j], m.degree, v; values = true)
     f = bc ? r.q : r.p
+    scale = factorial(v) / m.h[j]^v
     # a fit that is not identified has no influence function
-    isnan(f.est) && return fill(NaN, U)
-    val = zeros(U)
-    val[1:r.ga-1] .= f.Atot / n - f.aT
-    val[r.ga:r.gb] .= f.vals
-    val[r.gb+1:U] .= -f.aT
-    val .* (factorial(v) / m.h[j]^v)
+    (ok = !isnan(f.est), ga = r.ga, gb = r.gb, lo = (f.Atot / n - f.aT) * scale, hi = -f.aT * scale,
+     w = f.vals .* scale)
   end
-  # one product of the weighted influence values, Sᵀ S, instead of a vector per pair
-  S = sqrt.(aux.Q) .* reduce(hcat, dense)
-  return (S' * S) ./ n^2
+  M = length(infl)
+  if U * M <= 2^18
+    dense = [I.ok ? [g < I.ga ? I.lo : g > I.gb ? I.hi : I.w[g - I.ga + 1] for g in 1:U] : fill(NaN, U) for I in infl]
+    S = sqrt.(aux.Q) .* reduce(hcat, dense)
+    return (S' * S) ./ n^2
+  end
+  C = Matrix{Float64}(undef, M, M)
+  cuts = Vector{Int}(undef, 6)
+  for j in 1:M, l in j:M
+    C[j, l] = C[l, j] = _lpdcov(infl[j], infl[l], aux, U, cuts) / n^2
+  end
+  return C
+end
+
+# ∑g Qg vA(g) vB(g) over the distinct values, split where either point enters or leaves
+# its window
+function _lpdcov(A, B, aux, U, cuts)
+  A.ok && B.ok || return NaN
+  Q, wA, wB = aux.Q, A.w, B.w
+  oA, oB = A.ga - 1, B.ga - 1
+  cuts .= (1, A.ga, A.gb + 1, B.ga, B.gb + 1, U + 1)
+  sort!(cuts; alg = InsertionSort)
+  s = 0.0
+  for c in 1:length(cuts)-1
+    g1, g2 = cuts[c], cuts[c + 1] - 1
+    g1 <= g2 || continue
+    # each stretch lies inside a window or outside it, below or above
+    inA, inB = A.ga <= g1 && g2 <= A.gb, B.ga <= g1 && g2 <= B.gb
+    cA, cB = g1 < A.ga ? A.lo : A.hi, g1 < B.ga ? B.lo : B.hi
+    t = 0.0
+    if inA && inB
+      @inbounds for g in g1:g2
+        t += Q[g] * wA[g - oA] * wB[g - oB]
+      end
+    elseif inA
+      @inbounds for g in g1:g2
+        t += Q[g] * wA[g - oA]
+      end
+      t *= cB
+    elseif inB
+      @inbounds for g in g1:g2
+        t += Q[g] * wB[g - oB]
+      end
+      t *= cA
+    else
+      t = cA * cB * (aux.cumQ[g2 + 1] - aux.cumQ[g1])
+    end
+    s += t
+  end
+  return s
 end
 
 function Base.show(io::IO, m::LocalPolynomialDensity)

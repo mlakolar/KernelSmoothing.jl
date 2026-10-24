@@ -2,7 +2,7 @@ module BandsTest
 
 using Test
 using KernelSmoothing
-using LinearAlgebra: diag, eigvals, Symmetric
+using LinearAlgebra: diag, eigvals, eigen, Symmetric
 using Random: MersenneTwister
 using Distributions: Normal, quantile, cdf as ncdf
 
@@ -96,6 +96,24 @@ end
   cs = [confband(m2; draws = 100, rng = MersenneTwister(s)).critical for s in 1:100]
   @test all(zp .<= cs .<= zb)
   @test any(==(zb), cs)
+end
+
+@testset "draws in blocks" begin
+  # the normal variates are drawn in blocks, so that the critical value is that of a
+  # loop of single draws in distribution, and the same for the same seed
+  x = collect(range(0, 1; length = 400))
+  m = fit(LocalPolynomialRegression, x, sin.(2π .* x); bandwidth = 0.1, points = collect(range(0.1, 0.9; length = 17)))
+  C = vcov(m; method = RobustBiasCorrected())
+  se = sqrt.(diag(C))
+  R = C ./ (se * se')
+  E = eigen(Symmetric(R))
+  L = E.vectors .* sqrt.(max.(E.values, 0.0))'
+  rng = MersenneTwister(3)
+  maxima = [maximum(abs, L * randn(rng, 17)) for _ in 1:100_000]
+  c = confband(m; draws = 100_000, rng = MersenneTwister(4)).critical
+  @test abs(c - quantile(maxima, 0.95)) < 0.04
+  @test confband(m; draws = 5000, rng = MersenneTwister(5)).critical == confband(m; draws = 5000, rng = MersenneTwister(5)).critical
+  @test confband(m; draws = 5001, rng = MersenneTwister(5)).critical > 0
 end
 
 end

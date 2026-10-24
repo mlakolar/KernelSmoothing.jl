@@ -50,9 +50,8 @@ function worstcasebias(m::LocalPolynomialRegression, M; biascorrected::Bool = fa
 end
 
 # ∑ᵢ |ℓᵢ| |xᵢ - x₀|^(p+1) for the weights of the estimate, or of the bias-corrected
-# estimate, at x0
-function _absmoment(d, k, x0, h, b, p, ν, bc)
-  f = _localsetup(d, k, x0, h, b, p, ν)
+# estimate, at x0, from the setup f of the local fits there
+function _absmoment(d, k, x0, h, b, p, ν, bc, f = _localsetup(d, k, x0, h, b, p, ν))
   f.ok || return NaN
   s = 0.0
   for i in f.a:f.e
@@ -139,10 +138,12 @@ function selectbandwidth(rule::FLCIOptimal, d::SmoothingData, k::AbstractKernel;
   hmax = d.x[end] - d.x[1]
   hs = _pointwise(pts) do c
     hmin = max(knn_distance(d, c, min(max(minobs, 21, p + 2), nobs(d))), hmax / 1e4)
+    # one setup of the local fits per bandwidth, for the standard error and the bias
     function halflength(h)
-      f = _localfit(d, k, c, h, h, p, ν, vce)
+      s = _localsetup(d, k, c, h, h, p, ν)
+      f = _localfit(d, k, c, h, h, p, ν, vce; setup = s)
       isfinite(f.se) && f.se > 0 || return Inf
-      B = M * _absmoment(d, k, c, h, h, p, ν, false) / factorial(p + 1)
+      B = M * _absmoment(d, k, c, h, h, p, ν, false, s) / factorial(p + 1)
       return _cvb(B / f.se, 0.95) * f.se
     end
     grid = exp.(range(log(hmin), log(hmax); length = rule.gridsize))

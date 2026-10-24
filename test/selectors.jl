@@ -213,13 +213,13 @@ end
   x = [Q; 1e14]
   @test bandwidth(SheatherJones(), SmoothingData(x), k) ≈ bandwidth(SheatherJones(exact = 10^6), SmoothingData(x), k) rtol = 1e-5
   @test bandwidth(fit(KDE, x)) ≈ bandwidth(SheatherJones(), SmoothingData(x), EpanechnikovKernel())
-  # heavy tails: Cauchy quantiles, of which the dense center is binned and the
-  # sparse tails are summed exactly
+  # heavy tails: Cauchy quantiles, of which the dense center and the stretches with
+  # enough pairs are binned and the sparse tails are summed exactly
   c = [tan(π * (mod(0.6180339887498949i, 1) - 0.5)) for i in 1:2000]
   d = SmoothingData(c)
   @test bandwidth(SheatherJones(), d, k) ≈ bandwidth(SheatherJones(exact = 10^6), d, k) rtol = 1e-5
   p = KernelSmoothing._LaggedBins(d, 1e-3, 30.0)
-  @test !isempty(p.rest) && length(p.cs) > 1
+  @test length(p.cs) > 1
   for (r, g) in ((4, 0.3), (6, 0.5), (4, 2.0))
     @test _psi(p, r, g) ≈ _psi(d, r, g, true) rtol = 1e-5
   end
@@ -249,6 +249,32 @@ end
   x = [0.01 .* Z; 10 .+ 0.01 .* reverse(Z)]
   @test bandwidth(SheatherJones(), SmoothingData(x), k) ≈
         bandwidth(SheatherJones(; exact = 10^4), SmoothingData(x), k) rtol = 1e-5
+end
+
+@testset "wide runs in several binned stretches, and cross-validation in one pass" begin
+  # a dense run of 1.5 million bins, covered by several binned stretches, whose pairs
+  # across their boundaries are summed exactly
+  d = SmoothingData([1500 * mod(0.6180339887498949i, 1) for i in 1:50000])
+  p = KernelSmoothing._LaggedBins(d, 1e-3, 30.0)
+  @test length(p.parts) >= 5 && isempty(p.rest)
+  for (r, g) in ((4, 0.2), (6, 0.3))
+    @test _psi(p, r, g) ≈ _psi(d, r, g, true) rtol = 1e-4
+  end
+  # a scale mixture, whose sparse tails are summed exactly
+  x = [isodd(i) ? quantile(Normal(), mod(0.6180339887498949i, 1)) :
+                  1000 * quantile(Normal(), mod(0.7548776662466927i, 1)) for i in 1:20000]
+  dm = SmoothingData(x)
+  pm = KernelSmoothing._LaggedBins(dm, 1e-3, 30.0)
+  @test !isempty(pm.rest)
+  @test _psi(pm, 4, 0.1) ≈ _psi(dm, 4, 0.1, true) rtol = 1e-4
+  # the sums with and without the responses in one pass agree with separate passes
+  xs = [mod(0.6180339887498949i, 1) for i in 1:3000]
+  dy = SmoothingData(xs, sin.(2π .* xs); weights = 1 .+ mod.(1:3000, 3))
+  for k in (EpanechnikovKernel(), TriangularKernel(), GaussianKernel()), h in (0.003, 0.03, 0.3), p in (1, 2)
+    S, T = KernelSmoothing._sumsyz(dy, k, h, p, SumsWorkspace())
+    @test S ≈ kernelsums(dy, k, h; kmax = 2p) rtol = 1e-12
+    @test T ≈ kernelsums(dy, k, h; kmax = p, z = dy.y) rtol = 1e-12
+  end
 end
 
 end
