@@ -18,13 +18,13 @@ const NPKERNELS = Dict("epa" => EpanechnikovKernel(), "uni" => UniformKernel())
     bw = c.h === nothing ? (c.bwselect == "imse-dpi" ? IMSEOptimal() : MSEOptimal()) : c.h
     m = fit(PointwiseDensity, X; points = EVAL, kernel = NPKERNELS[c.kernel], bandwidth = bw,
             pilot = c.b, compat = true)
-    @test m.h ≈ c.hused rtol = 1e-12
-    @test m.b ≈ c.bused rtol = 1e-12
+    @test all(isapprox.(m.h, c.hused; rtol = 1e-12))
+    @test all(isapprox.(m.b, c.bused; rtol = 1e-12))
     @test m.nwindow == c.N
-    @test m.estimate ≈ c.f_us rtol = 1e-12
-    @test m.estimate_bc ≈ c.f_bc rtol = 1e-11
-    @test m.se ≈ c.se_us rtol = 1e-12
-    @test m.se_rbc ≈ c.se_rb rtol = 1e-11
+    @test all(isapprox.(m.estimate, c.f_us; rtol = 1e-12))
+    @test all(isapprox.(m.estimate_bc, c.f_bc; rtol = 1e-11))
+    @test all(isapprox.(m.se, c.se_us; rtol = 1e-12))
+    @test all(isapprox.(m.se_rbc, c.se_rb; rtol = 1e-11))
   end
   s = selectbandwidth(IMSEOptimal(), SmoothingData(X), EpanechnikovKernel(); compat = true)
   @test s.h ≈ KDBW_IMSE_DEFAULT_GRID.h rtol = 1e-12
@@ -186,6 +186,28 @@ end
     @test only(m.estimate_bc) ≈ bf rtol = 1e-13
     @test vcov(m; method = RobustBiasCorrected())[1, 1] ≈ only(m.se_rbc)^2 rtol = 1e-12
   end
+end
+
+@testset "argument checks of density fits" begin
+  m = fit(PointwiseDensity, X; points = [-1.0, 0.0])
+  @test_throws "regression" stderror(m; method = Honest(1.0))
+  @test_throws "regression" vcov(m; method = Honest(1.0))
+  ml = fit(LocalPolynomialDensity, X; points = [-1.0, 0.0])
+  @test_throws "regression" stderror(ml; method = Honest(1.0))
+  @test_throws "regression" vcov(ml; method = Honest(1.0))
+  @test_throws ArgumentError fit(PointwiseDensity, X; points = [0.0], bandwidth = 0.3, rho = Inf, minobs = 0)
+  # the density rules need kernels that integrate to one
+  dx = SmoothingData(X)
+  g = derivative(GaussianKernel(), 2)
+  for rule in (NormalReference(), SilvermanRule(), SheatherJones(), LSCV())
+    @test_throws "integrate to one" selectbandwidth(rule, dx, g)
+  end
+  # a KDE takes nothing for its default bandwidth, and gives an interval at a point
+  f = fit(KDE, X)
+  @test bandwidth(fit(KDE, X; bandwidth = nothing)) == bandwidth(f)
+  @test confint(f, 0.3) == Tuple(confint(f, [0.3]))
+  @inferred vcov(ml)
+  @inferred confband(ml)
 end
 
 end

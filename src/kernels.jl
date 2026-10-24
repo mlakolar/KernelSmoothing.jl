@@ -26,6 +26,19 @@ Every kernel can be evaluated, `k(u)`, and supports [`support`](@ref),
 [`cdf`](@ref), [`ccdf`](@ref), [`moment`](@ref), [`roughness`](@ref),
 [`smoothness`](@ref), [`derivative`](@ref) and [`convolve`](@ref). Derivatives and convolutions are
 kernels too, although a derivative integrates to zero rather than one.
+
+A new kernel type `K <: AbstractKernel` defines the evaluation `(k::K)(u::Real)`
+and `support(k)`, which `kernelsums` and local polynomial regression with a given
+bandwidth need. A kernel density estimate also needs `moment(k, j)`, to check that
+the kernel integrates to one and for its mean and variance, and `cdf(k, u)` for its
+distribution function and quantiles; `ccdf(k, u)` keeps its upper tail accurate
+where `moment(k, 0) - cdf(k, u)` cancels. The plug-in rules and the rules of thumb
+need moments of `k` and `k²` and `roughness(k)`; the last two are computed by
+quadrature unless the type defines them.
+`derivative` and `convolve`, for derivatives of densities and least-squares
+cross-validation, are available for the polynomial and Gaussian kernels. The
+compactly supported kernels of [`LocalPolynomialDensity`](@ref) must be polynomial
+kernels, such as a `PiecewisePolynomialKernel`.
 """
 abstract type AbstractKernel end
 
@@ -259,6 +272,11 @@ function PiecewisePolynomialKernel(breaks::AbstractVector{<:Real},
 end
 
 pieces(k::PiecewisePolynomialKernel) = (k.breaks, k.coefs)
+
+# two kernels with the same pieces are the same kernel, also when built separately
+Base.:(==)(a::PiecewisePolynomialKernel, b::PiecewisePolynomialKernel) =
+  a.breaks == b.breaks && a.coefs == b.coefs
+Base.hash(k::PiecewisePolynomialKernel, h::UInt) = hash(k.coefs, hash(k.breaks, hash(:PiecewisePolynomialKernel, h)))
 smoothness(k::PiecewisePolynomialKernel) = k.smoothness
 _cdfpieces(k::PiecewisePolynomialKernel) = (k.breaks, k.cdfcoefs, k.mass)
 

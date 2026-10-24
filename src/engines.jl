@@ -322,14 +322,16 @@ function _foreachchunk(f, order)
 end
 
 # [f(p) for p in points] for an f that is expensive at each point, one task per point,
-# which run in parallel when Julia runs with several threads
-_pointwise(f, points) = _fetchall([Threads.@spawn f(p) for p in points])
+# which run in parallel when Julia runs with several threads; the results have the
+# type that inference gives f, so that callers infer too
+_pointwise(f, points) = _fetchall([Threads.@spawn f(p) for p in points], Base.promote_op(f, eltype(points)))
 
-# The results of the tasks, once all of them have finished. An error in a task is
-# thrown as itself, not wrapped in a TaskFailedException, so that its type does not
-# depend on whether the work ran in tasks. Anything else that interrupts the wait,
-# such as Ctrl-C, is thrown at once.
-function _fetchall(tasks)
+# The results of the tasks, once all of them have finished, as a vector with element
+# type T where that is a type their values can have. An error in a task is thrown as
+# itself, not wrapped in a TaskFailedException, so that its type does not depend on
+# whether the work ran in tasks. Anything else that interrupts the wait, such as
+# Ctrl-C, is thrown at once.
+function _fetchall(tasks, T::Type = Any)
   for t in tasks
     try
       wait(t)
@@ -340,7 +342,8 @@ function _fetchall(tasks)
   for t in tasks
     istaskfailed(t) && throw(t.result)
   end
-  return [fetch(t) for t in tasks]
+  T === Union{} && return [fetch(t) for t in tasks]
+  return T[fetch(t)::T for t in tasks]
 end
 
 # The first i with pred(i), or n + 1, for a predicate that is false and then true on
@@ -677,7 +680,8 @@ _binned_support(k::GaussianFamily) = (s = 12 * first(_scale_order(k)); (-s, s))
 # occupied grid points, in increasing order, and their totals.
 function _linearbin!(ws::SumsWorkspace, xs, vals, δ)
   (xs[end] - xs[1]) / δ < 2.0^50 || throw(ArgumentError(
-    "BinnedSums: the grid would need more than 2^50 points for this bandwidth; use FastSums"))
+    "BinnedSums: the grid would need more than 2^50 points for this bandwidth; use an exact engine, " *
+    "FastSums or WindowSums for polynomial kernels and DirectSums otherwise"))
   gl, gv = empty!(ws.gridindex), empty!(ws.gridvals)
   for i in eachindex(xs)
     s = (xs[i] - xs[1]) / δ

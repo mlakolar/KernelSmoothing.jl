@@ -66,9 +66,17 @@ opposite signs.
 struct MSEOptimal <: BandwidthSelector
   regularization::Float64
   interior::Bool
+
+  function MSEOptimal(regularization::Real, interior::Bool)
+    _check_regularization(regularization)
+    new(regularization, interior)
+  end
 end
 
 MSEOptimal(; regularization::Real = 1, interior::Bool = false) = MSEOptimal(regularization, interior)
+
+_check_regularization(r) = 0 <= r < Inf ||
+  throw(ArgumentError("regularization must be nonnegative and finite, got $r"))
 
 """
     IMSEOptimal(; grid = 30, regularization = 1, interior = false)
@@ -101,6 +109,7 @@ struct IMSEOptimal <: BandwidthSelector
   function IMSEOptimal(grid::Union{Integer,Symbol}, regularization::Real, interior::Bool)
     grid isa Symbol && grid != :points && throw(ArgumentError("grid must be a number of points or :points, got :$grid"))
     grid isa Integer && grid < 2 && throw(ArgumentError("grid must have at least two points, got $grid"))
+    _check_regularization(regularization)
     new(grid, regularization, interior)
   end
 end
@@ -147,25 +156,27 @@ function selectbandwidth(rule::MSEOptimal, d::SmoothingData, k::AbstractKernel; 
                          derivative::Integer = 0, points = nothing, vce::VarianceEstimator = NNVariance(),
                          minobs::Integer = 21, compat::Bool = false)
   d.y === nothing && return _densityplugin(rule, d, k, points === nothing ? nothing : _checkpoints(points),
-                                           minobs, compat; imse = false)
+                                           minobs, compat, Val(false))
   _check_spread(d, rule)
   _check_responses(d, rule)
+  _check_degree(degree, derivative)
   pts = points === nothing ? collect(range(d.x[1], d.x[end]; length = 30)) : _checkpoints(points)
   p, ν = Int(degree), Int(derivative)
   pilots = compat ? nothing : _regressionpilots(d, k, p)
-  r = _pointwise(c -> _msedpi(d, k, c, p, ν, rule.regularization, rule.interior, vce, minobs, pilots), pts)
-  details = (b = [s.b for s in r], points = pts)
-  return BandwidthSelection([s.h for s in r], rule,
-                            compat ? details : (details..., crossvalidation = pilots.crossvalidation))
+  r = _msedpis(d, k, pts, p, ν, rule, vce, minobs, pilots)
+  # the details have one shape for both pilots, so that the selection is inferable
+  return BandwidthSelection([s.h for s in r], rule, (b = [s.b for s in r], points = pts,
+                            crossvalidation = compat ? NaN : pilots.crossvalidation))
 end
 
 function selectbandwidth(rule::IMSEOptimal, d::SmoothingData, k::AbstractKernel; degree::Integer = 1,
                          derivative::Integer = 0, points = nothing, vce::VarianceEstimator = NNVariance(),
                          minobs::Integer = 21, compat::Bool = false)
   d.y === nothing && return _densityplugin(rule, d, k, points === nothing ? nothing : _checkpoints(points),
-                                           minobs, compat; imse = true)
+                                           minobs, compat, Val(true))
   _check_spread(d, rule)
   _check_responses(d, rule)
+  _check_degree(degree, derivative)
   p, ν = Int(degree), Int(derivative)
   q = p + 1
   grid = if rule.grid isa Integer
@@ -175,7 +186,7 @@ function selectbandwidth(rule::IMSEOptimal, d::SmoothingData, k::AbstractKernel;
     _checkpoints(points)
   end
   pilots = compat ? nothing : _regressionpilots(d, k, p)
-  r = _pointwise(c -> _msedpi(d, k, c, p, ν, rule.regularization, rule.interior, vce, minobs, pilots), grid)
+  r = _msedpis(d, k, grid, p, ν, rule, vce, minobs, pilots)
   N, R = nobs(d), d.x[end] - d.x[1]
   Vh, Bh = sum(s.Vh for s in r) / length(r), sum(s.Bh for s in r) / length(r)
   if isodd(p - ν) || rule.interior
@@ -186,14 +197,15 @@ function selectbandwidth(rule::IMSEOptimal, d::SmoothingData, k::AbstractKernel;
   else
     h = _fmin(H -> abs(H^(2p + 2 - 2ν) * Bh + Vh / (N * H^(1 + 2ν))), eps(), R)
   end
-  compat || return BandwidthSelection(h, rule, (b = pilots.b1, grid = grid, crossvalidation = pilots.crossvalidation))
+  compat || return BandwidthSelection(h, rule, (b = Float64(pilots.b1), grid = grid,
+                                                crossvalidation = pilots.crossvalidation))
   Vb, Bb = sum(s.Vb for s in r) / length(r), sum(s.Bb for s in r) / length(r)
   if isodd(p - ν) || rule.interior
     b = (Vb / (N * Bb))^(1 / (2q + 3))
   else
     b = _fmin(H -> abs(H^(2q + 2 - 2(p + 1)) * Bb + Vb / (N * H^(1 + 2(p + 1)))), eps(), R)
   end
-  return BandwidthSelection(h, rule, (b = b, grid = grid))
+  return BandwidthSelection(h, rule, (b = Float64(b), grid = grid, crossvalidation = NaN))
 end
 
 function selectbandwidth(rule::CoverageOptimal, d::SmoothingData, k::AbstractKernel; degree::Integer = 1,
@@ -227,6 +239,11 @@ function _regressionpilots(d, k, p)
   h0 = rot(p, 0)
   return (b1 = hcv * rot(p + 1, p + 1) / h0, b2 = hcv * rot(p + 2, p + 2) / h0, crossvalidation = hcv)
 end
+
+# _msedpi at the points cs, in tasks; a function barrier, so that the closure captures
+# pilots of one type, which Julia 1.10 needs to infer the results
+_msedpis(d, k, cs, p, ν, rule, vce, minobs, pilots) =
+  _pointwise(c -> _msedpi(d, k, c, p, ν, rule.regularization, rule.interior, vce, minobs, pilots), cs)
 
 # The stages of nprobust's lpbwselect.mse.dpi at the point c, for a fit of order p
 # of the derivative ν, or only its last stage with the adaptive pilot bandwidths;
@@ -285,7 +302,8 @@ function _msedpi(d, k, c, p, ν, regul, interior, vce, minobs, pilots = nothing)
   else
     (ch.V, compat ? (ch.B1 + h * ch.B2)^2 : sqbias(ch, h, regul))
   end
-  compat || return (h = h, b = b, Vh = Vh, Bh = Bh)
+  # one shape for both pilots, so that the callers infer
+  compat || return (h = h, b = b, Vh = Vh, Bh = Bh, Vb = NaN, Bb = NaN)
   Vb, Bb = !even || interior ? (cb.rV * cb.V, cb.rB * cb.B1^2) : (cb.V, (cb.B1 + b * cb.B2)^2)
   return (h = h, b = b, Vh = Vh, Bh = Bh, Vb = Vb, Bb = Bb)
 end

@@ -42,7 +42,8 @@ points over the Taylor class with bound `M` on the derivative of order `p + 1`, 
 in [`Honest`](@ref); `M = :rot` uses the rule of thumb.
 """
 function worstcasebias(m::LocalPolynomialRegression, M; biascorrected::Bool = false)
-  Mv = M === :rot ? _honestM(m.data, m.degree) : Float64(M)
+  Honest(M)   # checks M
+  Mv = M === :rot ? _honestM(m.data, m.degree) : Float64(M)::Float64
   p, ν = m.degree, m.derivative
   return _pointwise(eachindex(m.points)) do j
     Mv * _absmoment(m.data, m.kernel, m.points[j], m.h[j], m.b[j], p, ν, biascorrected) / factorial(p + 1)
@@ -75,12 +76,13 @@ function _honestM(d::SmoothingData, p)
   x̄, s = _mean(d), sqrt(_variance(d))
   z = (d.x .- x̄) ./ s
   sw = d.w === nothing ? ones(nobs(d)) : sqrt.(d.w)
-  α = LinearAlgebra.qr(sw .* [zi^j for zi in z, j in 0:P]) \ (sw .* d.y)
+  # (the solve does not infer, so its type is asserted, and with it the result's)
+  α = (LinearAlgebra.qr(sw .* [zi^j for zi in z, j in 0:P]) \ (sw .* d.y))::Vector{Float64}
   r = p + 1
   deriv(zz) = sum(α[j + 1] * prod(j-r+1:j) * zz^(j - r) for j in r:P; init = 0.0) / s^r
   # a polynomial of order 2 attains its largest absolute value at an end or its vertex
   zs = range(z[1], z[end]; length = 1001)
-  return maximum(abs ∘ deriv, zs)
+  return maximum(abs ∘ deriv, zs)::Float64
 end
 
 # the level quantile of |N(t, 1)|: the c with Φ(c - t) - Φ(-c - t) = level, which
@@ -103,11 +105,11 @@ function _honestconfint(m::LocalPolynomialRegression, level, method::Honest)
 end
 
 """
-    FLCIOptimal(M = :rot; gridsize = 40)
+    FLCIOptimal(M = :rot; gridsize = 40, level = 0.95)
 
 The bandwidth at each point that minimizes the length of the [`Honest`](@ref)
-interval with bound `M`, `cv(B(h) / se(h)) se(h)`, as Armstrong and Kolesár (2020)
-recommend for honest inference. The length is evaluated with the standard errors
+interval with bound `M` and coverage `level`, `cv(B(h) / se(h)) se(h)`, as Armstrong
+and Kolesár (2020) recommend for honest inference. The length is evaluated with the standard errors
 of the fit's variance estimator on a grid of bandwidths spaced evenly on the log
 scale, from the distance of the `max(minobs, 21)`-th nearest observation to the
 range of the data, and the best one is refined by golden-section search. The lower
@@ -118,23 +120,27 @@ about three observations, where the intervals covered 3% of the time.
 struct FLCIOptimal <: BandwidthSelector
   M::Union{Float64,Symbol}
   gridsize::Int
+  level::Float64
 
-  function FLCIOptimal(M::Union{Real,Symbol}, gridsize::Integer)
+  function FLCIOptimal(M::Union{Real,Symbol}, gridsize::Integer, level::Real)
     Honest(M)   # checks M
     gridsize >= 3 || throw(ArgumentError("gridsize must be at least 3, got $gridsize"))
-    new(M isa Real ? Float64(M) : M, gridsize)
+    0 < level < 1 || throw(ArgumentError("level must be between 0 and 1, got $level"))
+    new(M isa Real ? Float64(M) : M, gridsize, level)
   end
 end
 
-FLCIOptimal(M::Union{Real,Symbol} = :rot; gridsize::Integer = 40) = FLCIOptimal(M, gridsize)
+FLCIOptimal(M::Union{Real,Symbol} = :rot; gridsize::Integer = 40, level::Real = 0.95) =
+  FLCIOptimal(M, gridsize, level)
 
 function selectbandwidth(rule::FLCIOptimal, d::SmoothingData, k::AbstractKernel; degree::Integer = 1,
                          derivative::Integer = 0, points = nothing, vce::VarianceEstimator = NNVariance(),
-                         minobs::Integer = 21, kwargs...)
+                         minobs::Integer = 21)
   d.y === nothing && throw(ArgumentError("FLCIOptimal needs responses; use SmoothingData(x, y)"))
+  _check_degree(degree, derivative)
   p, ν = Int(degree), Int(derivative)
   pts = points === nothing ? collect(range(d.x[1], d.x[end]; length = 30)) : _checkpoints(points)
-  M = rule.M === :rot ? _honestM(d, p) : rule.M
+  M = rule.M === :rot ? _honestM(d, p) : rule.M::Float64
   hmax = d.x[end] - d.x[1]
   hs = _pointwise(pts) do c
     hmin = max(knn_distance(d, c, min(max(minobs, 21, p + 2), nobs(d))), hmax / 1e4)
@@ -144,7 +150,7 @@ function selectbandwidth(rule::FLCIOptimal, d::SmoothingData, k::AbstractKernel;
       f = _localfit(d, k, c, h, h, p, ν, vce; setup = s)
       isfinite(f.se) && f.se > 0 || return Inf
       B = M * _absmoment(d, k, c, h, h, p, ν, false, s) / factorial(p + 1)
-      return _cvb(B / f.se, 0.95) * f.se
+      return _cvb(B / f.se, rule.level) * f.se
     end
     grid = exp.(range(log(hmin), log(hmax); length = rule.gridsize))
     vals = halflength.(grid)
@@ -157,4 +163,6 @@ end
 _usesbc(method::Honest) = method.biascorrected
 _confint(m::LocalPolynomialRegression, level, method::Honest) = _honestconfint(m, level, method)
 _confint(m::PointwiseDensity, level, method::Honest) =
+  throw(ArgumentError("honest intervals are implemented for local polynomial regression"))
+_densitymethod(::Honest) =
   throw(ArgumentError("honest intervals are implemented for local polynomial regression"))

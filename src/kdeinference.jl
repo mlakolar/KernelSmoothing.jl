@@ -19,7 +19,8 @@ the robust one includes the variability of the bias estimate. The estimates are
 inconsistent at boundary points, so evaluate in the interior.
 
 `coef`, `stderror(m; method)`, `confint(m; level, method)` and `coeftable(m)` work as
-for [`LocalPolynomialRegression`](@ref).
+for [`LocalPolynomialRegression`](@ref); the column `nobs` of `coeftable` counts the
+observations within `max(h, b)` of each point.
 """
 struct PointwiseDensity{K<:AbstractKernel,D<:SmoothingData,S<:BandwidthSelection} <: StatsAPI.StatisticalModel
   data::D
@@ -79,7 +80,7 @@ function fit(::Type{PointwiseDensity}, d::SmoothingData; points = nothing,
   minobs >= 0 || throw(ArgumentError("minobs must be nonnegative, got $minobs"))
   pts = points === nothing ? [_quantile(d, q) for q in range(0.1, 0.9; length = 30)] : _checkpoints(points)
   rule = bandwidth === nothing ? _default_density_rule(kernel, length(pts), compat) : bandwidth
-  sel = _density_selection(rule, d, kernel, pts, minobs, compat)
+  sel = _anyselection(_density_selection(rule, d, kernel, pts, minobs, compat))
   h = _pointbandwidths(sel.h, length(pts))
   b = if pilot === :selected
     haskey(sel.details, :b) || throw(ArgumentError("pilot = :selected needs a rule that selects b, such as MSEOptimal()"))
@@ -87,7 +88,7 @@ function fit(::Type{PointwiseDensity}, d::SmoothingData; points = nothing,
   elseif pilot !== nothing
     _pointbandwidths(pilot, length(pts))
   else
-    rho > 0 || throw(ArgumentError("rho must be positive, or pass the pilot bandwidth"))
+    0 < rho < Inf || throw(ArgumentError("rho must be positive and finite, or pass the pilot bandwidth"))
     h ./ rho
   end
   floored = _floor!(h, b, d, pts, minobs)
@@ -176,7 +177,11 @@ bandwidth(m::PointwiseDensity) = m.h
 StatsAPI.coef(m::PointwiseDensity) = copy(m.estimate)
 
 stderror(m::PointwiseDensity; method::InferenceMethod = Conventional()) =
-  copy(_usesbc(method) ? m.se_rbc : m.se)
+  copy(_usesbc(_densitymethod(method)) ? m.se_rbc : m.se)
+
+# the methods of density fits; honest intervals, and their standard errors, are
+# implemented for regression only (see honest.jl)
+_densitymethod(method::InferenceMethod) = method
 
 function StatsAPI.confint(m::PointwiseDensity; level::Real = 0.95, method::InferenceMethod = RobustBiasCorrected())
   return _confint(m, level, method)
@@ -245,6 +250,12 @@ function StatsAPI.confint(f::KDE, x::AbstractVector{<:Real}; level::Real = 0.95,
   return confint(m; level, method)
 end
 
+# at one point, the interval as a tuple (lower, upper)
+function StatsAPI.confint(f::KDE, x::Real; kwargs...)
+  c = confint(f, [x]; kwargs...)
+  return (c[1, 1], c[1, 2])
+end
+
 
 ## Plug-in bandwidths for densities
 
@@ -256,10 +267,11 @@ end
 # f is estimated at the Sheather–Jones bandwidth; Rreg = 3 (μ₂/2)² Var(f̂'') keeps h
 # finite where f'' vanishes. With compat = true, the rule-of-thumb pilots of
 # nprobust's kdbwselect are used instead.
-function _densityplugin(rule, d, k, points, minobs, compat; imse::Bool)
+# (imse, integrated or pointwise, comes as a Val, so that each selection infers)
+function _densityplugin(rule, d, k, points, minobs, compat, ::Val{imse}) where imse
   rule.interior && throw(ArgumentError("the plug-in bandwidths for densities are for interior points " *
     "already, and have no interior option, got $rule"))
-  compat && return _kdbwselect(rule, d, k, points, minobs; imse)
+  compat && return _kdbwselect(rule, d, k, points, minobs, Val(imse))
   xs, N = d.x, effective_nobs(d)
   c0, c2 = _secondderivative(k)
   μ2, R = moment(k, 2), roughness(k)
@@ -320,7 +332,7 @@ function _clampdensity(h, floor, cap)
 end
 
 # nprobust's kdbwselect: rule-of-thumb pilots for f and f''
-function _kdbwselect(rule, d, k, points, minobs; imse::Bool)
+function _kdbwselect(rule, d, k, points, minobs, ::Val{imse}) where imse
   k isa Union{EpanechnikovKernel,UniformKernel} || throw(ArgumentError(
     "nprobust's plug-in density bandwidths (compat = true) are defined for the Epanechnikov and " *
     "uniform kernels; pass a bandwidth or use compat = false for $k"))
@@ -347,7 +359,7 @@ function _kdbwselect(rule, d, k, points, minobs; imse::Bool)
     V = sum(c[2] for c in cs) / length(cs)
     # nprobust squares the average bias, which can cancel where f'' changes sign
     B2 = (sum(B) / length(B))^2
-    return BandwidthSelection(hopt(V, B2), rule, (b = brot, grid = grid))
+    return BandwidthSelection(hopt(V, B2), rule, (b = brot, grid = grid, sheatherjones = NaN))
   end
   pts = points === nothing ? [_quantile(d, q) for q in range(0.1, 0.9; length = 30)] : points
   h, b = similar(pts), similar(pts)
@@ -360,5 +372,5 @@ function _kdbwselect(rule, d, k, points, minobs; imse::Bool)
     isfinite(h[j]) || (h[j] = max(abs(c - xs[1]), abs(c - xs[end])))
     b[j] = max(brot, floor)
   end
-  return BandwidthSelection(h, rule, (b = b, points = pts))
+  return BandwidthSelection(h, rule, (b = b, points = pts, sheatherjones = NaN))
 end

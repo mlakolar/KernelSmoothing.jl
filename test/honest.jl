@@ -101,4 +101,22 @@ end
   @test confint(m; method = Honest(1.0)) ≈ [2 - B[1] 2 + B[1]]
 end
 
+@testset "FLCI level, argument checks and inference" begin
+  m = fit(LocalPolynomialRegression, X, Y; bandwidth = 0.2, points = [0.3, 0.6])
+  @test_throws ArgumentError worstcasebias(m, -1.0)
+  @test_throws ArgumentError FLCIOptimal(1.0; level = 1.5)
+  @inferred confint(m; method = Honest(1.0))
+  @inferred confint(m; method = Honest())
+  @inferred worstcasebias(m, :rot)
+  d = SmoothingData(X, Y)
+  k = EpanechnikovKernel()
+  s95 = @inferred selectbandwidth(FLCIOptimal(1.0), d, k; points = [0.5])
+  s80 = selectbandwidth(FLCIOptimal(1.0; level = 0.8), d, k; points = [0.5])
+  # the length at each level is smallest at its own bandwidth
+  half(h, level) = (mm = fit(LocalPolynomialRegression, d; bandwidth = h, points = [0.5]);
+                    c = confint(mm; method = Honest(1.0), level); (c[2] - c[1]) / 2)
+  @test half(s80.h[1], 0.8) <= half(s95.h[1], 0.8) * (1 + 1e-6)
+  @test half(s95.h[1], 0.95) <= half(s80.h[1], 0.95) * (1 + 1e-6)
+end
+
 end

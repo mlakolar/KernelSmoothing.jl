@@ -34,13 +34,13 @@ end
     m = fit(LocalPolynomialRegression, X, Y; weights = c.weighted ? W : nothing, degree = c.p,
             derivative = c.deriv, kernel = NPKERNELS[c.kernel], bandwidth = c.h, pilot = c.b,
             points = EVAL, vce)
-    @test m.h ≈ c.hused rtol = 1e-14
-    @test m.b ≈ c.bused rtol = 1e-14
+    @test all(isapprox.(m.h, c.hused; rtol = 1e-14))
+    @test all(isapprox.(m.b, c.bused; rtol = 1e-14))
     @test m.nwindow == c.N
-    @test m.estimate ≈ c.tau_us rtol = 1e-10
-    @test m.estimate_bc ≈ c.tau_bc rtol = 1e-10
-    @test m.se ≈ c.se_us rtol = 1e-10
-    @test m.se_rbc ≈ c.se_rb rtol = 1e-10
+    @test all(isapprox.(m.estimate, c.tau_us; rtol = 1e-10))
+    @test all(isapprox.(m.estimate_bc, c.tau_bc; rtol = 1e-10))
+    @test all(isapprox.(m.se, c.se_us; rtol = 1e-10))
+    @test all(isapprox.(m.se_rbc, c.se_rb; rtol = 1e-10))
   end
 end
 
