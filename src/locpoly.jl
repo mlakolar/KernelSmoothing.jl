@@ -504,7 +504,20 @@ end
 
 nobs(m::LocalPolynomialRegression) = nobs(m.data)
 bandwidth(m::LocalPolynomialRegression) = m.h
-StatsAPI.coef(m::LocalPolynomialRegression) = copy(m.estimate)
+"""
+    coef(m; method = Conventional())
+
+The estimates at the points of a fit (`LocalPolynomialRegression`,
+[`PointwiseDensity`](@ref) or [`LocalPolynomialDensity`](@ref)), or with
+`method = RobustBiasCorrected()` the bias-corrected estimates, the centres of the
+default intervals of [`confint`](@ref). By default `coef`, `stderror` and `vcov`
+describe the conventional estimate, which has the smaller mean squared error, and
+`confint` the robust bias-corrected interval, which covers (Calonico, Cattaneo and
+Farrell 2018); with the same `method`, `coef(m; method) .± z .* stderror(m; method)`
+is `confint(m; method)`.
+"""
+StatsAPI.coef(m::LocalPolynomialRegression; method::InferenceMethod = Conventional()) =
+  copy(_usesbc(method) ? m.estimate_bc : m.estimate)
 
 """
     stderror(m::LocalPolynomialRegression; method = Conventional())

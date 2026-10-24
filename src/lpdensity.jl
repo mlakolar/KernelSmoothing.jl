@@ -17,7 +17,7 @@ bias-corrected estimate is the fit of order `p + 1` with the same bandwidth. The
 standard errors come from the influence function of `F̂` on the fit, so that they
 account for its estimation.
 
-`coef`, `stderror(m; method)`, `confint(m; level, method)`, `coeftable(m)`,
+`coef(m; method)`, `stderror(m; method)`, `confint(m; level, method)`, `coeftable(m)`,
 [`vcov`](@ref) and [`confband`](@ref) work as for [`PointwiseDensity`](@ref). The
 columns `nobs` and `nunique` of `coeftable` count the observations and the distinct
 values with positive weight in the window of each point, or with `compat = true`
@@ -246,7 +246,8 @@ end
 
 nobs(m::LocalPolynomialDensity) = nobs(m.data)
 bandwidth(m::LocalPolynomialDensity) = m.h
-StatsAPI.coef(m::LocalPolynomialDensity) = copy(m.estimate)
+StatsAPI.coef(m::LocalPolynomialDensity; method::InferenceMethod = Conventional()) =
+  copy(_usesbc(_densitymethod(method)) ? m.estimate_bc : m.estimate)
 stderror(m::LocalPolynomialDensity; method::InferenceMethod = Conventional()) =
   copy(_usesbc(_densitymethod(method)) ? m.se_rbc : m.se)
 StatsAPI.confint(m::LocalPolynomialDensity; level::Real = 0.95, method::InferenceMethod = RobustBiasCorrected()) =

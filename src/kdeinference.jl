@@ -18,8 +18,8 @@ standard errors estimate the exact variances of the two linear estimators, so th
 the robust one includes the variability of the bias estimate. The estimates are
 inconsistent at boundary points, so evaluate in the interior.
 
-`coef`, `stderror(m; method)`, `confint(m; level, method)` and `coeftable(m)` work as
-for [`LocalPolynomialRegression`](@ref); the column `nobs` of `coeftable` counts the
+`coef(m; method)`, `stderror(m; method)`, `confint(m; level, method)` and `coeftable(m)`
+work as for [`LocalPolynomialRegression`](@ref); the column `nobs` of `coeftable` counts the
 observations with positive weight in the larger of the windows of `h` and `b`, as
 for regression, or with `compat = true` all those within `max(h, b)`, as nprobust.
 """
@@ -61,9 +61,9 @@ bias-corrected standard errors (Calonico, Cattaneo and Farrell 2018), as nprobus
 - `compat = true` reproduces nprobust 1.0.0: its bias correction uses the constant
   `∫ u⁴ D(u) du / 24` instead of `μ₂(k)/2`, which removes only 5/9 of the leading
   bias for the Epanechnikov kernel, and its plug-in bandwidths use normal-reference
-  pilots and, when integrated, square the average bias. nprobust has plug-in
-  bandwidths for the Epanechnikov and uniform kernels only; for other kernels the
-  default bandwidth is then [`SheatherJones`](@ref).
+  pilots and, when integrated, square the average bias. nprobust's `kdrobust`
+  accepts the Epanechnikov and uniform kernels only, so that `compat = true` with
+  another kernel is an error.
 
 Where no observation has positive weight in a window, the standard error of that
 estimate is `NaN`: nprobust gives zero, and with it an interval of width zero
@@ -85,8 +85,11 @@ function fit(::Type{PointwiseDensity}, d::SmoothingData; points = nothing,
   isapprox(moment(kernel, 1), 0; atol = 1e-12) && isapprox(moment(kernel, 3), 0; atol = 1e-12) ||
     throw(ArgumentError("$kernel is not symmetric; robust bias-corrected densities need a symmetric kernel"))
   minobs >= 0 || throw(ArgumentError("minobs must be nonnegative, got $minobs"))
+  compat && !(kernel isa Union{EpanechnikovKernel,UniformKernel}) && throw(ArgumentError(
+    "nprobust's kdrobust accepts the Epanechnikov and uniform kernels only, so compat = true has no " *
+    "counterpart for $kernel; use compat = false"))
   pts = points === nothing ? [_quantile(d, q) for q in range(0.1, 0.9; length = 30)] : _checkpoints(points)
-  rule = bandwidth === nothing ? _default_density_rule(kernel, length(pts), compat) : bandwidth
+  rule = bandwidth === nothing ? _default_density_rule(length(pts)) : bandwidth
   sel = _anyselection(_density_selection(rule, d, kernel, pts, minobs, compat))
   h = _pointbandwidths(sel.h, length(pts))
   b = if pilot === :selected
@@ -112,8 +115,7 @@ function _check_density_kernel(k)
   return nothing
 end
 
-_default_density_rule(k, m, compat) =
-  compat && !(k isa Union{EpanechnikovKernel,UniformKernel}) ? SheatherJones() : m == 1 ? MSEOptimal() : IMSEOptimal()
+_default_density_rule(m) = m == 1 ? MSEOptimal() : IMSEOptimal()
 
 _density_selection(h::Union{Real,AbstractVector{<:Real}}, d, k, pts, minobs, compat) =
   _regression_selection(h, d, k, 0, 0, pts, nothing, minobs)
@@ -186,7 +188,8 @@ const _PointwiseFit = Union{LocalPolynomialRegression,PointwiseDensity}
 
 nobs(m::PointwiseDensity) = nobs(m.data)
 bandwidth(m::PointwiseDensity) = m.h
-StatsAPI.coef(m::PointwiseDensity) = copy(m.estimate)
+StatsAPI.coef(m::PointwiseDensity; method::InferenceMethod = Conventional()) =
+  copy(_usesbc(_densitymethod(method)) ? m.estimate_bc : m.estimate)
 
 stderror(m::PointwiseDensity; method::InferenceMethod = Conventional()) =
   copy(_usesbc(_densitymethod(method)) ? m.se_rbc : m.se)

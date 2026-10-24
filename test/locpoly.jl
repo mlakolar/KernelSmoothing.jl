@@ -295,4 +295,21 @@ end
   @test mb.nwindow == [count(abs.(x .- 0.5) .< 0.3)]
 end
 
+@testset "coef with a method, matching confint" begin
+  m = fit(LocalPolynomialRegression, XS, YS; points = [0.25, 0.5])
+  z = 1.959963984540054
+  for method in (Conventional(), RobustBiasCorrected())
+    @test hcat(coef(m; method) .- z .* stderror(m; method), coef(m; method) .+ z .* stderror(m; method)) ≈
+          confint(m; method)
+  end
+  @test coef(m) == m.estimate && coef(m; method = RobustBiasCorrected()) == m.estimate_bc
+  @test coef(m; method = Honest(:rot; biascorrected = true)) == m.estimate_bc
+  for f in (fit(PointwiseDensity, XS; points = [0.0]), fit(LocalPolynomialDensity, XS; points = [0.0]))
+    @test coef(f; method = RobustBiasCorrected()) == f.estimate_bc && coef(f) == f.estimate
+  end
+  # the kernel type is exported, and support is a tuple, for which insupport tests membership
+  @test :PiecewisePolynomialKernel in names(KernelSmoothing)
+  @test support(EpanechnikovKernel()) == (-1.0, 1.0) && insupport(EpanechnikovKernel(), 0.5)
+end
+
 end

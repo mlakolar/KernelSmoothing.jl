@@ -121,7 +121,8 @@ places the defaults depart from the R packages, which `compat = true` reproduces
 The pages of the estimators give the details.
 
 For all fits, `coef(m)` and `stderror(m)` describe the conventional estimates, and
-`stderror(m; method = RobustBiasCorrected())` gives the robust standard errors. The
+`coef(m; method = RobustBiasCorrected())` and `stderror(m; method = RobustBiasCorrected())`
+give the bias-corrected estimates and their robust standard errors. The
 intervals of `confint(m)` and the bands of `confband(m)` are robust bias-corrected
 by default and centred at the bias-corrected estimates, since conventional intervals
 cover only for bandwidths well below the ones that minimize the mean squared error.
