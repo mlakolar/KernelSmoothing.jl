@@ -22,9 +22,9 @@ development.
   conventional, robust bias-corrected and honest intervals (Armstrong and Kolesár),
   nearest-neighbour, HC0–HC3 and cluster-robust CR0–CR3 variances, covariances
   between points and uniform sup-t bands.
-- `fit(RegressionDiscontinuity, x, y; cutoff, bandwidth)`: sharp, fuzzy and kink
-  regression discontinuity designs, with covariates, as rdrobust (Calonico,
-  Cattaneo and Titiunik 2014).
+- `fit(RegressionDiscontinuity, x, y; cutoff)`: sharp, fuzzy and kink regression
+  discontinuity designs, with covariates and rdrobust's bandwidth selectors, as
+  rdrobust (Calonico, Cattaneo and Titiunik 2014).
 - Bandwidth selectors: Sheather and Jones (the default for densities), rules of
   thumb, least-squares and leave-one-out cross-validation, the plug-in bandwidths
   of nprobust and lpdensity, coverage-error-optimal rescalings and the bandwidths

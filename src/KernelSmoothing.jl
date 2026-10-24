@@ -45,7 +45,7 @@ export
   LocalPolynomialRegression, PointwiseDensity, LocalPolynomialDensity, RuleOfThumb, MSEOptimal, IMSEOptimal, CoverageOptimal,
   VarianceEstimator, NNVariance, HCVariance, ClusterVariance,
   InferenceMethod, Conventional, RobustBiasCorrected, Honest, FLCIOptimal, worstcasebias,
-  RegressionDiscontinuity,
+  RegressionDiscontinuity, RDOptimal,
   coef, confint, coeftable, predict, fitted, residuals, vcov, confband
 
 include("polynomials.jl")
@@ -62,6 +62,7 @@ include("kdeinference.jl")
 include("bands.jl")
 include("honest.jl")
 include("lpdensity.jl")
+include("rdbandwidth.jl")
 include("rd.jl")
 include("precompile.jl")
 

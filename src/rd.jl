@@ -6,7 +6,7 @@
 A local polynomial estimate of the effect of a treatment assigned by whether a
 running variable `x` reaches a cutoff `c`, with conventional and robust
 bias-corrected inference (Calonico, Cattaneo and Titiunik 2014), as rdrobust;
-fitted with [`fit`](@ref)`(RegressionDiscontinuity, x, y; cutoff, bandwidth)`.
+fitted with [`fit`](@ref)`(RegressionDiscontinuity, x, y; cutoff)`.
 
 On each side of the cutoff, local polynomials of order `p` with bandwidth `h`
 estimate the regression function and its derivatives at `c`, and fits of order
@@ -23,6 +23,7 @@ derivative of order `derivative`:
   covariates with coefficients common to both sides (Calonico, Cattaneo, Farrell
   and Titiunik 2019).
 
+The bandwidths come from [`RDOptimal`](@ref) unless they are given.
 `coef(m)` and `stderror(m)` give the estimate and its standard error, with
 `method = RobustBiasCorrected()` the bias-corrected estimate and its robust
 standard error, [`confint`](@ref)`(m; level, method)` the interval (robust
@@ -57,19 +58,26 @@ struct RegressionDiscontinuity{K<:AbstractKernel,V<:VarianceEstimator,S<:Bandwid
 end
 
 """
-    fit(RegressionDiscontinuity, x, y; cutoff = 0, bandwidth, pilot = nothing, rho = 1,
-        derivative = 0, degree = derivative + 1, kernel = TriangularKernel(),
+    fit(RegressionDiscontinuity, x, y; cutoff = 0, bandwidth = RDOptimal(), pilot = nothing,
+        rho = nothing, derivative = 0, degree = derivative + 1, kernel = TriangularKernel(),
         treatment = nothing, covariates = nothing, vce = nothing, weights = nothing,
-        cluster = nothing, compat = false)
+        cluster = nothing, masspoints = :adjust, bwcheck = nothing, compat = false)
 
 Estimates the jump at `cutoff` in the regression of `y` on the running variable `x`,
 or in its derivative of order `derivative`, from local polynomials of order `degree`
 on the two sides, as rdrobust. Observations with `x < cutoff` form the left side,
 the others the right.
 
-- `bandwidth` is a number, or a pair of numbers for the left and the right side.
+- `bandwidth` is a number, a pair of numbers for the left and the right side, or
+  an [`RDOptimal`](@ref) rule, by default `RDOptimal(:mserd)`, as rdrobust.
 - `pilot` is the bandwidth `b` of the fits of order `degree + 1` that estimate the
-  bias, a number or a pair; by default `b = h / rho`, so that `b = h`, as rdrobust.
+  bias, a number or a pair. By default it is the pilot bandwidth of the rule, or
+  `b = h` for a given bandwidth; with `rho`, `b = h / rho`.
+- `masspoints` and `bwcheck` are rdrobust's options for the rule: where 20 percent
+  or more of the observations on a side repeat values of `x`, `masspoints = :adjust`
+  (the default) counts distinct values instead of observations in the variance
+  bandwidth and keeps 10 distinct values in every window, as `bwcheck = 10` does;
+  `:check` only detects mass points and `:off` ignores them.
 - `treatment` gives the treatment received, for a fuzzy design.
 - `covariates` is a vector or a matrix with one row per observation, for the
   covariate-adjusted estimate; collinear covariates are dropped.
@@ -82,9 +90,57 @@ the others the right.
 """
 function fit(::Type{RegressionDiscontinuity}, x::AbstractVector, y::AbstractVector; cutoff::Real = 0,
              treatment = nothing, covariates = nothing, weights = nothing, cluster = nothing,
-             bandwidth = nothing, pilot = nothing, rho::Real = 1, derivative::Integer = 0,
-             degree::Integer = derivative + 1, kernel::AbstractKernel = TriangularKernel(),
-             vce::Union{Nothing,VarianceEstimator} = nothing, compat::Bool = false)
+             bandwidth = RDOptimal(), pilot = nothing, rho::Union{Nothing,Real} = nothing,
+             derivative::Integer = 0, degree::Integer = derivative + 1,
+             kernel::AbstractKernel = TriangularKernel(), vce::Union{Nothing,VarianceEstimator} = nothing,
+             masspoints::Symbol = :adjust, bwcheck::Union{Nothing,Integer} = nothing, compat::Bool = false)
+  c, p, ν, sides, fuzzy, dZ = _rdprepare(x, y, cutoff, treatment, covariates, weights, cluster, degree, derivative)
+  vce = _variance(vce, sides[1].data)
+  rho === nothing || 0 < rho < Inf || throw(ArgumentError("rho must be positive and finite, got $rho"))
+  sel = if bandwidth isa RDOptimal
+    _rdselection(bandwidth, sides, c, kernel, p, ν, vce, masspoints, bwcheck, fuzzy, dZ, compat)
+  elseif bandwidth isa BandwidthSelector
+    throw(ArgumentError("$bandwidth chooses bandwidths for other estimators; use RDOptimal()"))
+  else
+    BandwidthSelection([_rdbandwidths(bandwidth, "bandwidth")...], nothing, NamedTuple())
+  end
+  h = (sel.h[1], sel.h[2])
+  b = pilot !== nothing ? _rdbandwidths(pilot, "pilot") : rho !== nothing ? h ./ rho :
+      haskey(sel.details, :b) ? (sel.details.b[1], sel.details.b[2]) : h
+  return _rdfit(sides, c, kernel, p, ν, vce, fuzzy, dZ, _anyselection(sel), h, b, compat)
+end
+
+"""
+    selectbandwidth(rule::RDOptimal, x, y; cutoff = 0, derivative = 0, degree = derivative + 1,
+                    kernel = TriangularKernel(), treatment = nothing, covariates = nothing,
+                    vce = nothing, weights = nothing, cluster = nothing, masspoints = :adjust,
+                    bwcheck = nothing, compat = false)
+
+The bandwidths of a [`RegressionDiscontinuity`](@ref) fit by the rule, as rdrobust's
+`rdbwselect`: `h` holds the bandwidths on the left and on the right, and
+`details.b` the pilot bandwidths. The keywords are those of the fit.
+"""
+function selectbandwidth(rule::RDOptimal, x::AbstractVector, y::AbstractVector; cutoff::Real = 0,
+                         treatment = nothing, covariates = nothing, weights = nothing, cluster = nothing,
+                         derivative::Integer = 0, degree::Integer = derivative + 1,
+                         kernel::AbstractKernel = TriangularKernel(), vce::Union{Nothing,VarianceEstimator} = nothing,
+                         masspoints::Symbol = :adjust, bwcheck::Union{Nothing,Integer} = nothing, compat::Bool = false)
+  c, p, ν, sides, fuzzy, dZ = _rdprepare(x, y, cutoff, treatment, covariates, weights, cluster, degree, derivative)
+  return _rdselection(rule, sides, c, kernel, p, ν, _variance(vce, sides[1].data), masspoints, bwcheck, fuzzy, dZ, compat)
+end
+
+function _rdselection(rule, sides, c, k, p, ν, vce, masspoints, bwcheck, fuzzy, dZ, compat)
+  masspoints in (:adjust, :check, :off) || throw(ArgumentError("masspoints must be :adjust, :check or :off, got $(repr(masspoints))"))
+  bwcheck === nothing || bwcheck >= 1 || throw(ArgumentError("bwcheck must be positive, got $bwcheck"))
+  hs, bs, det = _rdselect(rule, sides, c, k, p, ν, vce, masspoints, bwcheck === nothing ? nothing : Int(bwcheck),
+                          fuzzy, dZ, compat)
+  return BandwidthSelection([hs...], rule, (b = [bs...], det...))
+end
+
+# The data of the two sides of the cutoff: each side as SmoothingData of x and y with
+# its weights and clusters, and the matrix D of the outcome, the treatment and the
+# covariates in the order of x
+function _rdprepare(x, y, cutoff, treatment, covariates, weights, cluster, degree, derivative)
   c = Float64(cutoff)
   isfinite(c) || throw(ArgumentError("the cutoff must be finite, got $cutoff"))
   p, ν = Int(degree), Int(derivative)
@@ -109,25 +165,16 @@ function fit(::Type{RegressionDiscontinuity}, x::AbstractVector, y::AbstractVect
     dZ = size(Z, 2)
     D = hcat(D, Z)
   end
-  left = findall(<(c), x)
-  right = findall(>=(c), x)
-  sides = map((left, right)) do ix
+  sides = map((findall(<(c), x), findall(>=(c), x))) do ix
     isempty(ix) && throw(ArgumentError("the cutoff must lie inside the range of x, with observations on both sides"))
     d = SmoothingData(view(x, ix), view(y, ix); weights = weights === nothing ? nothing : view(weights, ix),
                       cluster = cluster === nothing ? nothing : view(cluster, ix))
     (data = d, D = D[ix[d.perm], :])
   end
-  vce = _variance(vce, sides[1].data)
-  h = _rdbandwidths(bandwidth, "bandwidth")
-  b = pilot === nothing ? (0 < rho < Inf ? h ./ rho :
-      throw(ArgumentError("rho must be positive and finite, or pass the pilot bandwidth"))) :
-      _rdbandwidths(pilot, "pilot")
-  sel = _anyselection(BandwidthSelection([h...], nothing, NamedTuple()))
-  return _rdfit(sides, c, kernel, p, ν, vce, fuzzy, dZ, sel, h, b, compat)
+  return c, p, ν, sides, fuzzy, dZ
 end
 
 function _rdbandwidths(h, name)
-  h === nothing && throw(ArgumentError("pass a bandwidth; the bandwidth selectors for regression discontinuity are not implemented yet"))
   hs = h isa Real ? (h, h) : length(h) == 2 ? (h[1], h[2]) :
        throw(ArgumentError("$name must be a number or a pair of numbers for the left and the right side, got $(repr(h))"))
   all(v -> v isa Real && 0 < v < Inf, hs) || throw(ArgumentError("$name must be positive and finite, got $(repr(h))"))
@@ -429,6 +476,7 @@ function Base.show(io::IO, ::MIME"text/plain", m::RegressionDiscontinuity)
   println(io, "Regression discontinuity: ", _rdkind(m), ", local polynomials of degree ", m.degree,
           m.compat ? " (rdrobust compatibility)" : "")
   println(io, "  cutoff ", _fmt(m.cutoff), ", kernel: ", m.kernel, ", variance: ", m.vce)
+  m.selection.rule === nothing || println(io, "  bandwidth: ", m.selection.rule)
   println(io, "  ", rpad("", 22), rpad("left", 12), "right")
   println(io, "  ", rpad("observations", 22), rpad(m.nobs[1], 12), m.nobs[2])
   println(io, "  ", rpad("in the window of h", 22), rpad(m.nh[1], 12), m.nh[2])
