@@ -251,6 +251,7 @@ struct PiecewisePolynomialKernel <: PolynomialKernel
     all(cj -> all(isfinite, cj), coefs) || throw(ArgumentError("coefficients must be finite"))
     smoothness >= 0 || throw(ArgumentError("smoothness must be nonnegative, got $smoothness"))
     b, c = Vector{Float64}(breaks), [Vector{Float64}(cj) for cj in coefs]
+    all(cj -> all(isfinite, cj), c) || throw(ArgumentError("coefficients must be finite as Float64 values"))
     cc, mass, lower, upper = if eltype(first(coefs)) <: BigFloat
       setprecision(BigFloat, 256) do
         cb = [BigFloat.(cj) for cj in coefs]
