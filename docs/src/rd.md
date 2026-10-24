@@ -6,8 +6,8 @@ the two sides of the cutoff, with conventional and robust bias-corrected inferen
 (Calonico, Cattaneo and Titiunik 2014). It covers sharp, fuzzy and kink designs and
 adjustment for covariates, and selects its bandwidths by the plug-in rules of
 rdrobust. The estimates, standard errors and bandwidths agree with rdrobust to
-rounding. `fit(DensityDiscontinuity, x; cutoff)` gives the manipulation test of
-rddensity.
+rounding. Honest intervals and their bandwidths are those of RDHonest, and
+`fit(DensityDiscontinuity, x; cutoff)` gives the manipulation test of rddensity.
 
 ```julia
 using KernelSmoothing
@@ -90,6 +90,43 @@ observations and keeps at least 10 distinct values in every window. A bandwidth 
 also be given, as one number or a pair for the left and the right side, with
 `pilot` (by default ``b = h``) or `rho` (``b = h / \rho``).
 
+## Honest intervals
+
+Robust bias correction estimates the bias and removes it, while honest intervals
+(Armstrong and Kolesár 2018, 2020) bound it over a class of regression functions,
+as RDHonest. Over the Hölder class of functions whose second derivative is bounded
+by ``M`` on each side of the cutoff, the worst-case bias of a local linear estimate
+with weights ``\ell_i`` is
+
+```math
+\bar b = \frac{M}{2} \Big| \sum_i \ell_i (x_i - c)^2 \Big| ,
+```
+
+since the weights of a local linear estimate at the boundary have the same sign on
+each side, and the interval is ``\hat\tau \pm \mathrm{cv}(\bar b / \mathrm{se}) \,
+\mathrm{se}``, where ``\mathrm{cv}(t)`` is the quantile of ``|N(t, 1)|``.
+`class = :taylor` gives the Taylor class instead. In a fuzzy design, ``M = (M_Y,
+M_T)`` bounds the outcome and the treatment, and the bias is that of
+``(M_Y + M_T |\hat\tau|) / |\hat f|`` for the jump ``\hat f`` in the treatment.
+`M = :rot` takes the rule of thumb of RDHonest, the largest second derivative of
+global quartic fits on the two sides, which Armstrong and Kolesár offer as a
+starting point for a sensitivity analysis rather than as a bound.
+
+[`RDHonestOptimal`](@ref)`(M)` chooses the bandwidth that minimizes the worst-case
+mean squared error, the length of the honest interval or the excess length of a
+one-sided interval, from preliminary variances that are constant on each side, as
+RDHonest. With these bandwidths and its standard errors, nearest-neighbour or
+``\mathrm{HC0}`` (RDHonest's `"EHW"`), the intervals agree with RDHonest to
+rounding.
+
+```julia
+m = fit(RegressionDiscontinuity, x, y; bandwidth = RDHonestOptimal(1.5))
+confint(m; method = Honest(1.5))                       # the honest 95% interval
+worstcasebias(m, 1.5)                                  # its bound on the bias
+m = fit(RegressionDiscontinuity, x, y; treatment = t, bandwidth = RDHonestOptimal((1.5, 0.5); criterion = :flci))
+confint(m; method = Honest((1.5, 0.5)))
+```
+
 ## The manipulation test
 
 A regression discontinuity design assumes that units cannot sort themselves around
@@ -121,5 +158,5 @@ agree with rddensity to rounding.
 
 ```@autodocs
 Modules = [KernelSmoothing]
-Pages = ["rd.jl", "rdbandwidth.jl", "rddensity.jl"]
+Pages = ["rd.jl", "rdbandwidth.jl", "rdhonest.jl", "rddensity.jl"]
 ```

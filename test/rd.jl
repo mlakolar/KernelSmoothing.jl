@@ -177,7 +177,7 @@ end
   @test_throws ArgumentError fit(RegressionDiscontinuity, X, Y; bandwidth = 0.001)
   @test_throws ArgumentError fit(RegressionDiscontinuity, X, Y; bandwidth = 0.3, vce = ClusterVariance())
   @test_throws DimensionMismatch fit(RegressionDiscontinuity, X, Y; bandwidth = 0.3, treatment = T[1:10])
-  @test_throws ArgumentError confint(fit(RegressionDiscontinuity, X, Y; bandwidth = 0.3); method = Honest(1.0))
+  @test_throws ArgumentError confint(fit(RegressionDiscontinuity, X, Y; bandwidth = 0.3); method = Honest(1.0; biascorrected = true))
 end
 
 end

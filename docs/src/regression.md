@@ -134,7 +134,7 @@ worstcasebias(m, 40)
 
 ```@autodocs
 Modules = [KernelSmoothing]
-Pages = ["honest.jl"]
+Pages = ["src/honest.jl"]   # (not rdhonest.jl)
 ```
 
 ## Uniform bands

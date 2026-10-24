@@ -31,7 +31,7 @@ bias-corrected by default), and `coeftable(m)` the conventional, bias-corrected
 and robust results, as rdrobust reports them. For a fuzzy design, `m.firststage`
 holds the jump in the treatment.
 """
-struct RegressionDiscontinuity{K<:AbstractKernel,V<:VarianceEstimator,S<:BandwidthSelection} <:
+struct RegressionDiscontinuity{K<:AbstractKernel,V<:VarianceEstimator,S<:BandwidthSelection,T} <:
        StatsAPI.RegressionModel
   cutoff::Float64
   kernel::K
@@ -55,6 +55,7 @@ struct RegressionDiscontinuity{K<:AbstractKernel,V<:VarianceEstimator,S<:Bandwid
   bias::NTuple{2,Float64}        # the estimated biases on the two sides
   firststage::NamedTuple         # the jump in the treatment, for a fuzzy design
   gamma::Matrix{Float64}         # the coefficients of the covariates
+  data::T                        # the data of the two sides
 end
 
 """
@@ -99,6 +100,10 @@ function fit(::Type{RegressionDiscontinuity}, x::AbstractVector, y::AbstractVect
   rho === nothing || 0 < rho < Inf || throw(ArgumentError("rho must be positive and finite, got $rho"))
   sel = if bandwidth isa RDOptimal
     _rdselection(bandwidth, sides, c, kernel, p, ν, vce, masspoints, bwcheck, fuzzy, dZ, compat)
+  elseif bandwidth isa RDHonestOptimal
+    p == 1 && ν == 0 || throw(ArgumentError("RDHonestOptimal is for local linear estimates of the jump, degree = 1 and derivative = 0"))
+    hs, det = _rdhselect(bandwidth, sides, c, kernel, fuzzy, dZ)
+    BandwidthSelection([hs...], bandwidth, (b = [hs...], det...))
   elseif bandwidth isa BandwidthSelector
     throw(ArgumentError("$bandwidth chooses bandwidths for other estimators; use RDOptimal()"))
   else
@@ -165,11 +170,14 @@ function _rdprepare(x, y, cutoff, treatment, covariates, weights, cluster, degre
     dZ = size(Z, 2)
     D = hcat(D, Z)
   end
-  sides = map((findall(<(c), x), findall(>=(c), x))) do ix
-    isempty(ix) && throw(ArgumentError("the cutoff must lie inside the range of x, with observations on both sides"))
-    d = SmoothingData(view(x, ix), view(y, ix); weights = weights === nothing ? nothing : view(weights, ix),
-                      cluster = cluster === nothing ? nothing : view(cluster, ix))
-    (data = d, D = D[ix[d.perm], :])
+  # (a closure that captured D, which is assigned more than once, would box it)
+  sides = let D = D
+    map((findall(<(c), x), findall(>=(c), x))) do ix
+      isempty(ix) && throw(ArgumentError("the cutoff must lie inside the range of x, with observations on both sides"))
+      d = SmoothingData(view(x, ix), view(y, ix); weights = weights === nothing ? nothing : view(weights, ix),
+                        cluster = cluster === nothing ? nothing : view(cluster, ix))
+      (data = d, D = D[ix[d.perm], :])
+    end
   end
   return c, p, ν, sides, fuzzy, dZ
 end
@@ -245,7 +253,7 @@ function _rdfit(sides, c, k, p, ν, vce, fuzzy, dZ, sel, h, b, compat)
   v = map(j -> _rdvariance(sides[j].data, sides[j].D, sv, k, c, h[j], b[j], p, ν, vce, compat, hb, fits[j]), (1, 2))
   return RegressionDiscontinuity(c, k, p, ν, vce, fuzzy, dZ, sel, compat, h, b,
     (nobs(sides[1].data), nobs(sides[2].data)), (fits[1].nh, fits[2].nh), (fits[1].nb, fits[2].nb),
-    est, est_bc, sqrt(v[1].vh + v[2].vh), sqrt(v[1].vb + v[2].vb), lr, bias, first, gamma)
+    est, est_bc, sqrt(v[1].vh + v[2].vh), sqrt(v[1].vb + v[2].vb), lr, bias, first, gamma, sides)
 end
 
 # The fits of order p with bandwidth h and of order q = p + 1 with bandwidth b at the
@@ -432,14 +440,16 @@ StatsAPI.vcov(m::RegressionDiscontinuity; method::InferenceMethod = Conventional
     confint(m::RegressionDiscontinuity; level = 0.95, method = RobustBiasCorrected())
 
 The confidence interval for the jump as a 1×2 matrix: by default the robust
-bias-corrected interval, centred at the bias-corrected estimate, and with
-`method = Conventional()` the interval around the estimate.
+bias-corrected interval, centred at the bias-corrected estimate, with
+`method = Conventional()` the interval around the estimate, and with
+`method = Honest(M)` the honest interval of Armstrong and Kolesár, as RDHonest.
 """
 function StatsAPI.confint(m::RegressionDiscontinuity; level::Real = 0.95,
                           method::InferenceMethod = RobustBiasCorrected())
-  method isa Union{Conventional,RobustBiasCorrected} ||
-    throw(ArgumentError("intervals for regression discontinuity are Conventional() or RobustBiasCorrected()"))
   0 < level < 1 || throw(ArgumentError("level must be between 0 and 1, got $level"))
+  method isa Honest && return _rdhonestconfint(m, level, method)
+  method isa Union{Conventional,RobustBiasCorrected} ||
+    throw(ArgumentError("intervals for regression discontinuity are Conventional(), RobustBiasCorrected() or Honest(M)"))
   z = Distributions.quantile(Distributions.Normal(), (1 + level) / 2)
   est, se = coef(m; method)[1], stderror(m; method)[1]
   return [est - z * se est + z * se]
