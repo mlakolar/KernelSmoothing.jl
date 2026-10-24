@@ -87,9 +87,15 @@ the integrated squared error minus ``\int f^2``,
 ```
 
 on a grid of bandwidths spaced evenly on the log scale, whose lower end comes from a
-robust scale estimate, so that outliers do not lift it. Following Sheather (2004),
-it takes the largest local minimizer, refines it and reports all local minimizers,
-since the criterion often has several. For regression,
+robust scale estimate, so that outliers do not lift it. The criterion often has
+several local minimizers. Following Sheather (2004), the rule prefers the largest,
+since spurious ones appear at small bandwidths, as for rounded data, where the
+criterion falls without bound as ``h`` shrinks. With compact kernels, however,
+clustered data give local minimizers at the scale of the gaps between the clusters,
+where the criterion is far above its lowest local minimum. The rule therefore takes
+the largest local minimizer whose criterion is within half of the lowest one, and
+refines it. Where the criterion is lowest at the lower end of the grid and the data
+have no ties, the grid extends downward first. For regression,
 [`CrossValidation`](@ref) minimizes
 
 ```math

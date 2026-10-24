@@ -443,7 +443,8 @@ function _goldenmin(f, a, b; rtol = 1e-6)
 end
 
 # The bandwidth chosen from a criterion on a grid: the global minimizer over the
-# finite values, or with `largest = true` the largest local minimizer. An interior
+# finite values, or with `largest = true` the largest local minimizer whose
+# criterion is within half of the lowest local minimum, if there is one. An interior
 # choice is refined between its neighbours, to the relative accuracy rtol, and the
 # refinement is kept only where it is no worse. Returns the details: the grid, the
 # criterion values, the local minimizers and whether the choice is at an end of the
@@ -453,7 +454,12 @@ function _gridminimize(f, hs; largest::Bool, rtol = 1e-6)
   m = length(hs)
   any(isfinite, cv) || throw(ArgumentError("the criterion is not finite at any bandwidth of the grid"))
   interior = [i for i in 2:m-1 if isfinite(cv[i]) && cv[i] < cv[i - 1] && cv[i] <= cv[i + 1]]
-  i = largest && !isempty(interior) ? last(interior) : argmin(map(v -> isfinite(v) ? v : Inf, cv))
+  i = if largest && !isempty(interior)
+    lowest = minimum(cv[interior])
+    last(filter(i -> cv[i] <= lowest + abs(lowest) / 2, interior))
+  else
+    argmin(map(v -> isfinite(v) ? v : Inf, cv))
+  end
   atbound = i == 1 || i == m
   h = hs[i]
   if !atbound && isfinite(cv[i - 1]) && isfinite(cv[i + 1])
@@ -479,10 +485,18 @@ error. The minimizer of the criterion itself can exceed `h_OS`, as it does for
 normal data about half of the time, hence the factor 4. The lower end uses the
 robust scale of [`NormalReference`](@ref), so that outliers and heavy tails, which
 inflate the standard deviation, do not lift the whole grid. Following Sheather
-(2004), it takes the largest local minimizer on the grid and refines it. The
-details of the selection record the grid, the criterion, all local minimizers and
-whether the minimum was at an end of the grid, which happens, for example, when ties
-make the criterion fall without bound as `h` shrinks; the rule warns then.
+(2004), the rule prefers the largest local minimizer, since the criterion often has
+spurious minimizers at small bandwidths: with rounded data, it falls without bound
+as `h` shrinks. With compact kernels, however, clustered data give local minimizers
+at the scale of the gaps between the clusters, where the criterion is far above its
+lowest local minimum; for two normal samples 10 apart, the largest minimizer was at
+13.3, with a criterion of -0.045 against -0.126 at 0.95. The rule therefore takes
+the largest local minimizer whose criterion is within half of the lowest local
+minimum, and refines it. Where the criterion is lowest at the lower end of the grid
+and the data have no ties, the grid first extends downward by up to three decades,
+as for lognormal data, whose minimizer lay at a fifth of the lower end. The details
+of the selection record the grid, the criterion, all local minimizers and whether
+the choice was at an end of the grid, and the rule warns then.
 
 Polynomial kernels use exact fast sums. Gaussian kernels use exact double sums for
 up to `exact` observations and otherwise the data binned once, on a grid of 100
@@ -512,9 +526,18 @@ function selectbandwidth(rule::LSCV, d::SmoothingData, k::AbstractKernel)
   n = effective_nobs(d)
   c = (243 * roughness(k) / (35 * _mu2(k)^2 * n))^(1 / 5)
   hmin, hmax = c * _robustscale(sd, iqr / 1.349) / 100, 4 * c * sd
-  crit = _lscvcriterion(d, k, nobs(d) <= rule.exact, hmin)
+  exact = nobs(d) <= rule.exact
   hs = exp.(range(log(hmin), log(hmax); length = rule.gridsize))
-  h, details = _gridminimize(crit, hs; largest = true)
+  h, details = _gridminimize(_lscvcriterion(d, k, exact, hmin), hs; largest = true)
+  # the lowest criterion at the lower end: without ties, which make the criterion
+  # fall without bound there, the grid extends downward, with as many points per
+  # decade, to three decades lower or to the smallest gap between distinct values
+  lo = max(hmin / 1000, minimum(diff(d.values)))
+  if argmin(map(v -> isfinite(v) ? v : Inf, details.criterion)) == 1 && nunique(d) == nobs(d) && lo < hmin
+    m = rule.gridsize + ceil(Int, (rule.gridsize - 1) * log(hmin / lo) / log(hmax / hmin))
+    hs = exp.(range(log(lo), log(hmax); length = m))
+    h, details = _gridminimize(_lscvcriterion(d, k, exact, lo), hs; largest = true)
+  end
   details.atbound && @warn "LSCV: the criterion is smallest at an end of the grid of bandwidths, h = $h"
   return BandwidthSelection(h, rule, details)
 end

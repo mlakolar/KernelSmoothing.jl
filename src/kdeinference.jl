@@ -20,7 +20,8 @@ inconsistent at boundary points, so evaluate in the interior.
 
 `coef`, `stderror(m; method)`, `confint(m; level, method)` and `coeftable(m)` work as
 for [`LocalPolynomialRegression`](@ref); the column `nobs` of `coeftable` counts the
-observations within `max(h, b)` of each point.
+observations with positive weight in the larger of the windows of `h` and `b`, as
+for regression, or with `compat = true` all those within `max(h, b)`, as nprobust.
 """
 struct PointwiseDensity{K<:AbstractKernel,D<:SmoothingData,S<:BandwidthSelection} <: StatsAPI.StatisticalModel
   data::D
@@ -35,7 +36,7 @@ struct PointwiseDensity{K<:AbstractKernel,D<:SmoothingData,S<:BandwidthSelection
   se::Vector{Float64}
   estimate_bc::Vector{Float64}
   se_rbc::Vector{Float64}
-  nwindow::Vector{Int}   # observations within max(h, b) of the point
+  nwindow::Vector{Int}   # observations with positive weight in the larger window; within it under compat
   floored::BitVector
 end
 
@@ -63,6 +64,12 @@ bias-corrected standard errors (Calonico, Cattaneo and Farrell 2018), as nprobus
   pilots and, when integrated, square the average bias. nprobust has plug-in
   bandwidths for the Epanechnikov and uniform kernels only; for other kernels the
   default bandwidth is then [`SheatherJones`](@ref).
+
+Where no observation has positive weight in a window, the standard error of that
+estimate is `NaN`: nprobust gives zero, and with it an interval of width zero
+around an estimate of zero, as at points far from the data. The lower ends of the
+intervals and bands are clamped at zero, since the density is nonnegative, which
+can only raise their coverage. With `compat = true`, both are as in nprobust.
 
 The kernel must be a symmetric second-order density kernel.
 """
@@ -94,7 +101,7 @@ function fit(::Type{PointwiseDensity}, d::SmoothingData; points = nothing,
   floored = _floor!(h, b, d, pts, minobs)
   c0, c2 = _secondderivative(kernel)
   κ = compat ? (c0 * moment(kernel, 4) + c2 * moment(kernel, 6)) / 24 : moment(kernel, 2) / 2
-  r = _pointwise(j -> _densityfit(d, kernel, pts[j], h[j], b[j], c0, c2, κ), eachindex(pts))
+  r = _pointwise(j -> _densityfit(d, kernel, pts[j], h[j], b[j], c0, c2, κ, compat), eachindex(pts))
   return PointwiseDensity(d, kernel, sel, Int(minobs), compat, pts, h, b, [t.f for t in r],
     [t.se for t in r], [t.fbc for t in r], [t.sebc for t in r], [t.n for t in r], floored)
 end
@@ -140,8 +147,11 @@ function _secondderivative(k)
 end
 
 # the estimates and their standard errors at one point, summed over the window of
-# the larger bandwidth; with sᵣ = ∑ wᵢʳ kᵢ and s₂ = ∑ wᵢ² kᵢ², as for KDE
-function _densityfit(d::SmoothingData, k, x0, h, b, c0, c2, κ)
+# the larger bandwidth; with sᵣ = ∑ wᵢʳ kᵢ and s₂ = ∑ wᵢ² kᵢ², as for KDE. Unless
+# compat, a standard error without an observation of nonzero weight, where the sum
+# of squared weights vanishes, is NaN, and the count is that of the observations
+# inside the larger window, and at its edges where the kernel is positive there.
+function _densityfit(d::SmoothingData, k, x0, h, b, c0, c2, κ, compat::Bool)
   xs, n = d.x, nobs(d)
   ρ = h / b
   hb = max(h, b)
@@ -162,8 +172,10 @@ function _densityfit(d::SmoothingData, k, x0, h, b, c0, c2, κ)
     t2 += w^2 * m^2
   end
   W = d.sumw
-  se(s0, s1, s2) = _densityse(s0, s1, s2, h, W, d.neff)
-  nwin = isfinite(rad) ? _firsttrue(i -> xs[i] - x0 > hb, n) - _firsttrue(i -> xs[i] - x0 >= -hb, n) : n
+  se(s0, s1, s2) = !compat && s2 == 0 ? NaN : _densityse(s0, s1, s2, h, W, d.neff)
+  e = !compat && k(1.0) == 0   # the edges of the window get no weight
+  nwin = isfinite(rad) ? _firsttrue(i -> e ? xs[i] - x0 >= hb : xs[i] - x0 > hb, n) -
+                         _firsttrue(i -> e ? xs[i] - x0 > -hb : xs[i] - x0 >= -hb, n) : n
   return (f = s0 / (h * W), se = se(s0, s1, s2), fbc = t0 / (h * W), sebc = se(t0, t1, t2), n = nwin)
 end
 
@@ -191,8 +203,13 @@ function _confint(m, level, method)
   0 < level < 1 || throw(ArgumentError("level must be between 0 and 1, got $level"))
   z = Distributions.quantile(Distributions.Normal(), (1 + level) / 2)
   est, se = _usesbc(method) ? (m.estimate_bc, m.se_rbc) : (m.estimate, m.se)
-  return hcat(est .- z .* se, est .+ z .* se)
+  return hcat(_lowerend(m, est .- z .* se), est .+ z .* se)
 end
+
+# The lower ends of intervals for a density, which is nonnegative, clamped at zero,
+# which can only raise their coverage; under compat they are as in R
+_lowerend(m, lower) = m isa LocalPolynomialRegression || !_nonnegative(m) ? lower : max.(lower, 0.0)
+_nonnegative(m::PointwiseDensity) = !m.compat
 
 # whether a method is built around the bias-corrected estimate
 _usesbc(::Conventional) = false
@@ -242,7 +259,9 @@ bandwidth of `f` and the same pilot bandwidth, as rows `[lower upper]` of a matr
 The robust bias-corrected intervals (Calonico, Cattaneo and Farrell 2018) remain
 valid at bandwidths that minimize the mean squared error;
 `method = Conventional()` gives `f̂(x) ± z stderror(f, x)`, which covers only when
-the bias is negligible. See [`PointwiseDensity`](@ref) for pointwise bandwidths.
+the bias is negligible. The lower ends are clamped at zero, and where no observation
+has positive weight the interval is `NaN`. See [`PointwiseDensity`](@ref) for
+pointwise bandwidths.
 """
 function StatsAPI.confint(f::KDE, x::AbstractVector{<:Real}; level::Real = 0.95,
                           method::InferenceMethod = RobustBiasCorrected())
@@ -297,8 +316,7 @@ function _densityplugin(rule, d, k, points, minobs, compat, ::Val{imse}) where i
   end
   hopt(V, B2, Rr) = (V / (4N * (B2 + regul * Rr)))^(1 / 5)
   if imse
-    grid = points === nothing || rule.grid isa Integer ?
-      [_quantile(d, q) for q in range(0.1, 0.9; length = rule.grid isa Integer ? rule.grid : 30)] : points
+    grid = _densitygrid(rule, d, points)
     cs = constants(grid)
     h = hopt(sum(c.V for c in cs), sum(c.B2 for c in cs), sum(c.Rreg for c in cs))
     # where the pilot estimates vanish on the whole grid, the Sheather–Jones bandwidth
@@ -316,6 +334,11 @@ function _densityplugin(rule, d, k, points, minobs, compat, ::Val{imse}) where i
   end
   return BandwidthSelection(h, rule, (b = bs, points = pts, sheatherjones = hsj))
 end
+
+# the grid of the integrated density rules: quantiles of order 0.1 to 0.9, 30 of them
+# as in nprobust's kdbwselect, or the evaluation points with grid = :points
+_densitygrid(rule, d, points) = rule.grid === :points ? _gridpoints(points) :
+  [_quantile(d, q) for q in range(0.1, 0.9; length = something(rule.grid, 30))]
 
 # ∑ᵢ wᵢ k(uᵢ) uᵢ^r for r ≤ kmax at the points c, uᵢ = (xᵢ - c) / h, summed over the
 # windows for compactly supported kernels and by the exact choice of the engines
@@ -352,8 +375,7 @@ function _kdbwselect(rule, d, k, points, minobs, ::Val{imse}) where imse
   end
   hopt(V, B2) = (V / (4 * N * B2))^(1 / 5)
   if imse
-    grid = points === nothing || rule.grid isa Integer ?
-      [_quantile(d, q) for q in range(0.1, 0.9; length = rule.grid isa Integer ? rule.grid : 30)] : points
+    grid = _densitygrid(rule, d, points)
     cs = constants(grid)
     B = [c[1] for c in cs]
     V = sum(c[2] for c in cs) / length(cs)

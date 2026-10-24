@@ -79,34 +79,36 @@ _check_regularization(r) = 0 <= r < Inf ||
   throw(ArgumentError("regularization must be nonnegative and finite, got $r"))
 
 """
-    IMSEOptimal(; grid = 30, regularization = 1, interior = false)
+    IMSEOptimal(; grid = nothing, regularization = 1, interior = false)
 
 The direct plug-in estimate of the bandwidth that minimizes the integrated mean
 squared error of a local polynomial fit, one bandwidth for all points: the
 variance and squared bias constants of [`MSEOptimal`](@ref), with its
-regularization, are averaged over `grid` equally spaced points between the
-smallest and the largest observation, as nprobust's `imse-dpi` does, or with
-`grid = :points` over the evaluation points of the fit, and the bandwidth is capped
-at the range of the data. The pilot bandwidths are those of [`MSEOptimal`](@ref),
+regularization, are averaged over a grid of points, and the bandwidth is capped at
+the range of the data. For regression, the grid is by default 30 equally spaced
+points between the smallest and the largest observation, as in nprobust's
+`imse-dpi`; `grid = m` takes `m` such points, and `grid = :points` the evaluation
+points of the fit. The pilot bandwidths are those of [`MSEOptimal`](@ref),
 adaptive by default, and `b` is in `details.b`. With `compat = true` the rule is
 nprobust's, whose pilots are its own, whose averaged squared bias leaves out the
 regularization and whose bandwidth has no cap, which for an exactly linear
 regression function was 966 on the unit interval.
 
 For a sample without responses, the rule gives the integrated plug-in bandwidth
-for densities, with the constants of [`MSEOptimal`](@ref) averaged over the
-quantiles of order 0.1 to 0.9 (or the evaluation points with `grid = :points`), or
-with `compat = true` nprobust's `kdbwselect`. For [`LocalPolynomialDensity`](@ref),
-it is lpdensity's `imse-dpi`, which sums the terms of [`MSEOptimal`](@ref) over the
-evaluation points with `grid = :points`, as lpdensity does, or over `grid` equally
-spaced points between the smallest and the largest observation.
+for densities, with the constants of [`MSEOptimal`](@ref) averaged by default over
+30 quantiles of order 0.1 to 0.9, as in nprobust's `kdbwselect`, which
+`compat = true` reproduces; `grid = m` takes `m` such quantiles. For
+[`LocalPolynomialDensity`](@ref), it is lpdensity's `imse-dpi`, which sums the
+terms of [`MSEOptimal`](@ref) by default over the evaluation points, as lpdensity
+does, and with `grid = m` over `m` equally spaced points between the smallest and
+the largest observation. `grid = :points` needs evaluation points.
 """
 struct IMSEOptimal <: BandwidthSelector
-  grid::Union{Int,Symbol}
+  grid::Union{Nothing,Int,Symbol}     # nothing: the default grid of each estimator
   regularization::Float64
   interior::Bool
 
-  function IMSEOptimal(grid::Union{Integer,Symbol}, regularization::Real, interior::Bool)
+  function IMSEOptimal(grid::Union{Nothing,Integer,Symbol}, regularization::Real, interior::Bool)
     grid isa Symbol && grid != :points && throw(ArgumentError("grid must be a number of points or :points, got :$grid"))
     grid isa Integer && grid < 2 && throw(ArgumentError("grid must have at least two points, got $grid"))
     _check_regularization(regularization)
@@ -114,8 +116,14 @@ struct IMSEOptimal <: BandwidthSelector
   end
 end
 
-IMSEOptimal(; grid::Union{Integer,Symbol} = 30, regularization::Real = 1, interior::Bool = false) =
+IMSEOptimal(; grid::Union{Nothing,Integer,Symbol} = nothing, regularization::Real = 1, interior::Bool = false) =
   IMSEOptimal(grid, regularization, interior)
+
+# the evaluation points for grid = :points, which must be given
+function _gridpoints(points)
+  points === nothing && throw(ArgumentError("IMSEOptimal(grid = :points) needs the evaluation points"))
+  return points
+end
 
 """
     CoverageOptimal(base = MSEOptimal(); convention = nothing)
@@ -180,12 +188,8 @@ function selectbandwidth(rule::IMSEOptimal, d::SmoothingData, k::AbstractKernel;
   _check_degree(degree, derivative)
   p, ν = Int(degree), Int(derivative)
   q = p + 1
-  grid = if rule.grid isa Integer
-    collect(range(d.x[1], d.x[end]; length = rule.grid))
-  else
-    points === nothing && throw(ArgumentError("IMSEOptimal(grid = :points) needs the evaluation points"))
-    _checkpoints(points)
-  end
+  grid = rule.grid === :points ? _checkpoints(_gridpoints(points)) :
+    collect(range(d.x[1], d.x[end]; length = something(rule.grid, 30)))
   pilots = compat ? nothing : _regressionpilots(d, k, p)
   r = _msedpis(d, k, grid, p, ν, rule, vce, minobs, pilots)
   N, R = nobs(d), d.x[end] - d.x[1]

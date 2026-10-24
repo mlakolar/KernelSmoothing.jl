@@ -320,4 +320,22 @@ end
   @test bandwidth(CrossValidation(), d, g) ≈ bandwidth(CrossValidation(exact = 10^4), d, g) rtol = 5e-3
 end
 
+@testset "least-squares cross-validation on clusters, lognormal and rounded data" begin
+  q(n) = [quantile(Normal(), mod(i * 0.6180339887498949, 1)) for i in 1:n]
+  # compact kernels give local minimizers at the scale of the gaps between clusters,
+  # far above the lowest local minimum; Sheather's largest local minimizer took them
+  x2 = [q(100); 10 .+ reverse(q(100))]
+  s2 = selectbandwidth(LSCV(), SmoothingData(x2), EpanechnikovKernel())
+  @test s2.details.minimizers[end] > 10 && s2.h < 2
+  x5 = vcat([10j .+ 0.1 .* q(60) for j in 1:5]...)
+  @test bandwidth(LSCV(), SmoothingData(x5), EpanechnikovKernel()) < 0.2
+  # lognormal data: the minimizer lies below the grid, which extends downward
+  sl = @test_logs selectbandwidth(LSCV(), SmoothingData(exp.(3 .* q(2000))), GaussianKernel())
+  @test !sl.details.atbound && length(sl.details.grid) > 60
+  # rounded data: the criterion falls without bound below the rounding, at the lower end
+  # of the grid, and the largest local minimizer stays
+  sr = selectbandwidth(LSCV(), SmoothingData(round.(q(1000); digits = 1)), GaussianKernel())
+  @test sr.h > 0.3 && length(sr.details.grid) == 60
+end
+
 end

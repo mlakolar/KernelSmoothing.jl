@@ -89,7 +89,10 @@ is the exact standard deviation of this linear estimator, estimated as for `KDE`
 so that it includes the variability of the bias estimate. By default ``b = h``.
 nprobust 1.0.0 multiplies ``D`` by ``\int u^4 D(u)\,du / 24`` instead of
 ``\mu_2(K)/2``, which is ``1/18`` instead of ``1/10`` for the Epanechnikov kernel
-and removes only 5/9 of the leading bias. `compat = true` reproduces it.
+and removes only 5/9 of the leading bias. `compat = true` reproduces it. Where no
+observation has positive weight in a window, the standard error is `NaN` rather than
+nprobust's zero, which gave intervals of width zero far from the data, and the lower
+ends of the intervals are clamped at zero, since the density is nonnegative.
 
 The default bandwidths are plug-in estimates of the bandwidths that minimize the
 asymptotic mean squared error at each point, or its integral over the points,
@@ -144,8 +147,8 @@ estimate, a U-statistic, which reverse cumulative sums over the distinct values
 compute in one pass.
 
 The default bandwidth, [`MSEOptimal`](@ref), is the plug-in estimate of lpdensity.
-It minimizes over the bandwidth ``a``, on the data standardized by their mean and
-standard deviation, the estimated mean squared error
+It minimizes over the bandwidth ``a``, on the data standardized by their median and
+a robust scale, the estimated mean squared error
 
 ```math
 a^{2p + 2 - 2v} \big( |B_1| + a\, |B_2| \big)^2 + \frac{V}{a^{2v - 1}} ,
@@ -153,10 +156,18 @@ a^{2p + 2 - 2v} \big( |B_1| + a\, |B_2| \big)^2 + \frac{V}{a^{2v - 1}} ,
 
 where ``B_1`` and ``B_2`` are the first two terms of the bias and ``V`` is the
 variance constant. The bias terms come from local estimates of ``F^{(p+1)}`` and
-``F^{(p+2)}`` at rule-of-thumb pilot bandwidths. lpdensity uses ``(B_1 + a B_2)^2``, which vanishes
-at ``a = -B_1/B_2`` when the estimates have opposite signs, so that it can choose
-bandwidths of the order of the range of the data. `compat = true` restores its
-rule, and `NormalReference()` gives its rule of thumb for normal data.
+``F^{(p+2)}`` at pilot bandwidths, rules of thumb integrated over the quantiles of
+the data and floored at each point. lpdensity differs in three ways, which
+`compat = true` restores. First, it standardizes by the mean and the standard
+deviation, which one outlier inflates. Second, it integrates the pilots over the
+evaluation points, so that one far point changes the bandwidths at all the others.
+Third, it uses ``(B_1 + a B_2)^2``, which vanishes at ``a = -B_1/B_2`` when the
+estimates have opposite signs, so that it can choose bandwidths of the order of the
+range of the data. `NormalReference()` gives the rule of thumb for normal data, with
+the next term of the bias, which keeps the bandwidth finite at the inflection points
+of the normal density. The estimates at points far outside the data, where the fits
+extrapolate, are `NaN`, and the lower ends of the intervals for the density are
+clamped at zero.
 
 ```julia
 using Random
