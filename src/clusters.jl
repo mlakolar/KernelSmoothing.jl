@@ -53,16 +53,17 @@ function _localfit(d::SmoothingData, k::AbstractKernel, x0, h, b, p, ν, vce::Cl
     end
   end
   cl = view(d.cluster, a:e)
-  keys, sh = _clustersums(cl, ℓ, εh, Y, KY, vce.type, compat)
+  ord = _clusterorder(cl)
+  keys, sh = _clustersums(cl, ord, ℓ, εh, Y, KY, vce.type, compat)
   sb = if nb
     # nprobust's matrix for the bias-corrected residuals, Q Γ⁻¹ Q' in its variables, is
     # q̃ᵢ'Γ_p⁻¹q̃ⱼ / h with q̃ᵢ = khᵢ r_p(uᵢ) - ρ kbᵢ c'r_q(vᵢ) Λ: its 1/h, from the
     # kernel weights k(u)/h, makes it change with the units of x
     z = _lsolve!(copy(Λ), U)
     A = (KY .- ρ .* z .* kc') ./ sqrt(h)
-    last(_clustersums(cl, ℓbc, εb, A, A, vce.type, compat))
+    last(_clustersums(cl, ord, ℓbc, εb, A, A, vce.type, compat))
   else
-    last(_clustersums(cl, ℓbc, εb, Y, KY, vce.type, compat))
+    last(_clustersums(cl, ord, ℓbc, εb, Y, KY, vce.type, compat))
   end
   G = length(keys)
   ch, cb = _crscale(vce.type, m, G, p + 1, compat), _crscale(vce.type, m, G, p + 2, compat)
@@ -73,15 +74,37 @@ function _localfit(d::SmoothingData, k::AbstractKernel, x0, h, b, p, ν, vce::Cl
   return (fit = fit, keys = keys, aus = (scale * sqrt(ch)) .* sh, arb = (scale * sqrt(cb)) .* sb)
 end
 
+# The order of the observations by their clusters cl: a counting sort over the
+# numbers of the clusters, unless they range far beyond the observations
+function _clusterorder(cl)
+  m = length(cl)
+  G = m == 0 ? 0 : maximum(cl)
+  G > 4m && return sortperm(cl)
+  next = zeros(Int, G + 1)
+  for c in cl
+    next[c + 1] += 1
+  end
+  next[1] = 1
+  for c in 2:G+1
+    next[c] += next[c - 1]   # next[c] is where cluster c starts in the order
+  end
+  ord = Vector{Int}(undef, m)
+  for (j, c) in enumerate(cl)
+    ord[next[c]] = j
+    next[c] += 1
+  end
+  return ord
+end
+
 # The sums S_g = ∑_{i ∈ g} ℓᵢ ε̃ᵢ over the clusters g of the observations, numbered by
-# cl, in increasing order of their numbers, which are returned with them. For types
+# cl and taken in the order ord, which sorts them by cluster, in increasing order of
+# their numbers, which are returned with them. For types
 # 2 and 3, ε̃_g = f(I - A_g' B_g) ε_g with f(s) = s^(-1/2) or 1/s, where column i of A
 # and B belongs to observation i. Since f(I - A'B) = I + A'φ(BA')B with
 # φ(λ) = (f(1 - λ) - 1) / λ, S_g = ∑ ℓᵢ εᵢ + (∑ ℓᵢ aᵢ)'φ(K)(∑ bᵢ εᵢ) with K = ∑ bᵢ aᵢ',
 # so that each cluster needs the eigendecomposition of a small matrix only, whatever
 # its size; K is symmetric for the matrices used here.
-function _clustersums(cl, ℓ, ε, A, B, type, compat)
-  ord = sortperm(cl)
+function _clustersums(cl, ord, ℓ, ε, A, B, type, compat)
   keys, sums = Int[], Float64[]
   adjust = type >= 2
   P = adjust ? size(A, 1) : 0
@@ -289,6 +312,7 @@ function _coefvar(d, k, f, g, vce::ClusterVariance, compat::Bool)
     end
   end
   type = compat ? 1 : vce.type
-  keys, sums = _clustersums(view(d.cluster, a:e), ℓ, ε, Y, KY, type, compat)
+  cl = view(d.cluster, a:e)
+  keys, sums = _clustersums(cl, _clusterorder(cl), ℓ, ε, Y, KY, type, compat)
   return _crscale(type, m, length(keys), P, compat) * sum(abs2, sums)
 end
