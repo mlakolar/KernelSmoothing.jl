@@ -10,7 +10,9 @@ points with robust bias-corrected intervals; [`LocalPolynomialDensity`](@ref), t
 boundary-adaptive density estimator of Cattaneo, Jansson and Ma; and
 [`LocalPolynomialRegression`](@ref), local polynomial estimates of a regression
 function or its derivatives with conventional, robust bias-corrected and
-[`Honest`](@ref) intervals and uniform bands, see [`confband`](@ref). They are fitted
+[`Honest`](@ref) intervals and uniform bands, see [`confband`](@ref); and
+[`RegressionDiscontinuity`](@ref), estimates for regression discontinuity designs.
+They are fitted
 with `fit` and choose their bandwidths with a [`BandwidthSelector`](@ref).
 Underneath are the smoothing kernels, see [`AbstractKernel`](@ref), samples
 prepared for smoothing, see [`SmoothingData`](@ref), and the kernel sums that many
@@ -43,6 +45,7 @@ export
   LocalPolynomialRegression, PointwiseDensity, LocalPolynomialDensity, RuleOfThumb, MSEOptimal, IMSEOptimal, CoverageOptimal,
   VarianceEstimator, NNVariance, HCVariance, ClusterVariance,
   InferenceMethod, Conventional, RobustBiasCorrected, Honest, FLCIOptimal, worstcasebias,
+  RegressionDiscontinuity,
   coef, confint, coeftable, predict, fitted, residuals, vcov, confband
 
 include("polynomials.jl")
@@ -59,6 +62,7 @@ include("kdeinference.jl")
 include("bands.jl")
 include("honest.jl")
 include("lpdensity.jl")
+include("rd.jl")
 include("precompile.jl")
 
 end

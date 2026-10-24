@@ -13,6 +13,8 @@ It provides:
 - [local polynomial regression](@ref regression-page) of a regression function or
   its derivatives, with conventional, robust bias-corrected and honest intervals,
   covariances between points and uniform bands;
+- [regression discontinuity](@ref rd-page) estimates for sharp, fuzzy and kink
+  designs, with covariates;
 - [bandwidth selectors](@ref bandwidths-page): rules of thumb, Sheather and Jones,
   cross-validation and plug-in bandwidths.
 
