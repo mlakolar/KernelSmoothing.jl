@@ -157,6 +157,29 @@ Modules = [KernelSmoothing]
 Pages = ["semiparametric.jl"]
 ```
 
+## Local likelihood
+
+For binary or count responses, [`LocalLikelihood`](@ref) fits a local polynomial in
+the linear predictor of a logistic (`family = :logit`) or Poisson (`:poisson`)
+model by maximizing the kernel-weighted log likelihood at each point (Tibshirani and
+Hastie 1987; Fan, Heckman and Wand 1995), which keeps the estimates of
+probabilities in ``(0, 1)`` and of means positive. The standard errors are the
+sandwich ones of the local fit, intervals for the mean transform those for the
+linear predictor, and [`CrossValidation`](@ref) maximizes the leave-one-out log
+likelihood, from one Newton step without each observation. At given bandwidths the
+estimates and standard errors are those of R's `glm` with the kernel weights as
+prior weights.
+
+```julia
+m = fit(LocalLikelihood, x, y; family = :logit)    # y in {0, 1}
+predict(m), confint(m)                             # probabilities at the points, with intervals
+```
+
+```@autodocs
+Modules = [KernelSmoothing]
+Pages = ["locallik.jl"]
+```
+
 ## Honest intervals
 
 Robust bias correction removes an estimate of the bias, while [`Honest`](@ref)

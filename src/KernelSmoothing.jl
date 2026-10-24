@@ -47,7 +47,7 @@ export
   InferenceMethod, Conventional, RobustBiasCorrected, Honest, FLCIOptimal, worstcasebias,
   RegressionDiscontinuity, RDOptimal, RDHonestOptimal, DensityDiscontinuity, RDDensityOptimal,
   coef, confint, coeftable, predict, fitted, residuals, vcov, confband,
-  localpolynomial, smoothermatrix, VaryingCoefficient, PartiallyLinear
+  localpolynomial, smoothermatrix, VaryingCoefficient, PartiallyLinear, LocalLikelihood
 
 include("polynomials.jl")
 include("kernels.jl")
@@ -68,6 +68,7 @@ include("rdbandwidth.jl")
 include("rd.jl")
 include("rdhonest.jl")
 include("semiparametric.jl")
+include("locallik.jl")
 include("rddensity.jl")
 include("precompile.jl")
 

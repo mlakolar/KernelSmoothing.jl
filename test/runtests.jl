@@ -11,6 +11,7 @@ tests = [
   "smoother",
   "surface",
   "semiparametric",
+  "locallik",
   "plugin",
   "kdeinference",
   "bands",
