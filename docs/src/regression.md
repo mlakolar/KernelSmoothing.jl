@@ -16,7 +16,7 @@ confint(m)                               # robust bias-corrected 95% intervals
 confint(m; method = Conventional())      # intervals that ignore the bias
 predict(m, [0.25, 0.5])                  # estimates at new points
 coeftable(m)                             # everything, as a table of columns
-fit(LocalPolynomialRegression, x, y; degree = 2, derivative = 1)   # the derivative
+fit(LocalPolynomialRegression, x, y; derivative = 1)              # the derivative, by local quadratics
 ```
 
 ## The estimator
@@ -60,12 +60,18 @@ the window, or from [`HCVariance`](@ref), which uses the residuals of the local 
 with the corrections HC0 to HC3. In small samples at the boundary, HC0 understates
 the variance more than the nearest-neighbour estimator and HC3. At each point,
 the bandwidths are raised where needed to the distance of the `minobs`-th nearest
-observation, 21 by default as nprobust's `bwcheck`, and the fit records the points
-where this floor binds. With ties, such a window can still hold too few distinct
-values: the fit of order ``p`` needs ``p + 1`` distinct values of positive weight
-and the bias correction ``p + 2``. Where they are missing, the estimates that need
-them are `NaN`, so that the conventional estimate survives a missing bias
-correction, and `coeftable` reports the number of distinct values at each point.
+observation, 21 by default as nprobust's `bwcheck`. With ties, such a window can
+still hold too few distinct values: the fit of order ``p`` needs ``p + 1`` distinct
+values of positive weight and the bias correction ``p + 2``. Where they are
+missing, the bandwidth is raised further, to 1.5 times the distance of the farthest
+distinct value it needs, which puts that value well inside the window; with
+`compat = true`, as in nprobust, it is not. The fit records the points where these
+floors bind. Estimates that still lack distinct values, as with `minobs = 0` or
+with too few distinct values in the data, are `NaN`, so that the conventional
+estimate survives a missing bias correction, and `coeftable` reports the number of
+distinct values at each point. The default degree is `derivative + 1`, as in
+nprobust, since an odd ``p - \nu`` has the same order of bias at the boundary as
+in the interior.
 
 The default bandwidths follow nprobust: the plug-in bandwidth
 [`MSEOptimal`](@ref) at a single point and [`IMSEOptimal`](@ref) at several, with
@@ -92,8 +98,9 @@ since the estimate reproduces polynomials of order ``p``. The interval is
 ``\hat\theta \pm \mathrm{cv}(B/\widehat{\mathrm{se}})\, \widehat{\mathrm{se}}``,
 where ``\mathrm{cv}(t)`` is the quantile of ``|N(t, 1)|`` at the level of the
 interval, so that it covers for every function in the class. The intervals need
-``M``, since adapting to unknown smoothness is impossible over such classes.
-`Honest()` takes ``M`` from a global polynomial of order ``p + 3``, the rule of
+``M``, chosen before seeing the estimates, since adapting to unknown smoothness is
+impossible over such classes, and [`Honest`](@ref) has no default for it.
+`Honest(:rot)` takes ``M`` from a global polynomial of order ``p + 3``, the rule of
 thumb of Armstrong and Kolesár, which they offer as a starting point for a
 sensitivity analysis. [`FLCIOptimal`](@ref) chooses the bandwidth that makes the
 interval shortest. The plug-in bandwidths of [`MSEOptimal`](@ref) estimate the bias
@@ -106,7 +113,7 @@ and Kolesár 2020).
 ```julia
 m = fit(LocalPolynomialRegression, x, y; points = [0.5], bandwidth = FLCIOptimal(40))
 confint(m; method = Honest(40))          # covers whenever |m''| ≤ 40
-confint(m; method = Honest())            # M from a global quartic, a starting point for sensitivity analysis
+confint(m; method = Honest(:rot))        # M from a global quartic, a starting point for sensitivity analysis
 worstcasebias(m, 40)
 ```
 

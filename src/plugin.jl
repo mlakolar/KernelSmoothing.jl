@@ -118,7 +118,7 @@ IMSEOptimal(; grid::Union{Integer,Symbol} = 30, regularization::Real = 1, interi
   IMSEOptimal(grid, regularization, interior)
 
 """
-    CoverageOptimal(base = MSEOptimal(); convention = :nprobust)
+    CoverageOptimal(base = MSEOptimal(); convention = nothing)
 
 Bandwidths that make the coverage error of robust bias-corrected intervals
 shrink at the fastest rate, obtained by rescaling the plug-in bandwidths of
@@ -131,20 +131,21 @@ point: `h n^(-p/((2p+3)(p+3)))` for odd `p - ν` and `h n^(-(p+2)/((2p+5)(p+3)))
 for even `p - ν`, as nprobust's `ce-rot`. With `convention = :interior`, an odd
 `p - ν` targets the interior rate `n^(-1/(p+4))` instead, `h n^(-(p-1)/((2p+3)(p+4)))`,
 which leaves local linear bandwidths unchanged. The pilot bandwidths are rescaled
-as in nprobust in both conventions.
+as in nprobust in both conventions. By default the convention is `:interior`, since
+most evaluation points are interior ones, and `:nprobust` with `compat = true`.
 """
 struct CoverageOptimal{S<:Union{MSEOptimal,IMSEOptimal}} <: BandwidthSelector
   base::S
-  convention::Symbol
+  convention::Union{Nothing,Symbol}   # nothing: :interior, or :nprobust under compat
 
-  function CoverageOptimal(base::S, convention::Symbol) where S<:Union{MSEOptimal,IMSEOptimal}
-    convention in (:nprobust, :interior) ||
+  function CoverageOptimal(base::S, convention::Union{Nothing,Symbol}) where S<:Union{MSEOptimal,IMSEOptimal}
+    convention in (nothing, :nprobust, :interior) ||
       throw(ArgumentError("convention must be :nprobust or :interior, got :$convention"))
     new{S}(base, convention)
   end
 end
 
-CoverageOptimal(base::Union{MSEOptimal,IMSEOptimal} = MSEOptimal(); convention::Symbol = :nprobust) =
+CoverageOptimal(base::Union{MSEOptimal,IMSEOptimal} = MSEOptimal(); convention::Union{Nothing,Symbol} = nothing) =
   CoverageOptimal(base, convention)
 
 # the plug-in rules take the choice between the adaptive pilots and nprobust's
@@ -152,8 +153,8 @@ _regression_selection(rule::Union{MSEOptimal,IMSEOptimal,CoverageOptimal}, d, k,
                       compat = false) =
   selectbandwidth(rule, d, k; degree = p, derivative = ν, points = pts, vce, minobs, compat)
 
-function selectbandwidth(rule::MSEOptimal, d::SmoothingData, k::AbstractKernel; degree::Integer = 1,
-                         derivative::Integer = 0, points = nothing, vce::VarianceEstimator = NNVariance(),
+function selectbandwidth(rule::MSEOptimal, d::SmoothingData, k::AbstractKernel; derivative::Integer = 0,
+                         degree::Integer = derivative + 1, points = nothing, vce::VarianceEstimator = NNVariance(),
                          minobs::Integer = 21, compat::Bool = false)
   d.y === nothing && return _densityplugin(rule, d, k, points === nothing ? nothing : _checkpoints(points),
                                            minobs, compat, Val(false))
@@ -169,8 +170,8 @@ function selectbandwidth(rule::MSEOptimal, d::SmoothingData, k::AbstractKernel; 
                             crossvalidation = compat ? NaN : pilots.crossvalidation))
 end
 
-function selectbandwidth(rule::IMSEOptimal, d::SmoothingData, k::AbstractKernel; degree::Integer = 1,
-                         derivative::Integer = 0, points = nothing, vce::VarianceEstimator = NNVariance(),
+function selectbandwidth(rule::IMSEOptimal, d::SmoothingData, k::AbstractKernel; derivative::Integer = 0,
+                         degree::Integer = derivative + 1, points = nothing, vce::VarianceEstimator = NNVariance(),
                          minobs::Integer = 21, compat::Bool = false)
   d.y === nothing && return _densityplugin(rule, d, k, points === nothing ? nothing : _checkpoints(points),
                                            minobs, compat, Val(true))
@@ -208,9 +209,10 @@ function selectbandwidth(rule::IMSEOptimal, d::SmoothingData, k::AbstractKernel;
   return BandwidthSelection(h, rule, (b = Float64(b), grid = grid, crossvalidation = NaN))
 end
 
-function selectbandwidth(rule::CoverageOptimal, d::SmoothingData, k::AbstractKernel; degree::Integer = 1,
-                         derivative::Integer = 0, kwargs...)
-  s = selectbandwidth(rule.base, d, k; degree, derivative, kwargs...)
+function selectbandwidth(rule::CoverageOptimal, d::SmoothingData, k::AbstractKernel; derivative::Integer = 0,
+                         degree::Integer = derivative + 1, compat::Bool = false, kwargs...)
+  s = selectbandwidth(rule.base, d, k; degree, derivative, compat, kwargs...)
+  convention = something(rule.convention, compat ? :nprobust : :interior)
   # for densities with second-order kernels (p = 2) the factors are one, as in nprobust
   d.y === nothing && return BandwidthSelection(s.h, rule, (s.details..., mse = s.h))
   p, ν = Int(degree), Int(derivative)
@@ -218,7 +220,7 @@ function selectbandwidth(rule::CoverageOptimal, d::SmoothingData, k::AbstractKer
   if iseven(p - ν)
     fh, fb = N^(-(p + 2) / ((2p + 5) * (p + 3))), N^(-q / ((2q + 3) * (q + 3)))
   else
-    fh = rule.convention == :nprobust ? N^(-p / ((2p + 3) * (p + 3))) : N^(-(p - 1) / ((2p + 3) * (p + 4)))
+    fh = convention == :nprobust ? N^(-p / ((2p + 3) * (p + 3))) : N^(-(p - 1) / ((2p + 3) * (p + 4)))
     fb = N^(-(q + 2) / ((2q + 5) * (q + 3)))
   end
   return BandwidthSelection(s.h * fh, rule, (s.details..., b = s.details.b * fb, mse = s.h))
@@ -281,16 +283,16 @@ function _msedpi(d, k, c, p, ν, regul, interior, vce, minobs, pilots = nothing)
     return _fmin(H -> abs(H^(2o + 2 - 2nu) * sqbias(C, H, scale) + C.V / (N * H^(1 + 2nu))), eps(), R)
   end
   if pilots === nothing
-    d1 = _lpbw(d, k, c, q + 1, q + 1, q + 2, cbw, R, R, 0.0, vce, needB2, false)
-    d2 = _lpbw(d, k, c, q + 2, q + 2, q + 3, cbw, R, R, 0.0, vce, needB2, false)
+    d1 = _lpbw(d, k, c, q + 1, q + 1, q + 2, cbw, R, R, 0.0, vce, needB2, true)
+    d2 = _lpbw(d, k, c, q + 2, q + 2, q + 3, cbw, R, R, 0.0, vce, needB2, true)
     bw2 = clamp_bw(optimal(d1, q + 1, q + 1, 0.0))
     bw3 = clamp_bw(optimal(d2, q + 2, q + 2, 0.0))
-    cb = _lpbw(d, k, c, q, p + 1, q + 1, cbw, bw2, bw3, regul, vce, needB2, false)
+    cb = _lpbw(d, k, c, q, p + 1, q + 1, cbw, bw2, bw3, regul, vce, needB2, true)
     b = clamp_bw(optimal(cb, q, p + 1, regul))
   else
     b, bw2 = clamp_bw(pilots.b1), clamp_bw(pilots.b2)
   end
-  ch = _lpbw(d, k, c, p, ν, q, cbw, b, bw2, regul, vce, needB2, !compat)
+  ch = _lpbw(d, k, c, p, ν, q, cbw, b, bw2, regul, vce, needB2, compat)
   h = clamp_bw(optimal(ch, p, ν, regul))
   isfinite(h) || throw(ArgumentError("the plug-in bandwidth at x = $c is not defined, since a " *
     "local fit of its stages has fewer distinct values of x with positive weight than " *
@@ -330,9 +332,11 @@ end
 # derivatives estimated by fits of orders oB and oB + 1 with bandwidths hB1, hB2,
 # the regularization R, and the bandwidth that minimizes the mean squared error.
 # The fits use the scaled variable u = (x - c) / h; raw coefficients of (x - c)^j
-# are the scaled ones divided by h^j. With `widen`, as in the adaptive rule, a fit
-# that is not identified widens its window; nprobust's stages, under compat, do not.
-function _lpbw(d, k, c, o, ν, oB, hV, hB1, hB2, scale, vce, needB2::Bool, widen::Bool)
+# are the scaled ones divided by h^j. In the adaptive rule a fit that is not
+# identified widens its window, and neighbours at distances that differ by rounding
+# are tied; under compat, as in nprobust, neither.
+function _lpbw(d, k, c, o, ν, oB, hV, hB1, hB2, scale, vce, needB2::Bool, compat::Bool)
+  widen, tol = !compat, _nntol(compat)
   N = nobs(d)
   rB, rV = 2(o + 1 - ν), 2ν + 1
   fV = _lfit(d, k, c, hV, o, 2, widen)
@@ -344,13 +348,13 @@ function _lpbw(d, k, c, o, ν, oB, hV, hB1, hB2, scale, vce, needB2::Bool, widen
   # the bandwidths of the fits, which a fit that is not identified raises
   hV, hB1, hB2 = fV.h, fB1.h, fB2 === nothing ? hB2 : fB2.h
   g = fV.C \ [j == ν ? 1.0 : 0.0 for j in 0:o]
-  VV = _coefvar(d, k, fV, g, vce) / hV^(2ν)
+  VV = _coefvar(d, k, fV, g, vce, tol) / hV^(2ν)
   BConst1 = sum(g[j + 1] * fV.s[o + j + 2] for j in 0:o)   # e_ν' Γ⁻¹ ∑ wk(u) u^(o+1) r(u)
   BConst2 = sum(g[j + 1] * fV.s[o + j + 3] for j in 0:o)
   Rreg = 0.0
   if scale > 0
     gB = fB1.C \ [j == o + 1 ? 1.0 : 0.0 for j in 0:oB]
-    Rreg = 3 * BConst1^2 * _coefvar(d, k, fB1, gB, vce) / hB1^(2(o + 1))
+    Rreg = 3 * BConst1^2 * _coefvar(d, k, fB1, gB, vce, tol) / hB1^(2(o + 1))
   end
   B1 = BConst1 * fB1.β[o + 2] / hB1^(o + 1)
   B2 = fB2 === nothing ? NaN : BConst2 * fB2.β[o + 3] / hB2^(o + 2)
@@ -388,9 +392,9 @@ end
 
 # ∑ᵢ (wᵢ k(uᵢ) g'r(uᵢ))² σ̂ᵢ² over the window of a fit, with σ̂ᵢ² from the variance
 # estimator: nearest neighbours in the window, or the residuals of this fit
-function _coefvar(d, k, f, g, vce)
+function _coefvar(d, k, f, g, vce, tol)
   a, e, h, o, c = f.a, f.e, f.h, f.o, f.c
-  σ2 = vce isa NNVariance ? _nnvariances(d, a, e, vce.matches) : nothing
+  σ2 = vce isa NNVariance ? _nnvariances(d, a, e, vce.matches, tol) : nothing
   lev = vce isa HCVariance && vce.type >= 2 ? _leveragepoly(f.C, o) : nothing
   n = e - a + 1
   v = 0.0

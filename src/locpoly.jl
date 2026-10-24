@@ -17,7 +17,11 @@ is the mean response of the `Jᵢ` nearest neighbours of `xᵢ` among the observ
 in the window. The neighbours are at least `matches` observations, together with
 all observations tied with `xᵢ` or with the farthest neighbour (Abadie and Imbens
 2006; Calonico, Cattaneo and Titiunik 2014). This is the default of nprobust and
-rdrobust. The estimates do not depend on the fitted polynomials, so conventional
+rdrobust. Neighbours on the left and on the right at the same distance are both
+taken, also when rounding makes the two distances differ in the last digits, as in
+an equally spaced design, where it changed the standard errors by up to 9 percent
+under a shift of the design; with `compat = true`, the distances are compared
+exactly, as in nprobust. The estimates do not depend on the fitted polynomials, so conventional
 and robust bias-corrected standard errors share them.
 """
 struct NNVariance <: VarianceEstimator
@@ -110,6 +114,7 @@ struct LocalPolynomialRegression{K<:AbstractKernel,D<:SmoothingData,V<:VarianceE
   vce::V
   selection::S                # the bandwidth before the floors
   minobs::Int                 # the floor: at least this many observations in a window
+  compat::Bool                # nprobust's pilots, floors and nearest-neighbour ties
   points::Vector{Float64}
   h::Vector{Float64}          # bandwidths used, after the floors
   b::Vector{Float64}          # pilot bandwidths used, after the floors
@@ -117,20 +122,22 @@ struct LocalPolynomialRegression{K<:AbstractKernel,D<:SmoothingData,V<:VarianceE
   se::Vector{Float64}
   estimate_bc::Vector{Float64}
   se_rbc::Vector{Float64}
-  nwindow::Vector{Int}        # observations with positive weight in the larger window
+  nwindow::Vector{Int}        # observations with positive weight in the larger window, nprobust's N
   nunique::Vector{Int}        # distinct values with positive weight in the window of h
   floored::BitVector          # whether the floor raised h or b
 end
 
 """
-    fit(LocalPolynomialRegression, x, y; degree = 1, derivative = 0, kernel = EpanechnikovKernel(),
-        bandwidth = nothing, pilot = nothing, rho = 1, points = nothing,
-        vce = NNVariance(), minobs = 21, weights = nothing, compat = false)
+    fit(LocalPolynomialRegression, x, y; derivative = 0, degree = derivative + 1,
+        kernel = EpanechnikovKernel(), bandwidth = nothing, pilot = nothing, rho = 1,
+        points = nothing, vce = NNVariance(), minobs = 21, weights = nothing, compat = false)
     fit(LocalPolynomialRegression, d::SmoothingData; kwargs...)
 
 Fits local polynomials of order `degree` to the responses `y` at `points`, by
 default 30 equally spaced points between the smallest and the largest `x`, and
-estimates the regression function or its derivative of order `derivative`.
+estimates the regression function or its derivative of order `derivative`. The
+default order, `derivative + 1`, is nprobust's: an odd `degree - derivative` has the
+same order of bias at the boundary as in the interior.
 
 - `bandwidth` is a number, a vector with one bandwidth per point, or a
   [`BandwidthSelector`](@ref) for regression. By default it follows nprobust:
@@ -143,13 +150,18 @@ estimates the regression function or its derivative of order `derivative`.
 - `vce` estimates the conditional variances: [`NNVariance`](@ref) (default) or
   [`HCVariance`](@ref).
 - `minobs` raises `h` and `b` at each point, where needed, to the distance of the
-  `minobs`-th nearest observation, so that every window holds enough data;
-  `minobs = 0` turns this off. The fit records where the floor was binding.
-  Estimates whose window holds fewer distinct values than coefficients, `p + 1`
-  for the fit and `p + 2` for its bias correction, are `NaN`.
+  `minobs`-th nearest observation, so that every window holds enough data, and
+  further where ties leave too few distinct values with positive weight: `p + 1`
+  in the window of `h` for the fit and `p + 2` in that of `b` for its bias
+  correction. `minobs = 0` turns both off, and the fit records where they were
+  binding. Estimates whose window still holds fewer distinct values than
+  coefficients are `NaN`.
 - `compat = true` gives the plug-in rules ([`MSEOptimal`](@ref),
   [`IMSEOptimal`](@ref) and [`CoverageOptimal`](@ref)) nprobust's pilot
-  bandwidths instead of the adaptive ones, so that they agree with nprobust 1.0.0.
+  bandwidths instead of the adaptive ones, so that they agree with nprobust 1.0.0,
+  and the floor and the nearest-neighbour variances are nprobust's: the floor
+  counts observations only, and neighbours at distances that differ by rounding
+  are not tied.
 
 The estimates are exact sums over the windows; with weights, they are weighted
 least-squares fits.
@@ -171,8 +183,8 @@ function fit(::Type{LocalPolynomialRegression}, x::AbstractVector, y::AbstractVe
   return fit(LocalPolynomialRegression, SmoothingData(x, y; weights); kwargs...)
 end
 
-function fit(::Type{LocalPolynomialRegression}, d::SmoothingData; degree::Integer = 1,
-             derivative::Integer = 0, kernel::AbstractKernel = EpanechnikovKernel(),
+function fit(::Type{LocalPolynomialRegression}, d::SmoothingData; derivative::Integer = 0,
+             degree::Integer = derivative + 1, kernel::AbstractKernel = EpanechnikovKernel(),
              bandwidth = nothing, pilot = nothing, rho::Real = 1, points = nothing,
              vce::VarianceEstimator = NNVariance(), minobs::Integer = 21, compat::Bool = false)
   d.y === nothing && throw(ArgumentError(
@@ -192,9 +204,10 @@ function fit(::Type{LocalPolynomialRegression}, d::SmoothingData; degree::Intege
     0 < rho < Inf || throw(ArgumentError("rho must be positive and finite, or pass the pilot bandwidth"))
     h ./ rho
   end
-  floored = _floor!(h, b, d, pts, minobs)
-  fits = _pointwise(j -> _localfit(d, kernel, pts[j], h[j], b[j], p, ν, vce), eachindex(pts))
-  return LocalPolynomialRegression(d, kernel, p, ν, vce, sel, Int(minobs), pts, h, b,
+  floored = _floor!(h, b, d, pts, minobs, compat ? nothing : p)
+  nntol = _nntol(compat)
+  fits = _pointwise(j -> _localfit(d, kernel, pts[j], h[j], b[j], p, ν, vce; nntol), eachindex(pts))
+  return LocalPolynomialRegression(d, kernel, p, ν, vce, sel, Int(minobs), compat, pts, h, b,
     [f.estimate for f in fits], [f.se for f in fits], [f.estimate_bc for f in fits],
     [f.se_rbc for f in fits], [f.nwindow for f in fits], [f.nunique for f in fits], floored)
 end
@@ -229,21 +242,45 @@ _regression_selection(::Nothing, d, k, p, ν, pts, vce, minobs; compat = false) 
 _regression_selection(h, d, k, p, ν, pts, vce, minobs; compat = false) = throw(ArgumentError(
   "bandwidth must be a positive number, a vector or a BandwidthSelector, got $(repr(h))"))
 
-# raises h[j] and b[j] to the distance of the minobs-th nearest observation of the
-# point, as nprobust's bwcheck does; returns where that changed something
-function _floor!(h, b, d, points, minobs)
+# Raises h[j] and b[j] to the distance of the minobs-th nearest observation of the
+# point, as nprobust's bwcheck does, and for a fit of order p (nothing for none)
+# further where the windows hold fewer than p + 1 distinct values with positive
+# weight for h, or p + 2 for b, the fit of order p + 1: with heavy ties, 21
+# observations can hold too few, and the estimates there were NaN. Returns where
+# that changed something.
+function _floor!(h, b, d, points, minobs, p = nothing)
   floored = falses(length(points))
   minobs == 0 && return floored
   kmin = min(minobs, nobs(d))
   for j in eachindex(points)
     δ = knn_distance(d, points[j], kmin)
-    if δ > h[j] || δ > b[j]
+    hj, bj = max(h[j], δ), max(b[j], δ)
+    if p !== nothing
+      hj = _distinctfloor(d, points[j], p + 1, hj)
+      bj = _distinctfloor(d, points[j], p + 2, bj)
+    end
+    if hj > h[j] || bj > b[j]
       floored[j] = true
-      h[j], b[j] = max(h[j], δ), max(b[j], δ)
+      h[j], b[j] = hj, bj
     end
   end
   return floored
 end
+
+# The half-width at x0 for which its m nearest distinct values have positive weight:
+# h itself where they lie strictly inside its window, and otherwise 1.5 times the
+# distance of the m-th, which puts that value at two thirds of the half-width, where
+# every kernel weights it well (a kernel that vanishes at the edge gives a value at
+# exactly the half-width no weight); h where there are fewer than m distinct values.
+function _distinctfloor(d::SmoothingData, x0, m, h)
+  m <= nunique(d) || return h
+  D = knn_distance(d, x0, m; distinct = true)
+  return D < h ? h : 1.5D
+end
+
+# the relative tolerance below which the distances of two nearest neighbours count
+# as tied, and nprobust's exact comparison under compat
+_nntol(compat::Bool) = compat ? 0.0 : sqrt(eps())
 
 # the results at one point
 struct _LocalFit
@@ -338,16 +375,16 @@ _count(f) = f()
 # The estimates and standard errors at x0; with `vectors = true` also the vectors
 # scale ℓᵢ ε̂ᵢ and scale ℓᵢᵇᶜ ε̂ᵢᵇ over the window
 function _localfit(d::SmoothingData, k::AbstractKernel, x0, h, b, p, ν, vce; vectors::Bool = false,
-                   setup = nothing)
+                   setup = nothing, nntol = _nntol(false))
   f = setup === nothing ? _localsetup(d, k, x0, h, b, p, ν) : setup
-  nwin = f.e - f.a + 1
+  nwin = f.e - f.a + 1   # the observations with positive weight for the larger bandwidth
   if !f.ok
     fit = _LocalFit(NaN, NaN, NaN, NaN, nwin, f.nuniq)
     return vectors ? (fit = fit, range = f.a:f.e, aus = fill(NaN, nwin), arb = fill(NaN, nwin)) : fit
   end
   xs, ys = d.x, d.y
   a, e, βp, γ, g, c, ρ, s, scale = f.a, f.e, f.βp, f.γ, f.g, f.c, f.ρ, f.s, f.scale
-  r = vce isa NNVariance ? _nnresiduals(d, a, e, vce.matches) : nothing
+  r = vce isa NNVariance ? _nnresiduals(d, a, e, vce.matches, nntol) : nothing
   lev = vce isa HCVariance && vce.type >= 2 ? _leveragepoly(f.Cp, p) : nothing
   aus = vectors ? Vector{Float64}(undef, nwin) : Float64[]
   arb = vectors ? Vector{Float64}(undef, nwin) : Float64[]
@@ -417,22 +454,23 @@ end
 # degrees of freedom
 _dofscale(n, k) = n > k ? sqrt(n / (n - k)) : NaN
 
-_nnvariances(d::SmoothingData, a, e, J) = _nnresiduals(d, a, e, J) .^ 2
+_nnvariances(d::SmoothingData, a, e, J, tol) = _nnresiduals(d, a, e, J, tol) .^ 2
 
 # Nearest-neighbour residuals √(J/(J+1)) (yᵢ - ȳᵢ) for the observations a:e, with the
 # neighbours taken among a:e: all observations tied with xᵢ, and then whole groups
 # of tied observations, nearest first and both sides at equal distances, until
-# there are at least J.
-function _nnresiduals(d::SmoothingData, a, e, J)
+# there are at least J; distances within the relative tolerance tol count as equal.
+function _nnresiduals(d::SmoothingData, a, e, J, tol)
   xs, ys = d.x, d.y
   n = e - a + 1
   σ2 = Vector{Float64}(undef, n)
   groupsize(i) = (g = d.valueindex[i]; d.starts[g + 1] - d.starts[g])
+  target = min(J, n - 1)
+  ctarget = sqrt(target / (target + 1))
   for pos in a:e
     g = d.valueindex[pos]
     l = pos - max(d.starts[g], a)          # neighbours on the left of pos
     r = min(d.starts[g + 1] - 1, e) - pos  # and on the right
-    target = min(J, n - 1)
     while l + r < target
       left, right = pos - l - 1, pos + r + 1
       if left < a
@@ -441,17 +479,22 @@ function _nnresiduals(d::SmoothingData, a, e, J)
         l += groupsize(left)
       else
         dl, dr = xs[pos] - xs[left], xs[right] - xs[pos]
-        dl >= dr && (r += groupsize(right))
-        dl <= dr && (l += groupsize(left))
+        tied = abs(dl - dr) <= tol * max(dl, dr)
+        (dl >= dr || tied) && (r += groupsize(right))
+        (dl <= dr || tied) && (l += groupsize(left))
       end
     end
     lo, hi = pos - l, min(e, pos + r)
     m = hi - lo
     s = 0.0
-    for i in lo:hi
-      i == pos || (s += ys[i])
+    for i in lo:pos-1
+      s += ys[i]
     end
-    σ2[pos - a + 1] = m == 0 ? NaN : sqrt(m / (m + 1)) * (ys[pos] - s / m)
+    for i in pos+1:hi
+      s += ys[i]
+    end
+    c = m == 0 ? NaN : m == target ? ctarget : sqrt(m / (m + 1))
+    σ2[pos - a + 1] = c * (ys[pos] - s / m)
   end
   return σ2
 end
@@ -489,8 +532,8 @@ StatsAPI.confint(m::LocalPolynomialRegression; level::Real = 0.95,
 
 The results at the points as a table, a named tuple of columns: `point`, the
 bandwidths `h` and `b`, the observations with positive weight in the window of the
-larger bandwidth `nobs`, the distinct values with positive weight in the window of
-`h` `nunique`, whether the floor on the window was binding `floored`, the
+larger bandwidth `nobs`, nprobust's `N`, the distinct values with positive weight in
+the window of `h` `nunique`, whether the floor on the window was binding `floored`, the
 `estimate` with its standard error `se` and conventional interval
 `lower`, `upper`, and the bias-corrected `estimate_bc` with its robust standard
 error `se_rbc` and interval `lower_rbc`, `upper_rbc`.
@@ -520,7 +563,7 @@ function StatsAPI.predict(m::LocalPolynomialRegression, x::AbstractVector{<:Real
   h0 = first(hs)
   pts = _checkpoints(x)
   h, b = fill(h0, length(pts)), fill(h0, length(pts))
-  _floor!(h, b, m.data, pts, m.minobs)
+  _floor!(h, b, m.data, pts, m.minobs, m.compat ? nothing : m.degree)
   return _estimates(m.data, m.kernel, h, pts, m.degree, m.derivative)
 end
 
@@ -605,7 +648,7 @@ _selection(rule::Union{RuleOfThumb,CrossValidation}, d, k) =
 
 # (the fits pass vce and minobs to every regression rule; this one does not use them)
 function selectbandwidth(rule::RuleOfThumb, d::SmoothingData, k::AbstractKernel;
-                         degree::Integer = 1, derivative::Integer = 0, points = nothing,
+                         derivative::Integer = 0, degree::Integer = derivative + 1, points = nothing,
                          vce::Union{Nothing,VarianceEstimator} = nothing, minobs::Integer = 0)
   d.y === nothing && throw(ArgumentError("RuleOfThumb needs responses; use SmoothingData(x, y)"))
   _check_degree(degree, derivative)

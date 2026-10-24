@@ -507,11 +507,13 @@ end
 
 # The kernel sums at the observations with and without the responses,
 # S = kernelsums(d, k, h; kmax = 2p) and T = kernelsums(d, k, h; kmax = p, z = d.y),
-# in one pass where the engine allows it
-function _sumsyz(d::SmoothingData, k::AbstractKernel, h, p, ws::SumsWorkspace)
+# in one pass where the engine allows it; with `binned`, Gaussian kernels use the
+# binned sums where those are faster than the exact ones
+function _sumsyz(d::SmoothingData, k::AbstractKernel, h, p, ws::SumsWorkspace; binned::Bool = false)
   n = nobs(d)
-  S, T = Matrix{Float64}(undef, 2p + 1, n), Matrix{Float64}(undef, p + 1, n)
   order = _sortedorder!(ws, d.x)
+  binned && k isa GaussianFamily && _fftfaster(d, k, h, p, order) && return _binnedsumsyz(d, k, h, p)
+  S, T = Matrix{Float64}(undef, 2p + 1, n), Matrix{Float64}(undef, p + 1, n)
   e = _choose_engine(k, d.x, h, d.x, 2p, order)
   vS, vT = _sumvalues!(ws, d, nothing), _sumvalues!(ws, d, d.y)
   if e isa FastSums
@@ -522,6 +524,74 @@ function _sumsyz(d::SmoothingData, k::AbstractKernel, h, p, ws::SumsWorkspace)
   else
     kernelsums!(S, d, k, h, d.x; engine = e, workspace = ws)
     kernelsums!(T, d, k, h, d.x; z = d.y, engine = e, workspace = ws)
+  end
+  return S, T
+end
+
+
+# Whether the binned sums of _binnedsumsyz cost less than the exact ones: an FFT of
+# the grid per row of sums against a term per observation and window, for windows of
+# the radius where the kernel underflows, estimated from 32 of the observations
+function _fftfaster(d, k::GaussianFamily, h, p, order; binsperh = 50)
+  xs, n = d.x, nobs(d)
+  s = h * first(_scale_order(k))
+  N = nextpow(2, floor(Int, (xs[end] - xs[1]) / (s / binsperh)) + 2 + 12binsperh + 1)
+  r = _zeroradius(k)
+  sample = view(order, 1:max(1, n ÷ 32):n)
+  terms = sum(sample) do j
+    _firsttrue(i -> (xs[i] - xs[j]) / h > r, n) - _firsttrue(i -> (xs[i] - xs[j]) / h >= -r, n)
+  end / length(sample)
+  return 4 * (5p + 5) * N * log2(N) < n * terms
+end
+
+# S and T of _sumsyz for a Gaussian kernel from the data binned linearly on a grid of
+# spacing s / binsperh, where s is the standard deviation of the kernel in the units
+# of x: the sums at the grid points are FFT convolutions with the kernel times powers
+# of u, cut at 12 standard deviations, and are interpolated linearly to the
+# observations. The relative error is of order binsperh^-2.
+function _binnedsumsyz(d::SmoothingData, k::GaussianFamily, h, p; binsperh = 50)
+  xs, n = d.x, nobs(d)
+  s = h * first(_scale_order(k))
+  δ = s / binsperh
+  M = floor(Int, (xs[end] - xs[1]) / δ) + 2   # grid points xs[1] + (j - 1) δ, j = 1, …, M
+  L = 12binsperh
+  N = nextpow(2, M + L + 1)
+  zw, zy = zeros(ComplexF64, N), zeros(ComplexF64, N)
+  pos = Vector{Int}(undef, n)
+  frac = Vector{Float64}(undef, n)
+  for i in 1:n
+    t = (xs[i] - xs[1]) / δ
+    j = min(floor(Int, t), M - 2)
+    f = t - j
+    w = _weight(d.w, i)
+    zw[j + 1] += (1 - f) * w
+    zw[j + 2] += f * w
+    zy[j + 1] += (1 - f) * w * d.y[i]
+    zy[j + 2] += f * w * d.y[i]
+    pos[i], frac[i] = j + 1, f
+  end
+  _fft!(zw)
+  _fft!(zy)
+  S, T = Matrix{Float64}(undef, 2p + 1, n), Matrix{Float64}(undef, p + 1, n)
+  kr, out = zeros(ComplexF64, N), zeros(ComplexF64, N)
+  for r in 0:2p
+    # the sum at grid point a is ∑_b z[b] K(b - a) with K(m) = k(u) u^r, u = m δ / h:
+    # a convolution with K reflected, placed at the indices m mod N
+    fill!(kr, 0)
+    for m in -L:L
+      u = m * δ / h
+      kr[mod(-m, N) + 1] = k(u) * u^r
+    end
+    _fft!(kr)
+    for (z, R) in ((zw, S), (zy, T))
+      r <= size(R, 1) - 1 || continue
+      out .= conj.(z .* kr)
+      _fft!(out)   # the inverse transform, as the conjugate of the transform of the conjugate
+      for i in 1:n
+        j = pos[i]
+        R[r + 1, i] = ((1 - frac[i]) * real(out[j]) + frac[i] * real(out[j + 1])) / N
+      end
+    end
   end
   return S, T
 end

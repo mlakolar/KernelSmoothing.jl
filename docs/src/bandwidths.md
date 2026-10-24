@@ -99,8 +99,15 @@ since the criterion often has several. For regression,
 
 where ``\ell_{ii}`` is the weight of ``y_i`` in the fit at ``x_i``. The fits at all
 observations come from [`kernelsums`](@ref), so that a bandwidth costs ``O(n)``
-operations for polynomial kernels. The rule takes the global minimizer over the
-grid and refines it between its neighbours. Cross-validation assumes independent
+operations for polynomial kernels; for Gaussian kernels and more than 1000
+observations, the sums come from binned data where that is faster. The grid starts
+where the leave-one-out fits exist, at the smallest bandwidth that leaves ``p + 1``
+other distinct values in the window of each observation. Isolated observations,
+whose distance to their ``(p+1)``-th nearest other distinct value is more than three
+interquartile ranges above the upper quartile of these distances, would set this
+floor for all, so the criterion leaves them out and the sums run over the others.
+The rule takes the global minimizer over the grid, refines it between its
+neighbours, and warns when it lies at the lower end of the grid. Cross-validation assumes independent
 errors; with positively correlated errors it undersmooths.
 
 ## Plug-in bandwidths for regression
@@ -139,7 +146,10 @@ at most the range of the data. Unlike nprobust's, whose rule `compat = true`
 reproduces, the squared bias keeps the regularization.
 [`CoverageOptimal`](@ref) rescales the plug-in bandwidths by a power of the sample
 size, which makes the coverage error of robust bias-corrected intervals shrink at
-the fastest rate (Calonico, Cattaneo and Farrell 2018, 2022). The same rules give
+the fastest rate (Calonico, Cattaneo and Farrell 2018, 2022). For odd ``p - \nu``
+this rate differs between interior and boundary points. By default the rule takes
+the interior rate, which leaves local linear bandwidths unchanged, and
+`compat = true` the boundary rate at every point, as nprobust. The same rules give
 the bandwidths of the density estimators; see
 [Density estimation](@ref density-page).
 

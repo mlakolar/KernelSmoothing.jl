@@ -31,9 +31,10 @@ end
 @testset "agrees with nprobust" begin
   for c in LPROBUST
     vce = c.vce == "nn" ? NNVariance(3) : HCVariance(parse(Int, c.vce[3:end]))
+    # (compat = true for nprobust's ties of neighbours, which these data on a grid have)
     m = fit(LocalPolynomialRegression, X, Y; weights = c.weighted ? W : nothing, degree = c.p,
             derivative = c.deriv, kernel = NPKERNELS[c.kernel], bandwidth = c.h, pilot = c.b,
-            points = EVAL, vce)
+            points = EVAL, vce, compat = true)
     @test all(isapprox.(m.h, c.hused; rtol = 1e-14))
     @test all(isapprox.(m.b, c.bused; rtol = 1e-14))
     @test m.nwindow == c.N
@@ -153,8 +154,9 @@ end
   # Gram matrix factor, with bias-corrected estimates far off and tiny standard errors.
   x = repeat(0.0:10.0, inner = 30)
   y = sqrt.(x .+ 1) .+ 0.1 .* sin.(7.3 .* (1:330))
+  # (without the floors, which would widen the window of the bias correction)
   for h in (0.7, 0.8, 0.9, 1.0), vce in (NNVariance(), HCVariance(0), HCVariance(1), HCVariance(3))
-    m = fit(LocalPolynomialRegression, x, y; bandwidth = h, points = [0.5, 5.5], vce)
+    m = fit(LocalPolynomialRegression, x, y; bandwidth = h, points = [0.5, 5.5], vce, minobs = 0)
     @test m.nunique == [2, 2]
     for (j, x0) in enumerate(m.points)
       @test m.estimate[j] ≈ wls(x, y, ones(330), EpanechnikovKernel(), x0, h, 1)[1] rtol = 1e-10
@@ -251,6 +253,44 @@ end
     @test isnan(only(m.se))
     @test isfinite(only(m.estimate))
   end
+end
+
+@testset "defaults: degree, floors by distinct values, ties of neighbours, counts" begin
+  x = [mod(0.6180339887498949i, 1) for i in 1:400]
+  y = sin.(2π .* x) .+ 0.2 .* cos.(17.3 .* (1:400))
+  # the default order is derivative + 1, as in nprobust
+  @test fit(LocalPolynomialRegression, x, y; bandwidth = 0.2, points = [0.5], derivative = 1).degree == 2
+  @test fit(LocalPolynomialRegression, x, y; bandwidth = 0.2, points = [0.5]).degree == 1
+  # four distinct values: the windows are widened until they hold enough distinct
+  # values with positive weight, unless compat
+  x4 = repeat([1.0, 4 / 3, 5 / 3, 2.0], inner = 75)
+  y4 = log.(x4) .+ 0.2 .* sin.(7.3 .* (1:300))
+  m = fit(LocalPolynomialRegression, x4, y4; bandwidth = 0.25, points = [1.0, 1.5])
+  @test all(isfinite, m.estimate) && all(isfinite, m.estimate_bc) && all(m.floored)
+  # at 1.0 the second distinct value is 1/3 away and the third 2/3; at 1.5 the two
+  # nearest are 1/6 away, inside the window, and the next two 1/2
+  @test m.h ≈ [1 / 2, 1 / 4] && m.b ≈ [1.0, 3 / 4]
+  # the bias correction of order 2 at windows that held two distinct values
+  x11 = repeat(0.0:10.0, inner = 30)
+  m11 = fit(LocalPolynomialRegression, x11, sqrt.(x11 .+ 1); bandwidth = 0.8, points = [0.5, 5.5])
+  @test m11.h == [0.8, 0.8] && m11.b ≈ [2.25, 2.25] && all(isfinite, m11.estimate_bc)
+  mc = fit(LocalPolynomialRegression, x4, y4; bandwidth = 0.25, points = [1.0, 1.5], compat = true)
+  @test isnan(mc.estimate[1]) && mc.h[1] == 0.25
+  @test isnan(fit(LocalPolynomialRegression, x4, y4; bandwidth = 0.25, points = [1.0], minobs = 0).estimate[1])
+  # predictions use the same floors
+  @test predict(fit(LocalPolynomialRegression, x4, y4; bandwidth = 0.25, points = [1.5]), [1.0]) ≈ m.estimate[1:1]
+  # an equally spaced design: neighbours at the same distance are tied, so that a shift
+  # of the design leaves the standard errors unchanged
+  xe = collect(range(0, 1; length = 500))
+  ye = sin.(2π .* xe) .+ 0.3 .* cos.(31.7 .* (1:500))
+  pts = [0.0, 0.25, 0.5, 0.75, 1.0]
+  m0 = fit(LocalPolynomialRegression, xe, ye; bandwidth = 0.1, points = pts)
+  m1 = fit(LocalPolynomialRegression, xe .+ 1, ye; bandwidth = 0.1, points = pts .+ 1)
+  @test m1.se ≈ m0.se rtol = 1e-10
+  @test all(isapprox.(vcov(m1), vcov(m0); rtol = 1e-8, atol = 1e-14))
+  # the counts are of the observations with positive weight in the larger window
+  mb = fit(LocalPolynomialRegression, x, y; bandwidth = 0.1, pilot = 0.3, points = [0.5])
+  @test mb.nwindow == [count(abs.(x .- 0.5) .< 0.3)]
 end
 
 end

@@ -562,7 +562,7 @@ _lscvcriterion(d, k::AbstractKernel, exact, hmin) =
   throw(ArgumentError("LSCV needs the convolution of the kernel with itself, which is not available for $k"))
 
 """
-    CrossValidation(; gridsize = 40)
+    CrossValidation(; gridsize = 40, exact = 1000)
 
 Leave-one-out cross-validation for local polynomial regression: the bandwidth that
 minimizes
@@ -572,24 +572,38 @@ minimizes
 where `m̂₋ᵢ(xᵢ)` is the fit at `xᵢ` without observation `i` and `ℓᵢᵢ` the weight
 of `yᵢ` in the fit at `xᵢ`. The fits at all observations come from
 [`kernelsums`](@ref), so that a bandwidth costs `O(n)` operations for polynomial
-kernels. The grid has `gridsize` bandwidths spaced evenly on the log scale, from
-the smallest one that leaves `p + 1` other distinct values in every window, below
-which leave-one-out fits break down, to the range of the data, or to twice that
-smallest one if it is larger. The global minimizer
-on the grid is refined to a relative accuracy of `1e-3`, far below the statistical
-error of the bandwidth, and the details record the grid and the criterion.
-Cross-validation estimates the regression function, so it needs `derivative = 0`.
+kernels. Gaussian kernels use exact sums for up to `exact` observations, and
+otherwise, where it is faster, the data binned linearly on a grid of 50 points per
+standard deviation of the kernel, with the sums from FFT convolutions; this changes
+the criterion by about `1e-5` relative, which moves the bandwidth by less than its
+refinement tolerance.
+
+The grid has `gridsize` bandwidths spaced evenly on the log scale, from the smallest
+one that leaves `p + 1` other distinct values in the window of each scored
+observation, below which leave-one-out fits break down, to the range of the data,
+or to twice that smallest one if it is larger. The criterion scores every
+observation except isolated ones, whose distance to their `(p + 1)`-th nearest
+other distinct value is far out among these distances, more than three
+interquartile ranges above the upper quartile; they still enter the fits of the
+others. A single isolated observation used to set the floor
+of the grid for all: one `x` at 10 among 1000 uniform ones moved the default
+regression bandwidth from 0.08 to 4.7. The global minimizer on the grid is refined
+to a relative accuracy of `1e-3`, far below the statistical error of the bandwidth,
+and the rule warns when it lies at the lower end of the grid. The details record
+the grid, the criterion and the number of scored observations. Cross-validation
+estimates the regression function, so it needs `derivative = 0`.
 """
 struct CrossValidation <: BandwidthSelector
   gridsize::Int
+  exact::Int
 
-  function CrossValidation(gridsize::Integer)
+  function CrossValidation(gridsize::Integer, exact::Integer)
     gridsize >= 3 || throw(ArgumentError("gridsize must be at least 3, got $gridsize"))
-    new(gridsize)
+    new(gridsize, exact)
   end
 end
 
-CrossValidation(; gridsize::Integer = 40) = CrossValidation(gridsize)
+CrossValidation(; gridsize::Integer = 40, exact::Integer = 1000) = CrossValidation(gridsize, exact)
 
 function selectbandwidth(rule::CrossValidation, d::SmoothingData, k::AbstractKernel;
                          degree::Integer = 1, derivative::Integer = 0, points = nothing,
@@ -601,35 +615,47 @@ function selectbandwidth(rule::CrossValidation, d::SmoothingData, k::AbstractKer
     "CrossValidation chooses bandwidths for the regression function, derivative = 0"))
   p = Int(degree)
   nunique(d) >= p + 2 || throw(ArgumentError("CrossValidation needs at least $(p + 2) distinct values"))
-  hmin = 1.01 * maximum(knn_distance(d, x, p + 2; distinct = true) for x in d.values)
-  # the grid reaches at least twice its floor, where every leave-one-out fit holds
-  # p + 1 other distinct values with positive weight; with few distinct values the
-  # floor can exceed the range, as for three values of x and a local linear fit
+  # the distance at which each distinct value has p + 1 other distinct values in its
+  # window; isolated values are left out of the criterion and of the floor
+  t = [knn_distance(d, x, p + 2; distinct = true) for x in d.values]
+  ts = sort(t)
+  q1, q3 = _unweightedquantile(ts, 0.25), _unweightedquantile(ts, 0.75)
+  scoredvalue = t .<= q3 + 3 * (q3 - q1)   # Tukey's far-out fence
+  scored = scoredvalue[d.valueindex]
+  hmin = 1.01 * maximum(t[scoredvalue])
+  # the grid reaches at least twice its floor, where every scored leave-one-out fit
+  # holds p + 1 other distinct values with positive weight; with few distinct values
+  # the floor can exceed the range, as for three values of x and a local linear fit
   hmax = max(d.x[end] - d.x[1], 2hmin)
   ws = SumsWorkspace()
-  crit(h) = _cvcriterion(d, k, h, p, ws)
+  binned = nobs(d) > rule.exact
+  crit(h) = _cvcriterion(d, k, h, p, ws, scored, binned)
   # the minimum is refined to 1e-3, far below the statistical error of the bandwidth,
   # with about half the evaluations of 1e-6
   h, details = _gridminimize(crit, exp.(range(log(hmin), log(hmax); length = rule.gridsize));
                              largest = false, rtol = 1e-3)
-  return BandwidthSelection(h, rule, details)
+  details.atbound && h == details.grid[1] && @warn "CrossValidation: the criterion is smallest at " *
+    "the lower end of its grid, h = $h, below which some leave-one-out fits fail; the minimum may lie lower"
+  return BandwidthSelection(h, rule, (details..., scored = count(scored)))
 end
 
-function _cvcriterion(d, k, h, p, ws)
-  S, T = _sumsyz(d, k, h, p, ws)
+function _cvcriterion(d, k, h, p, ws, scored = trues(nobs(d)), binned::Bool = false)
+  S, T = _sumsyz(d, k, h, p, ws; binned)
   k0 = k(0.0)
   # chunks of a fixed size, run as tasks and summed in order, so that the criterion
   # does not depend on the number of threads
-  parts = _fetchall([Threads.@spawn _cvpart(d, S, T, k0, p, r) for r in Iterators.partition(1:nobs(d), 8192)], Float64)
-  return sum(parts) / d.sumw
+  parts = _fetchall([Threads.@spawn _cvpart(d, S, T, k0, p, r, scored)
+                     for r in Iterators.partition(1:nobs(d), 8192)], Float64)
+  return sum(parts) / sum(i -> scored[i] ? _weight(d.w, i) : 0.0, 1:nobs(d))
 end
 
-# the leave-one-out squared errors of the observations in r, or Inf if a fit there
-# does not exist
-function _cvpart(d, S, T, k0, p, r)
+# the leave-one-out squared errors of the scored observations in r, or Inf if a fit
+# there does not exist
+function _cvpart(d, S, T, k0, p, r, scored)
   A, e = zeros(p + 1, p + 1), zeros(p + 1)
   s = 0.0
   for i in r
+    scored[i] || continue
     for b in 0:p, a in 0:p
       A[a + 1, b + 1] = S[a + b + 1, i]
     end

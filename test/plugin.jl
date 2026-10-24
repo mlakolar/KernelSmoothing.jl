@@ -111,7 +111,7 @@ end
   d = SmoothingData(X, Y)
   n = 400
   mse = selectbandwidth(MSEOptimal(), d, EpanechnikovKernel(); points = EVAL)
-  ce = selectbandwidth(CoverageOptimal(), d, EpanechnikovKernel(); points = EVAL)
+  ce = selectbandwidth(CoverageOptimal(convention = :nprobust), d, EpanechnikovKernel(); points = EVAL)
   @test ce.h ≈ mse.h .* n^(-1 / 20)                 # p = 1: n^(-p/((2p+3)(p+3)))
   @test ce.details.mse == mse.h
   # the interior convention leaves local linear bandwidths unchanged
@@ -233,6 +233,20 @@ end
   for compat in (false, true), rule in (MSEOptimal(), IMSEOptimal())
     @inferred selectbandwidth(rule, dx, k; points = [0.0, 0.5], compat)
   end
+end
+
+@testset "the convention of CoverageOptimal" begin
+  x = [mod(0.6180339887498949i, 1) for i in 1:500]
+  d = SmoothingData(x, sin.(2π .* x) .+ 0.2 .* cos.(19.1 .* (1:500)))
+  k = EpanechnikovKernel()
+  h = bandwidth(MSEOptimal(), d, k; points = [0.5])
+  # local linear, odd p - ν: the interior convention leaves the bandwidth unchanged,
+  # nprobust's shrinks it by n^(-1/20); compat = true takes nprobust's
+  @test bandwidth(CoverageOptimal(), d, k; points = [0.5]) == h
+  @test bandwidth(CoverageOptimal(convention = :nprobust), d, k; points = [0.5]) ≈ h .* 500^(-1 / 20)
+  hc = bandwidth(MSEOptimal(), d, k; points = [0.5], compat = true)
+  @test bandwidth(CoverageOptimal(), d, k; points = [0.5], compat = true) ≈ hc .* 500^(-1 / 20)
+  @test bandwidth(CoverageOptimal(convention = :interior), d, k; points = [0.5], compat = true) == hc
 end
 
 end

@@ -145,10 +145,15 @@ end
                     (EpanechnikovKernel(), 2, 1.0 .+ mod.(1:400, 3)))
     d = SmoothingData(x, y; weights = w)
     ww = w === nothing ? ones(400) : w
-    # leave-one-out fits by their definition
-    function cv(h)
+    # the observations that cross-validation scores: all but the far-out isolated ones
+    t = [knn_distance(d, xv, p + 2; distinct = true) for xv in d.values]
+    q1, q3 = quantile(t, 0.25), quantile(t, 0.75)
+    scored = (t .<= q3 + 3 * (q3 - q1))[d.valueindex][invperm(d.perm)]
+    # leave-one-out fits by their definition, over the observations in `keepers`
+    function cv(h, keepers = trues(400))
       s = 0.0
       for i in 1:400
+        keepers[i] || continue
         keep = [j for j in 1:400 if j != i]
         X = [(x[j] - x[i])^l for j in keep, l in 0:p]
         D = ww[keep] .* k.((x[keep] .- x[i]) ./ h)
@@ -157,7 +162,7 @@ end
         β = G \ (X' * (D .* y[keep]))
         s += ww[i] * (y[i] - β[1])^2
       end
-      return s / sum(ww)
+      return s / sum(ww[keepers])
     end
     for h in (0.6, 0.9)   # above the smallest bandwidth with leave-one-out fits everywhere
       @test _cvcriterion(d, k, h, p, SumsWorkspace()) ≈ cv(h) rtol = 1e-9
@@ -165,8 +170,10 @@ end
     @test _cvcriterion(d, k, 0.05, p, SumsWorkspace()) == Inf
     sel = selectbandwidth(CrossValidation(), d, k; degree = p)
     @test !sel.details.atbound
+    @test sel.details.scored == count(scored)
     # the criterion is continuous but wiggles as observations enter and leave windows
-    @test cv(sel.h) <= min(cv(0.99 * sel.h), cv(1.01 * sel.h)) * (1 + 1e-4)
+    cvs(h) = cv(h, scored)
+    @test cvs(sel.h) <= min(cvs(0.99 * sel.h), cvs(1.01 * sel.h)) * (1 + 1e-4)
   end
   m = fit(LocalPolynomialRegression, x, y; bandwidth = CrossValidation(), points = [0.0])
   @test m.selection.rule == CrossValidation()
@@ -175,6 +182,14 @@ end
   @test_throws ArgumentError fit(LocalPolynomialRegression, x, y; bandwidth = SheatherJones())
   @test_throws ArgumentError fit(KDE, x; bandwidth = CrossValidation())
   @test_throws ArgumentError fit(KDE, x; bandwidth = RuleOfThumb())
+end
+
+# the observations, in sorted order, that cross-validation scores: all but the far-out
+# isolated ones
+function cvscored(d, p)
+  t = [knn_distance(d, xv, p + 2; distinct = true) for xv in d.values]
+  q1, q3 = quantile(t, 0.25), quantile(t, 0.75)
+  return (t .<= q3 + 3 * (q3 - q1))[d.valueindex]
 end
 
 @testset "grid minimization" begin
@@ -194,7 +209,7 @@ end
   for y in (Z .+ 0.5 .* sin.(1e4 .* (1:400)), 2 .* Z .+ 0.3 .* cos.(7e3 .* (1:400)), sin.(2 .* Z) .+ 0.5 .* cos.(13.7 .* (1:400)))
     d = SmoothingData(Z, y)
     sel = selectbandwidth(CrossValidation(), d, EpanechnikovKernel())
-    @test _cvcriterion(d, EpanechnikovKernel(), sel.h, 1, SumsWorkspace()) <=
+    @test _cvcriterion(d, EpanechnikovKernel(), sel.h, 1, SumsWorkspace(), cvscored(d, 1)) <=
           minimum(filter(isfinite, sel.details.criterion)) * (1 + 1e-12)
   end
   # an outlier inflates the standard deviation, but not the lower end of the LSCV grid
@@ -275,6 +290,34 @@ end
     @test S ≈ kernelsums(dy, k, h; kmax = 2p) rtol = 1e-12
     @test T ≈ kernelsums(dy, k, h; kmax = p, z = dy.y) rtol = 1e-12
   end
+end
+
+@testset "cross-validation with isolated observations and binned Gaussian sums" begin
+  k = EpanechnikovKernel()
+  x = [mod(0.6180339887498949i, 1) for i in 1:1000]
+  y = sin.(2π .* x) .+ 0.3 .* cos.(37.1 .* (1:1000))
+  h0 = bandwidth(CrossValidation(), SmoothingData(x, y), k)
+  # one isolated observation is left out of the criterion and does not set the floor
+  s = selectbandwidth(CrossValidation(), SmoothingData([x; 10.0], [y; 0.0]), k)
+  @test s.h ≈ h0 rtol = 0.02
+  @test s.details.scored < 1001 && s.details.grid[1] < 0.05
+  # with a floor that binds, the rule warns
+  x2 = x[1:200]
+  @test_logs (:warn, r"lower end of its grid") selectbandwidth(CrossValidation(), SmoothingData(x2, sin.(80π .* x2)), k)
+  # Gaussian kernels: binned sums above `exact` observations, close to the exact ones
+  g = GaussianKernel()
+  xs = [mod(0.7548776662466927i, 1) for i in 1:3000]
+  ys = sin.(2π .* xs) .+ 0.3 .* cos.(41.3 .* (1:3000))
+  d = SmoothingData(xs, ys; weights = 1 .+ mod.(1:3000, 3))
+  for h in (0.03, 0.1, 0.3)
+    Sb, Tb = KernelSmoothing._binnedsumsyz(d, g, h, 1)
+    Se = kernelsums(d, g, h; kmax = 2)
+    Te = kernelsums(d, g, h; kmax = 1, z = d.y)
+    @test all(abs.(Sb .- Se) .<= 5e-4 .* maximum(abs.(Se); dims = 2))
+    @test all(abs.(Tb .- Te) .<= 5e-4 .* maximum(abs.(Te); dims = 2))
+    @test _cvcriterion(d, g, h, 1, SumsWorkspace(), trues(3000), true) ≈ _cvcriterion(d, g, h, 1, SumsWorkspace()) rtol = 2e-4
+  end
+  @test bandwidth(CrossValidation(), d, g) ≈ bandwidth(CrossValidation(exact = 10^4), d, g) rtol = 5e-3
 end
 
 end
