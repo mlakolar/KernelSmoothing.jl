@@ -30,6 +30,7 @@ development.
 - `fit(VaryingCoefficient, u, X, y)` and `fit(PartiallyLinear, u, X, y)`:
   varying-coefficient models and partially linear models (Robinson's double
   residuals), with sandwich standard errors and cross-validated bandwidths.
+- `fit(LocalLikelihood, x, y; family)`: local logistic and Poisson regression.
 - `localpolynomial` and `smoothermatrix`: local polynomial estimates and their
   weights at given points and bandwidths, without inference, for smoothing many
   curves and for building other estimators, also for two covariates (covariance
