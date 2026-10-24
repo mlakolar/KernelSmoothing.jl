@@ -85,36 +85,31 @@ function _densityvector(d, k, x0, h, b, c0, c2, κ, bc, compat = false)
   r = _densitywindow(d, k, x0, h, bc ? ρ : 1.0)
   a, e = first(r), last(r)
   wg = Vector{Float64}(undef, length(r))
-  s1, flagged = _densityvector!(wg, d, k, x0, h, ρ, r, c0, c2, κ, bc, _biaslift(k, ρ, κ), Val(false))
-  flagged && !compat && ((s1, _) = _densityvector!(wg, d, k, x0, h, ρ, r, c0, c2, κ, bc, 0.0, Val(true)))
+  s1 = _densityvector!(wg, d, k, x0, h, ρ, r, c0, c2, κ, bc, Val(false))
+  if bc && !compat && (!isfinite(s1) || _biascare(d, k, x0, h, ρ, r, c0, c2, κ))
+    s1 = _densityvector!(wg, d, k, x0, h, ρ, r, c0, c2, κ, bc, Val(true))
+  end
   return (range = a:e, wg = wg, s1 = s1)
 end
 
-# wg and s1 over the window r, with the bias terms as products and whether any of
-# them is flagged, or with careful = true from _densitybias, as in _densitysums
-function _densityvector!(wg, d, k, x0, h, ρ, r, c0, c2, κ, bc, lift, ::Val{careful}) where {careful}
+# wg and s1 over the window r, with the bias terms as products, or with
+# careful = true from _densitybias, as in _densitysums
+function _densityvector!(wg, d, k, x0, h, ρ, r, c0, c2, κ, bc, ::Val{careful}) where {careful}
   xs, a = d.x, first(r)
   s1 = 0.0
-  flagged = false
   for i in r
     u = (x0 - xs[i]) / h
     v = ρ * u
-    ku = k(u)
-    bias = 0.0
-    if bc
-      if careful
-        bias = _densitybias(k, v, ρ, c0, c2, κ)
-      else
-        bias, f = _biasproduct(k, v, ρ, c0, c2, κ, lift)
-        flagged |= f
-      end
+    g = if careful
+      (bc ? k(u) - _densitybias(k, v, ρ, c0, c2, κ) : k(u)) / h
+    else
+      (bc ? k(u) - ρ^3 * κ * k(v) * (c0 + c2 * v^2) : k(u)) / h
     end
-    g = (bc ? ku - bias : ku) / h
     w = _weight(d.w, i)
     wg[i - a + 1] = w * g
     s1 += w^2 * g
   end
-  return s1, flagged
+  return s1
 end
 
 """

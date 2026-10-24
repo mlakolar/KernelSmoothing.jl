@@ -153,23 +153,18 @@ end
 # where that is finite, except that a Gaussian tail k(v) = c exp(-z²/2) that
 # underflowed, which is at most max(c, 1) 2^-1075, can be a normal number when
 # ρ³ κ |q| max(c, 1) ≥ 2^53, for an extreme ratio ρ = h / b or scale. The loops over
-# a window sum the products and flag these cases, and only then sum the window again
-# with _densitybias, which evaluates the flagged terms in logarithms.
-@inline function _biasproduct(k, v, ρ, c0, c2, κ, lift)
-  kv = k(v)
-  q = c0 + c2 * v^2
-  t = ρ^3 * κ * kv * q
-  return t, !isfinite(t) | (k isa GaussianFamily && iszero(kv) & (abs(q) >= lift))
-end
-
-# the |q| from which an underflowed Gaussian tail can be a normal number
-function _biaslift(k, ρ, κ)
-  k isa GaussianFamily || return Inf
+# a window sum the products, and only where a sum is not finite or _biascare finds
+# such a tail possible, they sum the window again with _densitybias, which evaluates
+# these terms in logarithms.
+function _biascare(d, k, x0, h, ρ, r, c0, c2, κ)
+  k isa GaussianFamily && !isempty(r) || return false
+  # |q| is largest at the observation farthest from x0; a factor 2 covers rounding
+  vmax = ρ * max(abs(x0 - d.x[first(r)]), abs(x0 - d.x[last(r)])) / h
   c = abs(_amplitude(k)) * INV_SQRT_2PI / first(_scale_order(k))
-  return 0x1p53 / (ρ^3 * κ * max(c, 1.0))
+  return !(ρ^3 * κ * (abs(c0) + abs(c2) * vmax^2) * max(c, 1.0) < 0x1p52)
 end
 
-# the bias term itself, for windows with a flagged term
+# the bias term with this care
 @inline function _densitybias(k, v, ρ, c0, c2, κ)
   kv = k(v)
   q = c0 + c2 * v^2
@@ -211,9 +206,9 @@ function _densityfit(d::SmoothingData, k, x0, h, b, c0, c2, κ, compat::Bool)
   hb = max(h, b)
   r = _densitywindow(d, k, x0, h, ρ)
   rad = maximum(abs, support(k))
-  s0, s1, s2, t0, t1, t2, flagged = _densitysums(d, k, x0, h, ρ, r, c0, c2, κ, _biaslift(k, ρ, κ), Val(false))
-  if flagged && !compat
-    s0, s1, s2, t0, t1, t2, _ = _densitysums(d, k, x0, h, ρ, r, c0, c2, κ, 0.0, Val(true))
+  s0, s1, s2, t0, t1, t2 = _densitysums(d, k, x0, h, ρ, r, c0, c2, κ, Val(false))
+  if !compat && (!isfinite(t0 + t1 + t2) || _biascare(d, k, x0, h, ρ, r, c0, c2, κ))
+    s0, s1, s2, t0, t1, t2 = _densitysums(d, k, x0, h, ρ, r, c0, c2, κ, Val(true))
   end
   W = d.sumw
   se(s0, s1, s2) = !compat && s2 == 0 ? NaN : _densityse(s0, s1, s2, h, W, d.neff)
@@ -223,23 +218,16 @@ function _densityfit(d::SmoothingData, k, x0, h, b, c0, c2, κ, compat::Bool)
   return (f = s0 / (h * W), se = se(s0, s1, s2), fbc = t0 / (h * W), sebc = se(t0, t1, t2), n = nwin)
 end
 
-# the sums of _densityfit over the window r, with the bias terms as products and
-# whether any of them is flagged, or with careful = true from _densitybias
-function _densitysums(d, k, x0, h, ρ, r, c0, c2, κ, lift, ::Val{careful}) where {careful}
+# the sums of _densityfit over the window r, with the bias terms as products, or
+# with careful = true from _densitybias
+function _densitysums(d, k, x0, h, ρ, r, c0, c2, κ, ::Val{careful}) where {careful}
   xs = d.x
   s0 = s1 = s2 = t0 = t1 = t2 = 0.0
-  flagged = false
   for i in r
     u = (x0 - xs[i]) / h
     kv = k(u)
     v = ρ * u
-    if careful
-      bias = _densitybias(k, v, ρ, c0, c2, κ)
-    else
-      bias, f = _biasproduct(k, v, ρ, c0, c2, κ, lift)
-      flagged |= f
-    end
-    m = kv - bias
+    m = careful ? kv - _densitybias(k, v, ρ, c0, c2, κ) : kv - ρ^3 * κ * k(v) * (c0 + c2 * v^2)
     w = _weight(d.w, i)
     s0 += w * kv
     s1 += w^2 * kv
@@ -248,7 +236,7 @@ function _densitysums(d, k, x0, h, ρ, r, c0, c2, κ, lift, ::Val{careful}) wher
     t1 += w^2 * m
     t2 += w^2 * m^2
   end
-  return s0, s1, s2, t0, t1, t2, flagged
+  return s0, s1, s2, t0, t1, t2
 end
 
 
