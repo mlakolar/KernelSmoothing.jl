@@ -82,6 +82,7 @@ function _clustersums(cl, ℓ, ε, A, B, type, compat)
   adjust = type >= 2
   P = adjust ? size(A, 1) : 0
   K, la, w = zeros(P, P), zeros(P), zeros(P)
+  λ, V = zeros(P), zeros(P, P)
   i, n = 1, length(ord)
   while i <= n
     key = cl[ord[i]]
@@ -103,40 +104,97 @@ function _clustersums(cl, ℓ, ε, A, B, type, compat)
       end
       i += 1
     end
-    adjust && (S += _cradjustment(K, la, w, type, compat, n > P))
+    adjust && (S += _cradjustment!(K, la, w, type, compat, n > P, λ, V))
     push!(keys, key)
     push!(sums, S)
   end
   return keys, sums
 end
 
-# la'φ(K)w for the symmetric K, from its eigenvalues λ; the eigenvalues of I - H_gg
-# are s = 1 - λ and, where the cluster has more observations than K has rows, one
-function _cradjustment(K, la, w, type, compat, ones)
-  E = LinearAlgebra.eigen(LinearAlgebra.Symmetric(K))
-  λ, V = E.values, E.vectors
-  s = 1 .- λ
+# la'φ(K)w for the symmetric K, whose upper triangle is used and which is
+# overwritten, from its eigenvalues λ and eigenvectors V, which are overwritten too.
+# The eigenvalues of I - H_gg are s = 1 - λ and, where the cluster has more
+# observations than K has rows, one.
+function _cradjustment!(K, la, w, type, compat, ones, λ, V)
+  _jacobi!(λ, V, K)
+  smin, lo, hi = Inf, Inf, 0.0
+  for q in eachindex(λ)
+    sq = 1 - λ[q]
+    smin, lo, hi = min(smin, sq), min(lo, abs(sq)), max(hi, abs(sq))
+  end
   if compat
     # nprobust raises the eigenvalues of I - H_gg below 1e-12 to 1e-12 for CR2, and
     # for CR3 where solve finds I - H_gg singular, with a reciprocal condition number
     # below the machine epsilon
-    lo, hi = minimum(abs, s), maximum(abs, s)
     raise = type == 2 || (ones ? min(lo, 1.0) / max(hi, 1.0) : lo / hi) < eps()
   else
     # a cluster that alone determines part of the fit leaves no residual to estimate
     # its variance from, as a leverage of one does for HCVariance
-    minimum(s) > sqrt(eps()) || return NaN
+    smin > sqrt(eps()) || return NaN
     raise = false
   end
   t = 0.0
   for q in eachindex(λ)
-    sq = raise ? max(s[q], 1e-12) : s[q]
-    φ = sq == s[q] ? (type == 2 ? 1 / (sqrt(sq) * (1 + sqrt(sq))) : 1 / sq) :
-                     ((type == 2 ? 1 / sqrt(sq) : 1 / sq) - 1) / λ[q]
-    vq = view(V, :, q)
-    t += φ * LinearAlgebra.dot(vq, la) * LinearAlgebra.dot(vq, w)
+    s = 1 - λ[q]
+    sq = raise ? max(s, 1e-12) : s
+    φ = sq == s ? (type == 2 ? 1 / (sqrt(sq) * (1 + sqrt(sq))) : 1 / sq) :
+                  ((type == 2 ? 1 / sqrt(sq) : 1 / sq) - 1) / λ[q]
+    a = b = 0.0
+    for r in eachindex(la)
+      a += V[r, q] * la[r]
+      b += V[r, q] * w[r]
+    end
+    t += φ * a * b
   end
   return t
+end
+
+# The eigenvalues λ and the eigenvectors, the columns of V, of the symmetric matrix A,
+# whose upper triangle is used, by cyclic Jacobi rotations (Golub and Van Loan 2013,
+# Section 8.5), in place: A is overwritten. For the small matrices of the cluster
+# adjustments, this avoids the allocations of LAPACK's eigen.
+function _jacobi!(λ, V, A)
+  P = size(A, 1)
+  for j in 1:P, i in j+1:P
+    A[i, j] = A[j, i]
+  end
+  fill!(V, 0.0)
+  for i in 1:P
+    V[i, i] = 1.0
+  end
+  for _ in 1:30
+    off = total = 0.0
+    for j in 1:P, i in 1:P
+      a2 = A[i, j]^2
+      total += a2
+      i != j && (off += a2)
+    end
+    off <= eps()^2 * total && break
+    for p in 1:P-1, q in p+1:P
+      apq = A[p, q]
+      apq == 0 && continue
+      θ = (A[q, q] - A[p, p]) / (2apq)
+      t = (θ >= 0 ? 1.0 : -1.0) / (abs(θ) + sqrt(θ^2 + 1))
+      c = 1 / sqrt(t^2 + 1)
+      s = t * c
+      for k in 1:P
+        akp, akq = A[k, p], A[k, q]
+        A[k, p], A[k, q] = c * akp - s * akq, s * akp + c * akq
+      end
+      for k in 1:P
+        apk, aqk = A[p, k], A[q, k]
+        A[p, k], A[q, k] = c * apk - s * aqk, s * apk + c * aqk
+      end
+      for k in 1:P
+        vkp, vkq = V[k, p], V[k, q]
+        V[k, p], V[k, q] = c * vkp - s * vkq, s * vkp + c * vkq
+      end
+    end
+  end
+  for i in 1:P
+    λ[i] = A[i, i]
+  end
+  return λ, V
 end
 
 # The factor c of the cluster-robust variance with n observations and G clusters in
