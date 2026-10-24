@@ -166,7 +166,7 @@ julia> round.(coef(m); digits = 3)
  0.014
 ```
 """
-function fit(::Type{LocalPolynomialRegression}, x::AbstractVector{<:Real}, y::AbstractVector{<:Real};
+function fit(::Type{LocalPolynomialRegression}, x::AbstractVector, y::AbstractVector;
              weights = nothing, kwargs...)
   return fit(LocalPolynomialRegression, SmoothingData(x, y; weights); kwargs...)
 end

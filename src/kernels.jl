@@ -427,8 +427,15 @@ function moment(k::PolynomialKernel, j::Integer)
   b, c = pieces(k)
   return sum(eachindex(c)) do p
     m = _mid(b, p)
-    # u^j = (t + m)^j with t = u - m
-    sum(binomial(j, i) * m^(j - i) * _integrate(c[p], b[p] - m, b[p + 1] - m, i) for i in 0:j)
+    # u^j = (t + m)^j with t = u - m; the binomial coefficients in floating point, which
+    # overflow integers from j = 67 on, and only the last term about a midpoint of zero
+    m == 0 && return _integrate(c[p], b[p] - m, b[p + 1] - m, j)
+    s, binom = 0.0, 1.0
+    for i in 0:j
+      s += binom * m^(j - i) * _integrate(c[p], b[p] - m, b[p + 1] - m, i)
+      binom *= (j - i) / (i + 1)
+    end
+    s
   end
 end
 
@@ -732,6 +739,17 @@ end
 
 (s::_Squared)(u::Real) = s.k(u)^2
 support(s::_Squared) = support(s.k)
+
+# Moments of the square of a kernel without a closed form, such as a user kernel, by
+# quadrature; the plug-in rules and the rules of thumb need them, and the roughness,
+# which a kernel type can also define itself
+function moment(s::_Squared, j::Integer)
+  j >= 0 || throw(ArgumentError("moment order must be nonnegative, got $j"))
+  return _quadrature(u -> u^j * s.k(u)^2, support(s.k))
+end
+
+roughness(k::AbstractKernel) = moment(_Squared(k), 0)
+moment(r::_Reflected, j::Integer) = (-1)^j * moment(r.k, j)
 
 # Whether k(u) ≥ 0 for all u. A polynomial piece is checked at its ends and at the
 # real zeros of its derivative inside it, with a tolerance for rounding.

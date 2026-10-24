@@ -77,7 +77,7 @@ The kernel must be compactly supported and nonnegative; lpdensity uses the
 triangular, Epanechnikov and uniform kernels. The estimates agree with lpdensity 3.0.1 with
 `massPoints = TRUE`.
 """
-function fit(::Type{LocalPolynomialDensity}, x::AbstractVector{<:Real}; weights = nothing, kwargs...)
+function fit(::Type{LocalPolynomialDensity}, x::AbstractVector; weights = nothing, kwargs...)
   return fit(LocalPolynomialDensity, SmoothingData(x; weights); kwargs...)
 end
 
@@ -408,12 +408,6 @@ function _cjmG(k, p)
   return G
 end
 
-# nodes and weights of the m-point Gauss–Legendre rule on [-1, 1] (Golub and Welsch)
-function _gausslegendre(m)
-  β = [l / sqrt(4l^2 - 1) for l in 1:m-1]
-  E = LinearAlgebra.eigen(LinearAlgebra.SymTridiagonal(zeros(m), β))
-  return E.values, 2 .* E.vectors[1, :] .^ 2
-end
 
 confband(m::LocalPolynomialDensity; kwargs...) = _confband(m; kwargs...)
 _confint(m::LocalPolynomialDensity, level, method::Honest) =

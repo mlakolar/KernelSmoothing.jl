@@ -65,7 +65,7 @@ bias-corrected standard errors (Calonico, Cattaneo and Farrell 2018), as nprobus
 
 The kernel must be a symmetric second-order density kernel.
 """
-function fit(::Type{PointwiseDensity}, x::AbstractVector{<:Real}; weights = nothing, kwargs...)
+function fit(::Type{PointwiseDensity}, x::AbstractVector; weights = nothing, kwargs...)
   return fit(PointwiseDensity, SmoothingData(x; weights); kwargs...)
 end
 
@@ -160,8 +160,8 @@ function _densityfit(d::SmoothingData, k, x0, h, b, c0, c2, κ)
     t1 += w^2 * m
     t2 += w^2 * m^2
   end
-  W, sw2 = d.sumw, d.sumw^2 / d.neff
-  se(s0, s1, s2) = sqrt(max(s2 / h^2 - 2 * (s0 / (h * W)) * s1 / h + (s0 / (h * W))^2 * sw2, 0.0)) / W
+  W = d.sumw
+  se(s0, s1, s2) = _densityse(s0, s1, s2, h, W, d.neff)
   nwin = isfinite(rad) ? _firsttrue(i -> xs[i] - x0 > hb, n) - _firsttrue(i -> xs[i] - x0 >= -hb, n) : n
   return (f = s0 / (h * W), se = se(s0, s1, s2), fbc = t0 / (h * W), sebc = se(t0, t1, t2), n = nwin)
 end

@@ -271,4 +271,37 @@ end
   @test kernelsums(SmoothingData(fill(-3.0, 50)), k, 0.1, [-3.0]; kmax = 2, engine = FastSums())[2:3] == [0.0, 0.0]
 end
 
+@testset "many powers, overflowing arguments, other output arrays and interrupts" begin
+  d = SmoothingData(XR)
+  k = EpanechnikovKernel()
+  pts = collect(range(-6, 6; length = 300))
+  # beyond 16 powers the accumulators are the columns of out, with the same order of
+  # summation, so that windowed and direct sums stay identical
+  for kmax in (15, 16, 40)
+    @test kernelsums(d, k, 0.8, pts; kmax, engine = WindowSums()) == kernelsums(d, k, 0.8, pts; kmax, engine = DirectSums())
+  end
+  @test kernelsums(d, k, 0.8, pts; kmax = 40, engine = FastSums()) ≈ kernelsums(d, k, 0.8, pts; kmax = 40, engine = DirectSums())
+  @test (@allocated kernelsums(d, k, 0.8, pts; kmax = 40, engine = WindowSums())) < 10^6
+  # an argument that overflows to ±Inf, where the kernel vanishes, adds nothing
+  @test kernelsums(SmoothingData([0.0, 1e300]), k, 1e-10, [0.0, 1.0]; kmax = 2, engine = DirectSums()) ==
+        [0.75 0.0; 0.0 0.0; 0.0 0.0]
+  @test !any(isnan, kernelsums(SmoothingData([0.0, 1e300]), GaussianKernel(), 1e-10, [0.0]; kmax = 2, engine = DirectSums()))
+  # the tasks write columns of out, which only a strided array allows; others, such as
+  # a sparse matrix or this transpose, receive a copy
+  @test kernelsums!(view(zeros(5, 300), 1:3, :), d, k, 0.8, pts) == kernelsums(d, k, 0.8, pts; kmax = 2)
+  T = transpose(zeros(300, 3))
+  @test kernelsums!(T, d, k, 0.8, pts) === T
+  @test T == kernelsums(d, k, 0.8, pts; kmax = 2)
+  # an interrupt while waiting for the tasks is thrown at once, not after them
+  c = Channel{Int}(2)
+  tasks = [Threads.@spawn take!(c) for _ in 1:2]
+  waiter = @async KernelSmoothing._fetchall(tasks)
+  sleep(0.1)
+  schedule(waiter, InterruptException(); error = true)
+  @test timedwait(() -> istaskdone(waiter), 10.0) == :ok
+  @test istaskfailed(waiter) && waiter.result isa InterruptException
+  put!(c, 1); put!(c, 2)
+  @test fetch.(tasks) == [1, 2] || fetch.(tasks) == [2, 1]
+end
+
 end

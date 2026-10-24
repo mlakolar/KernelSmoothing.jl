@@ -169,4 +169,39 @@ end
   @test_throws ArgumentError selectbandwidth(IMSEOptimal(), SmoothingData(fill(1.0, 30), rand(30)), EpanechnikovKernel())
 end
 
+# a user kernel, without moments of its square
+struct CosineKernel <: AbstractKernel end
+(::CosineKernel)(u::Real) = abs(u) <= 1 ? π / 4 * cos(π * u / 2) : 0.0
+KernelSmoothing.support(::CosineKernel) = (-1.0, 1.0)
+KernelSmoothing.moment(::CosineKernel, j::Integer) =
+  isodd(j) ? 0.0 : j == 0 ? 1.0 : j == 2 ? 1 - 8 / π^2 : j == 4 ? 1 - 48 / π^2 + 384 / π^4 :
+  1 - 120 / π^2 + 5760 / π^4 - 46080 / π^6   # j = 6
+
+@testset "the default rules where a fit exists" begin
+  # four distinct values: the stages of the plug-in rule widen windows with too few
+  x = repeat([1.0, 4 / 3, 5 / 3, 2.0], inner = 75)
+  y = log.(x) .+ 0.2 .* sin.(7.3 .* (1:300))
+  m = fit(LocalPolynomialRegression, x, y; points = [1.0, 1.5])
+  # (at 1.0 the window of this bandwidth holds one distinct value, so the estimate
+  # there is NaN, while the floor counts observations)
+  @test all(isfinite, m.h) && isfinite(m.estimate[2])
+  @test all(isfinite, fit(LocalPolynomialRegression, x, y; points = [1.5]).h)
+  # heaped data without the floor: the interquartile range vanishes
+  xq = [fill(0.5, 200); [mod(0.618034i, 1) for i in 1:100]]
+  yq = sin.(3 .* xq) .+ 0.1 .* cos.(17 .* (1:300))
+  @test all(isfinite, fit(LocalPolynomialRegression, xq, yq; points = [0.3, 0.5], minobs = 0).h)
+  # constant responses leave nothing to minimize, which the error says
+  xc = [mod(0.7548776662466927i, 1.0) for i in 1:300]
+  @test_throws "the responses are constant" fit(LocalPolynomialRegression, xc, fill(2.0, 300))
+  @test_throws "the responses are constant" fit(LocalPolynomialRegression, xc, fill(2.0, 300); points = [0.5])
+  # cross-validation on three observations reaches beyond its floor
+  @test isfinite(bandwidth(CrossValidation(), SmoothingData([0.0, 1.0, 2.0], [0.0, 1.0, 0.0]), EpanechnikovKernel()))
+  # the plug-in rules with a user kernel, whose square has its moments by quadrature
+  xs = [sin(1.618i) + 0.3cos(2.7i) for i in 1:500]
+  k = CosineKernel()
+  @test all(isfinite, fit(PointwiseDensity, xs; kernel = k, points = [0.0]).h)
+  @test all(isfinite, fit(LocalPolynomialRegression, xs, sin.(xs); kernel = k, points = [0.0]).h)
+  @test isfinite(bandwidth(RuleOfThumb(), SmoothingData(xs, sin.(xs)), k))
+end
+
 end

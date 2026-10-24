@@ -181,6 +181,10 @@ function kernelsums!(out::AbstractMatrix{Float64}, d::SmoothingData, k::Abstract
   size(out, 1) >= 1 || throw(DimensionMismatch("out must have at least one row, for kmax = 0"))
   size(out, 2) == length(points) || throw(DimensionMismatch(
     "out must have length(points) = $(length(points)) columns, got size $(size(out))"))
+  # the engines write the columns of out from several tasks, which only a strided
+  # array allows; others, such as a sparse matrix, receive a copy
+  out isa StridedMatrix || return copyto!(out, kernelsums!(Matrix{Float64}(undef, size(out)), d, k, h, points;
+                                                         z, engine, workspace))
   hs = _bandwidths(h, length(points))
   vals = _sumvalues!(workspace, d, z)
   isempty(points) && return out
@@ -315,12 +319,14 @@ _pointwise(f, points) = _fetchall([Threads.@spawn f(p) for p in points])
 
 # The results of the tasks, once all of them have finished. An error in a task is
 # thrown as itself, not wrapped in a TaskFailedException, so that its type does not
-# depend on whether the work ran in tasks.
+# depend on whether the work ran in tasks. Anything else that interrupts the wait,
+# such as Ctrl-C, is thrown at once.
 function _fetchall(tasks)
   for t in tasks
     try
       wait(t)
-    catch
+    catch e
+      e isa TaskFailedException || rethrow()
     end
   end
   for t in tasks
@@ -385,22 +391,57 @@ end
   return out
 end
 
+# Julia stops optimizing tuples of more than about 32 elements, where the sums with
+# kmax = 32 took 60 times as long as with kmax = 31; beyond this many powers, the
+# accumulators are the column of out itself, with the terms added in the same order
+const _MAXTUPLE = 16
+
+# ∑ vals[i] k(uᵢ) (1, uᵢ, …, uᵢ^K) over i in r into out[:, j], uᵢ = (xs[i] - p) / hj;
+# with `finite`, u is kept finite, so that a u that overflows to ±Inf, where the
+# kernel vanishes, adds zero terms instead of NaN (0 · u stays 0), without a branch
+@inline function _pointsums!(out, j, xs, vals, k, p, hj, r, ::Val{K}, finite::Bool) where K
+  if K < _MAXTUPLE
+    acc = ntuple(_ -> 0.0, Val(K + 1))
+    @inbounds for i in r
+      u = (xs[i] - p) / hj
+      v = vals[i] * k(u)
+      finite && (u = clamp(u, -floatmax(), floatmax()))
+      acc = _accum(acc, v, u)
+    end
+    _store!(out, j, acc)
+  else
+    @inbounds for s in 1:K+1
+      out[s, j] = 0.0
+    end
+    @inbounds for i in r
+      u = (xs[i] - p) / hj
+      v = vals[i] * k(u)
+      finite && (u = clamp(u, -floatmax(), floatmax()))
+      for s in 1:K+1
+        out[s, j] += v
+        v *= u
+      end
+    end
+  end
+  return out
+end
+
 
 ## Direct and windowed sums
 
 _kernelsums!(out, ::DirectSums, xs, vals, k, h, points, kmax, ws) =
   _directsums!(out, xs, vals, k, h, points, Val(kmax))
 
-function _directsums!(out, xs, vals, k, h, points, ::Val{K}) where K
+function _directsums!(out, xs, vals, k, h, points, kmax::Val)
   _foreachchunk(eachindex(points)) do chunk
     for j in chunk
       p, hj = points[j], _bw(h, j)
-      acc = ntuple(_ -> 0.0, Val(K + 1))
-      @inbounds for i in eachindex(xs)
-        u = (xs[i] - p) / hj
-        acc = _accum(acc, vals[i] * k(u), u)
+      # u overflows only where the farthest observation is beyond floatmax bandwidths
+      if isfinite(max(abs(xs[1] - p), abs(xs[end] - p)) / hj)
+        _pointsums!(out, j, xs, vals, k, p, hj, eachindex(xs), kmax, false)
+      else
+        _pointsums!(out, j, xs, vals, k, p, hj, eachindex(xs), kmax, true)
       end
-      _store!(out, j, acc)
     end
   end
   return out
@@ -415,7 +456,7 @@ end
 
 # sums over the observations with lo ≤ u ≤ hi, which is all of them where k is
 # nonzero when (lo, hi) is the support of k; the points are taken in `order`
-function _windowsums!(out, xs, vals, k, h, points, ::Val{K}, lo, hi, order) where K
+function _windowsums!(out, xs, vals, k, h, points, kmax::Val, lo, hi, order)
   n = length(xs)
   _foreachchunk(order) do chunk
     a = b = 1   # the first index with u ≥ lo, the first index with u > hi
@@ -423,12 +464,7 @@ function _windowsums!(out, xs, vals, k, h, points, ::Val{K}, lo, hi, order) wher
       p, hj = points[j], _bw(h, j)
       a = _search(i -> (xs[i] - p) / hj >= lo, a, n, h)
       b = _search(i -> (xs[i] - p) / hj > hi, b, n, h)
-      acc = ntuple(_ -> 0.0, Val(K + 1))
-      @inbounds for i in a:b-1
-        u = (xs[i] - p) / hj
-        acc = _accum(acc, vals[i] * k(u), u)
-      end
-      _store!(out, j, acc)
+      _pointsums!(out, j, xs, vals, k, p, hj, a:b-1, kmax, false)
     end
   end
   return out

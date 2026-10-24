@@ -516,7 +516,8 @@ of `yᵢ` in the fit at `xᵢ`. The fits at all observations come from
 [`kernelsums`](@ref), so that a bandwidth costs `O(n)` operations for polynomial
 kernels. The grid has `gridsize` bandwidths spaced evenly on the log scale, from
 the smallest one that leaves `p + 1` other distinct values in every window, below
-which leave-one-out fits break down, to the range of the data. The global minimizer
+which leave-one-out fits break down, to the range of the data, or to twice that
+smallest one if it is larger. The global minimizer
 on the grid is refined, and the details record the grid and the criterion.
 Cross-validation estimates the regression function, so it needs `derivative = 0`.
 """
@@ -539,8 +540,10 @@ function selectbandwidth(rule::CrossValidation, d::SmoothingData, k::AbstractKer
   p = Int(degree)
   nunique(d) >= p + 2 || throw(ArgumentError("CrossValidation needs at least $(p + 2) distinct values"))
   hmin = 1.01 * maximum(knn_distance(d, x, p + 2; distinct = true) for x in d.values)
-  hmax = d.x[end] - d.x[1]
-  hmin < hmax || (hmin = hmax / 2)
+  # the grid reaches at least twice its floor, where every leave-one-out fit holds
+  # p + 1 other distinct values with positive weight; with few distinct values the
+  # floor can exceed the range, as for three values of x and a local linear fit
+  hmax = max(d.x[end] - d.x[1], 2hmin)
   ws = SumsWorkspace()
   crit(h) = _cvcriterion(d, k, h, p, ws)
   h, details = _gridminimize(crit, exp.(range(log(hmin), log(hmax); length = rule.gridsize));
