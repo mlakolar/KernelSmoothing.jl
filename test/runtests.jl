@@ -10,6 +10,7 @@ tests = [
   "locpoly",
   "smoother",
   "surface",
+  "semiparametric",
   "plugin",
   "kdeinference",
   "bands",
