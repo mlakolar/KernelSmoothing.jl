@@ -86,6 +86,7 @@ end
   end
   m = fit(PartiallyLinear, U, X, Yp)
   @test m.selection.rule == CrossValidation()
+  @test nobs(m) == N && bandwidth(m) == m.selection.h
   @test coef(m) ≈ [1.5, -0.5] atol = 0.05
   t = coeftable(m)
   @test t.estimate == coef(m) && t.se == stderror(m) && t.upper ≈ confint(m)[:, 2]
