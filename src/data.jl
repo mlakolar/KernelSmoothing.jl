@@ -129,7 +129,10 @@ function _sortperm(x, keep)
 end
 
 # [0, w[1], w[1] + w[2], …] by compensated summation, and the rounding errors of
-# these sums, so that sums over ranges keep their accuracy after large weights
+# these sums, so that sums over ranges keep their accuracy after large weights. The
+# running sum can step back by a unit in the last place, when a weight is smaller
+# than the compensation; the stored sums are kept nondecreasing, as searches in them
+# assume, with the difference moved to the rounding errors.
 function _cumsum0(w)
   c, lo = Vector{Float64}(undef, length(w) + 1), Vector{Float64}(undef, length(w) + 1)
   c[1] = lo[1] = s = comp = 0.0
@@ -138,7 +141,9 @@ function _cumsum0(w)
     t = s + y
     comp = (t - s) - y
     s = t
-    c[i + 1], lo[i + 1] = s, -comp   # the exact sum is about s - comp
+    # the exact sum is about s - comp
+    c[i + 1] = max(s, c[i])
+    lo[i + 1] = -comp - (c[i + 1] - s)
   end
   return c, lo
 end

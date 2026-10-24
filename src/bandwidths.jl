@@ -155,24 +155,28 @@ function _sdiqr(d::SmoothingData)
   return _std(d), _quantile(d, 0.75) - _quantile(d, 0.25)
 end
 
+# The weighted mean, summed about the middle observation, so that a large offset of
+# the data does not enter the rounding of the sum
 function _mean(d::SmoothingData)
   x, w = d.x, d.w
-  s = 0.0
-  for i in eachindex(x)
-    s += _weight(w, i) * x[i]
-  end
-  return s / d.sumw
+  x0 = x[(length(x) + 1) ÷ 2]
+  return x0 + sum(i -> _weight(w, i) * (x[i] - x0), eachindex(x)) / d.sumw
 end
 
-# the variance of the empirical distribution, ∑ wᵢ (xᵢ - x̄)² / ∑ wᵢ
+# the mean of sorted values, unweighted, summed in the same way
+function _sortedmean(x)
+  x0 = x[(length(x) + 1) ÷ 2]
+  return x0 + sum(t -> t - x0, x) / length(x)
+end
+
+# the variance of the empirical distribution, ∑ wᵢ (xᵢ - x̄)² / ∑ wᵢ, with the
+# correction of the two-pass algorithm for the rounding of the mean
 function _variance(d::SmoothingData)
   x, w = d.x, d.w
   μ = _mean(d)
-  s = 0.0
-  for i in eachindex(x)
-    s += _weight(w, i) * (x[i] - μ)^2
-  end
-  return s / d.sumw
+  s1 = sum(i -> _weight(w, i) * (x[i] - μ), eachindex(x))
+  s2 = sum(i -> _weight(w, i) * (x[i] - μ)^2, eachindex(x))
+  return max(s2 - s1^2 / d.sumw, 0.0) / d.sumw
 end
 
 # corrected with Kish's effective sample size, n / (n - 1) for equal weights

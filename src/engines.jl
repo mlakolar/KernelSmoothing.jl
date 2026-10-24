@@ -36,12 +36,12 @@ time (fast sum updating; Seifert et al. 1994, Langrené and Warin 2019).
 
 Power sums about one far-away centre lose all accuracy when the data are far from
 zero or the bandwidth is small compared with their range. Here the data are split
-into blocks at most one window wide and the power sums are taken about the centre
-of each block. The rounding error grows with the width of the blocks and the
+into blocks at most one window wide and the power sums are taken about the midpoint
+of the observations in each block. The rounding error grows with the width of the blocks and the
 highest power of the sums, the degree of the kernel plus `kmax`, so that the blocks
 narrow as the power grows. The error is then at most
 about `1e-13` times the total absolute weight of the observations near the point,
-whatever the location and scale of the data; for kernels of degree `d` with
+whatever the location and scale of the data and the bandwidth; for kernels of degree `d` with
 `d + kmax ≤ 6`, such as the named kernels other than the triweight with
 `kmax ≤ 2`, the blocks are one window wide. A sum that is much smaller than that,
 because the kernel nearly vanishes at every observation in the window, has a larger
@@ -503,7 +503,10 @@ end
 # Splits the sorted xs into blocks of width Δ and returns the first index and the
 # centre of each block, the block of each observation, and the power sums
 # prefix[q, i] = ∑ vals[l] t_l^(q-1) over the observations l of i's block up to i,
-# where t_l = (xs[l] - centre) / h; the arrays live in the workspace.
+# where t_l = (xs[l] - centre) / h; the arrays live in the workspace. The centre is
+# the midpoint of the block's own observations: the midpoint of its cell of the grid
+# can lie half a cell from them, and when the bandwidth, and with it the cell, is
+# much wider than the data, the power sums about it cancel.
 function _blockprefix!(ws::SumsWorkspace, xs, vals, Δ, h, smax)
   n = length(xs)
   size(ws.prefix) == (smax + 1, n) || (ws.prefix = Matrix{Float64}(undef, smax + 1, n))
@@ -513,22 +516,26 @@ function _blockprefix!(ws::SumsWorkspace, xs, vals, Δ, h, smax)
   q0 = -1.0
   @inbounds for i in 1:n
     q = floor((xs[i] - xs[1]) / Δ)
-    newblock = i == 1 || q != q0
-    if newblock
+    if i == 1 || q != q0
       push!(starts, i)
-      push!(centers, xs[1] + (q + 0.5) * Δ)
       q0 = q
     end
-    β = length(starts)
-    blockof[i] = β
-    t = (xs[i] - centers[β]) / h
-    v = vals[i]
-    for s in 1:smax+1
-      prefix[s, i] = (newblock ? 0.0 : prefix[s, i - 1]) + v
-      v *= t
-    end
+    blockof[i] = length(starts)
   end
   push!(starts, n + 1)
+  @inbounds for β in 1:length(starts)-1
+    s, e = starts[β], starts[β + 1] - 1
+    c = xs[s] + (xs[e] - xs[s]) / 2
+    push!(centers, c)
+    for i in s:e
+      t = (xs[i] - c) / h
+      v = vals[i]
+      for r in 1:smax+1
+        prefix[r, i] = (i == s ? 0.0 : prefix[r, i - 1]) + v
+        v *= t
+      end
+    end
+  end
   return starts, centers, blockof, prefix
 end
 

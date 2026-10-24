@@ -329,4 +329,55 @@ end
   @test cdf.(EpanechnikovKernel(), [-2.0, 0.0, 2.0]) ≈ [0, 0.5, 1]
 end
 
+@testset "upper tails and the tails of derived kernels" begin
+  # ccdf without the cancellation of 1 - cdf
+  for k in COMPACT
+    for u in (-0.3, 0.5, 0.9, 1 - 1e-6)
+      @test ccdf(k, u) ≈ quadgk(k, u, 1; rtol = 1e-13)[1] rtol = 1e-10
+    end
+    @test all(abs(cdf(k, u) + ccdf(k, u) - 1) <= 4eps() for u in range(-1.2, 1.2; length = 241))
+  end
+  @test ccdf(GaussianKernel(), 30.0) ≈ 4.906713927148187e-198 rtol = 1e-12
+  g = derivative(GaussianKernel(), 2)
+  @test ccdf(g, 1.3) == -cdf(g, 1.3)   # a derivative integrates to zero
+  # The convolution of two Epanechnikov kernels near the ends of its support, where
+  # its cdf is 3/32 s⁴ - 3/80 s⁵ + O(s⁶) in s = u + 2: the expansions about the
+  # midpoints of its pieces turned negative below s = 1e-4.
+  E = EpanechnikovKernel()
+  EE = convolve(E, E)
+  F(s) = 3 / 32 * s^4 - 3 / 80 * s^5
+  for j in 6:15
+    u = -2 + 10.0^-j
+    s = u + 2   # exactly
+    @test cdf(EE, u) ≈ F(s) rtol = 1e-10
+    @test ccdf(EE, -u) ≈ F(s) rtol = 1e-10
+    @test cdf(KernelSmoothing._reflect(EE), u) ≈ F(s) rtol = 1e-10
+  end
+  # the product (9/16)(1 - u²)², whose cdf is 3/4 s³ - 9/16 s⁴ + 9/80 s⁵ in s = u + 1
+  P = E * E
+  for j in 1:15
+    u = -1 + 10.0^-j
+    s = u + 1
+    @test cdf(P, u) ≈ 3 / 4 * s^3 - 9 / 16 * s^4 + 9 / 80 * s^5 rtol = 1e-13
+    @test ccdf(P, -u) ≈ 3 / 4 * s^3 - 9 / 16 * s^4 + 9 / 80 * s^5 rtol = 1e-13
+  end
+  # a kernel from coefficients in powers of u, the biweight
+  B = PiecewisePolynomialKernel([-1, 1], [[15 / 16, 0, -15 / 8, 0, 15 / 16]])
+  for j in 1:15
+    @test cdf(B, -1 + 10.0^-j) ≈ cdf(BiweightKernel(), -1 + 10.0^-j) rtol = 1e-13
+    @test ccdf(B, 1 - 10.0^-j) ≈ ccdf(BiweightKernel(), 1 - 10.0^-j) rtol = 1e-13
+  end
+  @test all(abs(cdf(EE, u) + ccdf(EE, u) - 1) <= 4eps() for u in range(-2.5, 2.5; length = 501))
+end
+
+@testset "the test for negative kernels does not depend on the scale of u" begin
+  # a sixth-order kernel, negative in places, rescaled to [-s, s]
+  c = [315 / 512 * a for a in (3.0, 0, -20, 0, 42, 0, -36, 0, 11)]
+  for s in (1.0, 100.0, 1000.0, 1e6)
+    k = PiecewisePolynomialKernel([-s, s], [[c[i] / s^i for i in eachindex(c)]])
+    @test !KernelSmoothing._isnonnegative(k)
+    @test KernelSmoothing._isnonnegative(PiecewisePolynomialKernel([-s, s], [[15 / 16 / s, 0, -15 / 8 / s^3, 0, 15 / 16 / s^5]]))
+  end
+end
+
 end

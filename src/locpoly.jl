@@ -386,6 +386,9 @@ function _residuals(vce::HCVariance, r, l, εh, εb, kh, u, lev, n, p)
   vce.type == 0 && return (εh, εb)
   vce.type == 1 && return (εh * _dofscale(n, p + 1), εb * _dofscale(n, p + 2))
   hii = kh * evalpoly(u, lev)   # the leverage in the fit of order p
+  # a leverage of one, which rounding can put just above one, leaves no residual to
+  # estimate the variance from
+  1 - hii > sqrt(eps()) || return (NaN, NaN)
   f = vce.type == 2 ? 1 / sqrt(1 - hii) : 1 / (1 - hii)
   return (εh * f, εb * f)
 end

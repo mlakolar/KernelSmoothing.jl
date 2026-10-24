@@ -337,4 +337,55 @@ end
   end
 end
 
+# the Laplace kernel with its upper tail
+struct LaplaceTailKernel <: AbstractKernel end
+(::LaplaceTailKernel)(u::Real) = exp(-abs(u)) / 2
+KernelSmoothing.support(::LaplaceTailKernel) = (-Inf, Inf)
+KernelSmoothing.cdf(::LaplaceTailKernel, u::Real) = u < 0 ? exp(u) / 2 : 1 - exp(-u) / 2
+KernelSmoothing.ccdf(::LaplaceTailKernel, u::Real) = u > 0 ? exp(-u) / 2 : 1 - exp(u) / 2
+KernelSmoothing.moment(::LaplaceTailKernel, j::Integer) = iseven(j) ? Float64(factorial(j)) : 0.0
+
+@testset "tails of broadcasts and of user kernels" begin
+  xx = [7 * sin(1.618i) + 0.3 * cos(2.7i) for i in 1:20000]
+  # near the ends of the support, where fast sums lose their relative accuracy
+  for k in (BiweightKernel(), TriweightKernel())
+    f = fit(KDE, xx; kernel = k, bandwidth = 0.5)
+    pts = [collect(range(-7.6, 7.6; length = 2000)); maximum(f) - 1e-4; minimum(f) + 1e-4]
+    for (vector, scalar) in ((pdf.(f, pts), [pdf(f, t) for t in pts]),
+                             (cdf.(f, pts), [cdf(f, t) for t in pts]),
+                             (ccdf.(f, pts), [ccdf(f, t) for t in pts]))
+      @test all(isapprox.(vector, scalar; rtol = 1e-10))
+    end
+    @test all(isapprox.(logpdf.(f, pts), [logpdf(f, t) for t in pts]; rtol = 1e-12))
+  end
+  # BinnedSums takes the weight beyond the window from the binned data too
+  f0 = fit(KDE, [0.0, 0.501, 3.0]; bandwidth = 1.0)
+  f1 = fit(KDE, [0.0, 0.501, 3.0]; bandwidth = 1.0, engine = BinnedSums())
+  @test cdf.(f1, [1.505])[1] ≈ cdf(f0, 1.505) atol = 1e-4
+  @test ccdf.(f1, [1.505])[1] ≈ ccdf(f0, 1.505) atol = 1e-4
+  # a user kernel with an upper tail keeps it in ccdf and cquantile
+  x, h = [-2.1, -0.4, 0.0, 0.3, 0.3, 1.7, 2.5], 0.6
+  f = fit(KDE, x; kernel = LaplaceTailKernel(), bandwidth = h)
+  exact = sum(exp(-(30 - xi) / h) / 2 for xi in x) / length(x)
+  @test ccdf(f, 30.0) ≈ exact rtol = 1e-12
+  @test ccdf.(f, [0.0, 30.0])[2] ≈ exact rtol = 1e-12
+  @test ccdf(f, cquantile(f, 1e-20)) ≈ 1e-20 rtol = 1e-10
+  @test ccdf(f, Distributions.invlogccdf(f, log(1e-20))) ≈ 1e-20 rtol = 1e-10
+  # the reflection swaps the tails
+  r = _reflect(LaplaceTailKernel())
+  @test ccdf(r, -30.0) == cdf(LaplaceTailKernel(), 30.0) && cdf(r, -30.0) == ccdf(LaplaceTailKernel(), 30.0)
+  # the Gaussian log-density far from the data, where the density underflows
+  for w in (nothing, [1.0, 2.0, 0.5])
+    xs = [0.0, 1.0, 1.5]
+    g = fit(KDE, xs; kernel = GaussianKernel(), bandwidth = 0.5, weights = w)
+    ws = w === nothing ? ones(3) : w
+    for t in (40.0, -40.0, 1e3)
+      a = [log(ws[i]) - ((t - xs[i]) / 0.5)^2 / 2 for i in 1:3]
+      exact = maximum(a) + log(sum(exp.(a .- maximum(a)))) - log(sum(ws) * 0.5 * sqrt(2π))
+      @test logpdf(g, t) ≈ exact rtol = 1e-13
+    end
+    @test logpdf.(g, [0.5, 40.0, -40.0]) ≈ [logpdf(g, t) for t in (0.5, 40.0, -40.0)] rtol = 1e-13
+  end
+end
+
 end

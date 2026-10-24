@@ -159,4 +159,14 @@ end
   @test_throws ArgumentError SmoothingData([1.0, 2.0]; weights = [1.0, big(10.0)^400])
 end
 
+@testset "cumulative weights never decrease" begin
+  # with these weights the compensated running sum stepped back by a unit in the last place
+  w = [2.6e11, 9.634060192370734e12, 96020.14964112596, 7.260040318886021e7, 8.902446084591206e9,
+       1.2751176404895992e19, 5.065850480910307e18, 9.559024014758572e7, 4.7133904770661127e11,
+       1.3907487889932169e10, 1.4489369595417734e6, 5.379260538324541e19, 0.5908100074150856]
+  d = SmoothingData(collect(1.0:13.0); weights = w)
+  @test issorted(d.cumw)
+  @test all(isapprox(weightsum(d, i:i), w[i]; rtol = 1e-10) for i in 1:13)
+end
+
 end

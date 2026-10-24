@@ -136,11 +136,58 @@ function pdf(f::KDE, x::Real)
   return max(_pointsum(f.data, f.reflected, f.h, x, f.data.w) / (f.h * f.data.sumw), 0.0)
 end
 
-logpdf(f::KDE, x::Real) = log(pdf(f, x))
+# For a Gaussian kernel the density underflows to zero about 40 bandwidths from the
+# data, while its logarithm is finite
+function logpdf(f::KDE, x::Real)
+  v = pdf(f, x)
+  v == 0 && f.kernel isa GaussianFamily && isfinite(x) && return _gaussianlogpdf(f, x)
+  return log(v)
+end
+
+# log f̂(x) for a Gaussian kernel, the logarithm of the sum taken about its largest
+# term, that of the nearest observation; terms below exp(-750) of it are left out
+function _gaussianlogpdf(f::KDE, x::Real)
+  d = f.data
+  xs, n = d.x, nobs(d)
+  s = f.h * first(_scale_order(f.kernel))   # the standard deviation of the kernel
+  r = searchsortedfirst(xs, x)
+  zmin = min(r <= n ? (xs[r] - x) / s : Inf, r > 1 ? (x - xs[r - 1]) / s : Inf)
+  R = sqrt(zmin^2 + 1500) * s
+  t = zero(float(x))
+  for i in searchsortedfirst(xs, x - R):searchsortedlast(xs, x + R)
+    z = (xs[i] - x) / s
+    t += _weight(d.w, i) * exp(-(z - zmin) * (z + zmin) / 2)
+  end
+  return log(t) - zmin^2 / 2 + log(_amplitude(f.kernel) * INV_SQRT_2PI) - log(s) - log(d.sumw)
+end
+
+# Fast sums are accurate to about 1e-13 of the weight near a point, which is a large
+# relative error for a value far below the total weight, in the tails of the
+# estimate; such values, below `threshold`, are computed again by the scalar method,
+# which sums over the window of the point. BinnedSums approximates throughout.
+function _tails!(v, f::KDE, p, scalar, threshold)
+  f.engine isa BinnedSums && return v
+  for j in eachindex(v)
+    v[j] < threshold && (v[j] = scalar(p[j]))
+  end
+  return v
+end
 
 # clamped at zero, since fast sums can round a zero density to a tiny negative number
-_pdf(f::KDE, x) =
-  _evaluate(p -> max.(_sums(f, f.reflected, p) ./ (f.h * f.data.sumw), 0.0), t -> pdf(f, t), x)
+_pdf(f::KDE, x) = _evaluate(t -> pdf(f, t), x) do p
+  v = max.(_sums(f, f.reflected, p) ./ (f.h * f.data.sumw), 0.0)
+  _tails!(v, f, p, t -> pdf(f, t), 1e-5 / f.h)
+end
+
+function _logpdf(f::KDE, x)
+  v = log.(_pdf(f, x))
+  if f.kernel isa GaussianFamily
+    for i in eachindex(v, x)
+      v[i] == -Inf && isfinite(x[i]) && (v[i] = _gaussianlogpdf(f, x[i]))
+    end
+  end
+  return v
+end
 
 function cdf(f::KDE, x::Real)
   isnan(x) && return float(x)
@@ -160,6 +207,7 @@ function cdf(f::KDE, x::Real)
 end
 
 function _cdf(f::KDE, x)
+  f.engine isa BinnedSums && return _cdf(_binned(f), x)
   d, k, h = f.data, f.kernel, f.h
   g = _cdfkernel(k)
   lo = first(support(g))
@@ -173,8 +221,20 @@ function _cdf(f::KDE, x)
       end
       s[j] = p[j] <= xmin ? 0.0 : p[j] >= xmax ? 1.0 : clamp(s[j] / d.sumw, 0.0, 1.0)
     end
-    s
+    _tails!(s, f, p, t -> cdf(f, t), 1e-5)
   end
+end
+
+# The estimate from the data binned as BinnedSums bins them, with an exact engine.
+# The distribution functions add the weight beyond the window of a point to the sums
+# within it, and both must come from the same, binned, data: with the observations
+# beyond the window, an observation near its edge whose binned weight falls inside
+# counts twice.
+function _binned(f::KDE)
+  d = f.data
+  gs, gv = _linearbin!(SumsWorkspace(), d.x, d.w === nothing ? ones(nobs(d)) : d.w, f.h / f.engine.binsperh)
+  db = SmoothingData(copy(gs); weights = copy(gv))
+  return KDE(db, f.kernel, f.reflected, f.h, f.selection, nothing)
 end
 
 # 1 - F̂(x) from the weight above the window and the upper tail of the kernel within
@@ -197,6 +257,7 @@ function ccdf(f::KDE, x::Real)
 end
 
 function _ccdf(f::KDE, x)
+  f.engine isa BinnedSums && return _ccdf(_binned(f), x)
   d, h = f.data, f.h
   g = _ccdfkernel(f.kernel)
   hi = last(support(g))
@@ -210,7 +271,7 @@ function _ccdf(f::KDE, x)
       end
       s[j] = p[j] <= xmin ? 1.0 : p[j] >= xmax ? 0.0 : clamp(s[j] / d.sumw, 0.0, 1.0)
     end
-    s
+    _tails!(s, f, p, t -> ccdf(f, t), 1e-5)
   end
 end
 
@@ -236,6 +297,9 @@ function cquantile(f::KDE, p::Real)
                     f.data.x[end] + f.h * q)
 end
 
+# the upper quantile 1 - p for p = exp(lp), from the upper tail
+Distributions.invlogccdf(f::KDE, lp::Real) = cquantile(f, exp(lp))
+
 Base.minimum(f::KDE) = f.data.x[1] + f.h * first(support(f.kernel))
 Base.maximum(f::KDE) = f.data.x[end] + f.h * last(support(f.kernel))
 insupport(f::KDE, x::Real) = minimum(f) <= x <= maximum(f)
@@ -247,7 +311,8 @@ var(f::KDE) =
 # the smoothed bootstrap: an observation drawn by weight plus h times a draw from k
 function Base.rand(rng::AbstractRNG, f::KDE)
   d = f.data
-  i = d.w === nothing ? rand(rng, 1:nobs(d)) : searchsortedlast(d.cumw, rand(rng) * d.sumw)
+  # a product that rounds up to the total weight belongs to the last observation
+  i = d.w === nothing ? rand(rng, 1:nobs(d)) : min(searchsortedlast(d.cumw, rand(rng) * d.sumw), nobs(d))
   return d.x[i] + f.h * _randkernel(rng, f.kernel)
 end
 
@@ -349,7 +414,7 @@ _unref(f::Base.RefValue{<:KDE}) = f[]
 const _PlainPoints = AbstractArray{<:Union{AbstractFloat,Integer}}
 
 Base.broadcasted(::typeof(pdf), f::_KDELike, x::_PlainPoints) = _pdf(_unref(f), x)
-Base.broadcasted(::typeof(logpdf), f::_KDELike, x::_PlainPoints) = log.(_pdf(_unref(f), x))
+Base.broadcasted(::typeof(logpdf), f::_KDELike, x::_PlainPoints) = _logpdf(_unref(f), x)
 Base.broadcasted(::typeof(cdf), f::_KDELike, x::_PlainPoints) = _cdf(_unref(f), x)
 Base.broadcasted(::typeof(ccdf), f::_KDELike, x::_PlainPoints) = _ccdf(_unref(f), x)
 Base.broadcasted(::typeof(stderror), f::_KDELike, x::_PlainPoints) = _stderror(_unref(f), x)

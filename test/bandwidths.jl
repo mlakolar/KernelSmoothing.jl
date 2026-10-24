@@ -92,4 +92,13 @@ end
   @test pdf(fit(KDE, XR; kernel = asym, bandwidth = 0.5), 0.0) > 0
 end
 
+@testset "the scale under a large offset" begin
+  # the mean is summed about the middle observation; the stored values are those offset
+  xs = (XR .+ 1e10) .- 1e10
+  @test _std(SmoothingData(XR .+ 1e10)) ≈ std(xs) rtol = 1e-13
+  @test abs(mean(fit(KDE, XR .+ 1e10)) - (1e10 + mean(xs))) <= 4eps(1e10)
+  @test _std(SmoothingData(XR; weights = 1:2000)) ≈
+        _std(SmoothingData(XR .+ 1e10; weights = 1:2000)) rtol = 1e-6
+end
+
 end

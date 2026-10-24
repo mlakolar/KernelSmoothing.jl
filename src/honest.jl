@@ -98,8 +98,9 @@ function _honestconfint(m::LocalPolynomialRegression, level, method::Honest)
   bc = method.biascorrected
   B = worstcasebias(m, method.M; biascorrected = bc)
   est, se = bc ? (m.estimate_bc, m.se_rbc) : (m.estimate, m.se)
-  c = [_cvb(B[j] / se[j], level) for j in eachindex(se)]
-  return hcat(est .- c .* se, est .+ c .* se)
+  # cv(B / se) se tends to B as se tends to 0
+  half = [se[j] == 0 ? B[j] : _cvb(B[j] / se[j], level) * se[j] for j in eachindex(se)]
+  return hcat(est .- half, est .+ half)
 end
 
 """
