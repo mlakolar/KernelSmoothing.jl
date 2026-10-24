@@ -155,6 +155,23 @@ instead scale every kernel to unit variance; their bandwidth `h_sd` corresponds
 to the half-width `h_sd / sqrt(moment(k, 2))` here, for example `h_sd √5` for the
 Epanechnikov kernel.
 
+## Plotting
+
+Loading Plots.jl, or another package that uses RecipesBase, adds plot recipes.
+`plot(m)` draws the estimates of a pointwise fit ([`LocalPolynomialRegression`](@ref),
+[`PointwiseDensity`](@ref) or [`LocalPolynomialDensity`](@ref)) over its shaded
+robust bias-corrected intervals, and `plot(f)` the density estimate of a
+[`KDE`](@ref). The keywords `level` and `method` choose the intervals as for
+[`confint`](@ref), `uniform = true` draws the uniform band of [`confband`](@ref)
+instead, and `data = true` adds the observations of a regression.
+
+```julia
+using KernelSmoothing, Plots
+m = fit(LocalPolynomialRegression, x, y)
+plot(m; data = true)
+plot(m; uniform = true, level = 0.9)
+```
+
 ## Threads
 
 Kernel sums, fits at several points and cross-validation run in parallel when
