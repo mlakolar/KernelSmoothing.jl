@@ -141,6 +141,9 @@ end
   # a given rho or pilot bandwidth replaces the selected pilot bandwidth
   @test fit(RegressionDiscontinuity, X, Y; rho = 0.5).b == 2 .* m.h
   @test fit(RegressionDiscontinuity, X, Y; pilot = 0.6).b == (0.6, 0.6)
+  # with perfect compliance, the bandwidths are those of the sharp design
+  sf = selectbandwidth(RDOptimal(), X, Y; treatment = Float64.(X .>= 0))
+  @test sf.h == s.h && sf.details.b == s.details.b
   # mass points: the rule keeps 10 distinct values in its windows
   sm = selectbandwidth(RDOptimal(), XM, Y)
   @test sm.details.masspoints && sm.details.bwcheck == 10
