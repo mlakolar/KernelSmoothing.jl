@@ -122,6 +122,11 @@ places the defaults depart from the R packages, which `compat = true` reproduces
     grid of the values: for `10^5` normal observations rounded to 0.1 it gave 0.0026,
     at which the estimate is a comb of spikes. [`SheatherJones`](@ref) searches only
     bandwidths that do not resolve the grid, and gives 0.106 there.
+11. nprobust evaluates regression by default at 30 equally spaced points between the
+    smallest and the largest observation, and its integrated bandwidth averages over
+    such points. For a covariate with heavy tails, most of them lie where few
+    observations are left. We evaluate between the quantiles of order 0.025 and
+    0.975, and average over 30 quantiles of order 0.05 to 0.95.
 
 The pages of the estimators give the details.
 
