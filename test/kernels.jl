@@ -397,6 +397,8 @@ KernelSmoothing.support(::LapKernel) = (-Inf, Inf)
   end
   @test roughness(CosKernel()) ≈ π^2 / 16 rtol = 1e-12
   @test roughness(LapKernel()) ≈ 1 / 4 rtol = 1e-12
+  r = KernelSmoothing._reflect(CosKernel())
+  @test moment(r, 3) == -moment(CosKernel(), 3) && moment(r, 2) == moment(CosKernel(), 2)
   # the binomial coefficients of high orders overflowed integers
   @test moment(EpanechnikovKernel(), 70) ≈ 0.75 * (2 / 71 - 2 / 73) rtol = 1e-12
   @test moment(TriangularKernel(), 80) ≈ 2 / (81 * 82) rtol = 1e-10

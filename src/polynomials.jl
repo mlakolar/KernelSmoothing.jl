@@ -79,15 +79,13 @@ function _gausslegendre(m)
   return E.values, 2 .* E.vectors[1, :] .^ 2
 end
 
-const _GL24 = _gausslegendre(24)
-
 # ∫ f over the support (lo, hi) of a kernel, by the 24-point Gauss–Legendre rule on
 # 16 equal pieces of a bounded support, or on 32 pieces of (-1, 1) after the
 # substitution u = t / (1 - t²) for an unbounded one; exact for polynomials of degree
 # up to 47 on each piece, and accurate to rounding for smooth integrands that decay
 # faster than a power of u
 function _quadrature(f, (lo, hi))
-  xs, ws = _GL24
+  xs, ws = _gausslegendre(24)
   bounded = isfinite(lo) && isfinite(hi)
   # u = t / (1 - t²) increases from -Inf to Inf on (-1, 1), and t = 2u / (1 + √(1 + 4u²))
   tof(u) = isfinite(u) ? 2u / (1 + sqrt(1 + 4u^2)) : sign(u)

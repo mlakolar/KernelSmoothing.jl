@@ -387,7 +387,7 @@ end
 # by Gauss–Legendre quadrature on the pieces of the kernel, exact for these polynomials
 function _cjmG(k, p)
   breaks = collect(first(pieces(k)))
-  xs, ws = _GL24
+  xs, ws = _gausslegendre(24)
   # ∫ f over [a, b], split at the breakpoints of the kernel
   function integral(f, a, b)
     a >= b && return 0.0
