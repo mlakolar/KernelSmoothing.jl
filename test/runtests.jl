@@ -14,6 +14,7 @@ tests = [
   "honest",
   "clusters",
   "lpdensity",
+  "recipes",
   "aqua"
 ]
 
