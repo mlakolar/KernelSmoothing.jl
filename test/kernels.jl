@@ -334,6 +334,23 @@ end
   end
 end
 
+@testset "Gaussian derivatives with a zero cached normalizer" begin
+  k = GaussianDerivativeKernel(1e100, 4, 1e308)
+  @test iszero(k.c)
+  for z in (0.0, 1.0, 2.0)
+    u = z * k.σ
+    expected = setprecision(BigFloat, 256) do
+      sb, zb = BigFloat(k.σ), BigFloat(u) / BigFloat(k.σ)
+      Float64(BigFloat(k.a) * (zb^4 - 6zb^2 + 3) * exp(-zb^2 / 2) /
+              (sqrt(2 * BigFloat(π)) * sb^5))
+    end
+    @test isfinite(expected) && expected != 0
+    @test k(u) ≈ expected rtol = 2e-12
+  end
+  @test k(1.0) > 0 && k(Inf) == 0 && k(-Inf) == 0
+  @test GaussianDerivativeKernel(1e100, 4)(0.0) == 0
+end
+
 @testset "convolutions and products on narrow pieces" begin
   # breakpoints that coincide only up to rounding, -0.7 + 1 and 0.3, make a piece one
   # unit in the last place wide; the convolution must not drop it

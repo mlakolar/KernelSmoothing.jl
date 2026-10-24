@@ -646,14 +646,14 @@ _amplitude(k::GaussianDerivativeKernel) = k.a
 # φ^(r)(z) = (-1)^r He_r(z) φ(z), with He_r the probabilists' Hermite polynomials;
 # beyond |z| = 38.6 the exponential is zero while the polynomial can overflow
 function (k::GaussianDerivativeKernel)(u::Real)
-  isfinite(k.c) || return _scaledgaussian(k, u)
+  (!isfinite(k.c) || (iszero(k.c) && !iszero(k.a))) && return _scaledgaussian(k, u)
   z = u * k.invσ
   e = exp(-z^2 / 2)
   return iszero(e) ? k.c * e : k.c * _hermite(k.r, z) * e
 end
 
-# An overflowing normalizer can be offset by the Gaussian tail. Keep the Hermite
-# polynomial scaled and combine all factors in logarithms on this exceptional path.
+# The normalizer or its denominator can overflow while the final value is finite.
+# Keep the Hermite polynomial scaled and combine all factors in logarithms.
 function _scaledgaussian(k::GaussianDerivativeKernel, u)
   z = u / k.σ
   isnan(z) && return z
