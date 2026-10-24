@@ -54,7 +54,7 @@ the following.
 
 | estimator | kernel | bandwidth | `compat = true` gives |
 |---|---|---|---|
-| `fit(KDE, x)` | Epanechnikov | [`SheatherJones`](@ref) | (no counterpart) |
+| `fit(KDE, x)` | Epanechnikov | [`SheatherJones`](@ref) | `bandwidth = SheatherJones(compat = true)`: R's `bw.SJ` |
 | `fit(PointwiseDensity, x)` | Epanechnikov | plug-in, pilots anchored on Sheather–Jones | nprobust's `kdrobust` |
 | `fit(LocalPolynomialRegression, x, y)` | Epanechnikov, degree `derivative + 1` | plug-in, pilots anchored on cross-validation | nprobust's `lprobust` |
 | `fit(LocalPolynomialDensity, x)` | triangular, degree 2 | lpdensity's plug-in, with a bound on the bias | lpdensity |
@@ -117,6 +117,11 @@ places the defaults depart from the R packages, which `compat = true` reproduces
    lpdensity extrapolates to points far outside the data, and both let intervals for
    a density reach below zero. We return `NaN` in the first two cases and clamp the
    lower ends at zero.
+10. R's `bw.SJ` takes the smallest root of the equation of Sheather and Jones. With
+    rounded data, pairs of equal values create roots at bandwidths that resolve the
+    grid of the values: for `10^5` normal observations rounded to 0.1 it gave 0.0026,
+    at which the estimate is a comb of spikes. [`SheatherJones`](@ref) searches only
+    bandwidths that do not resolve the grid, and gives 0.106 there.
 
 The pages of the estimators give the details.
 
