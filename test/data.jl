@@ -41,6 +41,11 @@ brute_window(d, x0, h) = findall(xi -> abs((xi - x0) / h) <= 1, d.x)
   @test dw.sumw ≈ sum(WS)
   @test effective_nobs(dw) ≈ sum(WS)^2 / sum(abs2, WS)
   @test effective_nobs(SmoothingData(XS; weights = fill(2.5, 500))) ≈ 500
+  # weighted data are inferable, and so are the fits that take weights
+  @inferred SmoothingData(XS, YS; weights = WS)
+  @inferred SmoothingData(XS; weights = fill(1e-300, 500))
+  @inferred fit(KDE, XS; weights = WS, bandwidth = 0.5)
+  @inferred fit(LocalPolynomialRegression, XS, YS; weights = WS, bandwidth = 0.5, points = [0.0])
 
   @test SmoothingData([3, 1, 2]).x == [1.0, 2.0, 3.0]
   @test SmoothingData(Float32[0.5, 0.25]).x == [0.25, 0.5]

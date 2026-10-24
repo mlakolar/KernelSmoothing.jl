@@ -91,13 +91,7 @@ function _smoothingdata(x, y, weights)
   # in Float64 next to the largest one, after the division, are dropped.
   wexp, wf = 0, nothing
   if weights !== nothing
-    wmax = maximum(weights)
-    if !(2.0^-200 <= Float64(wmax) <= 2.0^200)
-      wexp = exponent(float(wmax))
-      wf = [Float64(ldexp(float(w), -wexp)) for w in weights]
-    else
-      wf = [Float64(w) for w in weights]
-    end
+    wf, wexp = _scaledweights(weights)
     keep = findall(>(0), wf)
   end
 
@@ -119,6 +113,16 @@ function _smoothingdata(x, y, weights)
   cumw, cumwlo = ws === nothing ? (collect(0.0:n), Float64[]) : _cumsum0(ws)
   neff = ws === nothing ? Float64(n) : cumw[end]^2 / sum(abs2, ws)
   return SmoothingData(xs, ys, ws, perm, values, starts, valueindex, cumw, cumwlo, cumw[end], neff, wexp)
+end
+
+# The weights as Float64, divided by 2^wexp where their products would overflow or
+# underflow, and wexp; in a function of its own, since a comprehension that captured
+# a variable assigned twice would box it and make the data not inferable
+function _scaledweights(weights)
+  wmax = maximum(weights)
+  2.0^-200 <= Float64(wmax) <= 2.0^200 && return [Float64(w) for w in weights], 0
+  wexp = exponent(float(wmax))
+  return [Float64(ldexp(float(w), -wexp)) for w in weights], wexp
 end
 
 # The stable sorting permutation of x[keep], as indices of x. Each observation gets
