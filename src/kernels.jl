@@ -619,6 +619,7 @@ struct GaussianDerivativeKernel <: AbstractKernel
   a::Float64      # amplitude
   invσ::Float64   # 1 / σ
   c::Float64      # a (-1)^r / (sqrt(2π) σ^(r+1))
+  scaled::Bool    # c overflowed or vanished, so that values are combined in logarithms
 
   function GaussianDerivativeKernel(σ::Real, r::Integer, a::Real = 1.0)
     σf, af = Float64(σ), Float64(a)
@@ -626,7 +627,8 @@ struct GaussianDerivativeKernel <: AbstractKernel
       throw(ArgumentError("standard deviation σ must be positive and finite, got $σ"))
     _check_order(r)
     isfinite(af) || throw(ArgumentError("amplitude a must be finite, got $a"))
-    new(σf, r, af, 1 / σf, af * (-1)^r * INV_SQRT_2PI / σf^(r + 1))
+    c = af * (-1)^r * INV_SQRT_2PI / σf^(r + 1)
+    new(σf, r, af, 1 / σf, c, !isfinite(c) || (iszero(c) && !iszero(af)))
   end
 end
 
@@ -647,7 +649,7 @@ _amplitude(k::GaussianDerivativeKernel) = k.a
 # φ^(r)(z) = (-1)^r He_r(z) φ(z), with He_r the probabilists' Hermite polynomials;
 # beyond |z| = 38.6 the exponential is zero while the polynomial can overflow
 function (k::GaussianDerivativeKernel)(u::Real)
-  (!isfinite(k.c) || (iszero(k.c) && !iszero(k.a))) && return _scaledgaussian(k, u)
+  k.scaled && return _scaledgaussian(k, u)
   z = u * k.invσ
   e = exp(-z^2 / 2)
   return iszero(e) ? k.c * e : k.c * _hermite(k.r, z) * e

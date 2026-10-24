@@ -149,16 +149,28 @@ function _secondderivative(k)
   return -μ2 * c2, c2
 end
 
-# Keep the usual product unchanged; evaluate exceptional Gaussian tails and
-# overflowing products in logs, after removing exactly zero contributions.
+# The bias term ρ³ κ k(v) (c₀ + c₂ v²) of the robust density estimate, as the product
+# where it is finite. A Gaussian tail k(v) = c exp(-z²/2) that underflowed is at most
+# max(c, 1) 2^-1075, so that its term stays below floatmin unless
+# ρ³ κ |q| max(c, 1) ≥ 2^53, which needs an extreme ratio ρ = h / b or scale; only
+# then, and where the product is not finite, the term is evaluated in logarithms.
 @inline function _densitybias(k, v, ρ, c0, c2, κ)
   kv = k(v)
-  if iszero(kv) && !(k isa GaussianFamily)
-    return zero(kv)
-  end
   q = c0 + c2 * v^2
   t = ρ^3 * κ * kv * q
-  isfinite(t) && !(k isa GaussianFamily && iszero(kv)) && return t
+  if k isa GaussianFamily && iszero(kv)
+    c = abs(_amplitude(k)) * INV_SQRT_2PI / first(_scale_order(k))
+    abs(ρ^3 * κ * q) * max(c, 1.0) < 0x1p53 && return zero(t)
+  elseif isfinite(t)
+    return t
+  end
+  return _densitybiaslog(k, v, ρ, c0, c2, κ, kv, q)
+end
+
+# the bias term without the product, which overflows, multiplies zero by infinity
+# or loses an underflowed Gaussian tail; exactly zero contributions stay zero
+@noinline function _densitybiaslog(k, v, ρ, c0, c2, κ, kv, q)
+  iszero(kv) && !(k isa GaussianFamily) && return zero(kv)
   iszero(q) && return zero(q)
   logq = isfinite(q) ? log(abs(q)) : log(abs(c2)) + 2log(abs(v))
   logk = if k isa GaussianFamily

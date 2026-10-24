@@ -256,6 +256,32 @@ end
   @test reference > 0
   @test KernelSmoothing._densitybias(k, v, ρ, c0, c2, κ) ≈ reference rtol = 1e-12
   @test KernelSmoothing._densitybias(k, 1e200, 1.0, c0, c2, κ) == 0
+  # an underflowed tail at an ordinary ratio is below floatmin, so it is zero
+  @test KernelSmoothing._densitybias(k, 40.0, 1.0, c0, c2, κ) === 0.0
+  # a narrow Gaussian underflows in its exponential while its normalizer is large
+  g = KernelSmoothing.GaussianDerivativeKernel(1e-20, 0)
+  g0, g2 = _secondderivative(g)
+  gκ = moment(g, 2) / 2
+  v = 38.7 * g.σ
+  @test iszero(g(v)) && all(isfinite, (g0, g2, gκ))
+  reference = setprecision(BigFloat, 256) do
+    zb, sb = BigFloat(v) / BigFloat(g.σ), BigFloat(g.σ)
+    Float64(BigFloat(gκ) * exp(-zb^2 / 2) / (sqrt(2big(π)) * sb) * (BigFloat(g0) + BigFloat(g2) * BigFloat(v)^2))
+  end
+  @test reference >= floatmin()
+  @test KernelSmoothing._densitybias(g, v, 1.0, g0, g2, gκ) ≈ reference rtol = 1e-11
+  # a compact kernel whose product overflows although the term is finite
+  t = TriweightKernel()
+  t0, t2 = _secondderivative(t)
+  tκ = moment(t, 2) / 2
+  v, ρ = prevfloat(1.0, 2), 1e110
+  kv, q = t(v), t0 + t2 * v^2
+  @test kv > 0 && !isfinite(ρ^3 * tκ * kv * q)
+  reference = setprecision(BigFloat, 256) do
+    Float64(BigFloat(ρ)^3 * BigFloat(tκ) * BigFloat(kv) * BigFloat(q))
+  end
+  @test isfinite(reference)
+  @test KernelSmoothing._densitybias(t, v, ρ, t0, t2, tκ) ≈ reference rtol = 1e-11
   x = randn(MersenneTwister(24024), 800)
   pts = [-0.3, 0.2, 0.7]
   m = fit(PointwiseDensity, [x; 1e200]; points = pts, kernel = k, bandwidth = 0.5, minobs = 0)
