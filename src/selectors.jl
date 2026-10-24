@@ -1,7 +1,7 @@
 ## Data-driven bandwidth selectors
 
 """
-    SheatherJones(; method = :ste, exact = 100)
+    SheatherJones(; method = :ste, exact = 100, compat = false)
 
 The plug-in bandwidth of Sheather and Jones (1991) for kernel density estimates.
 It estimates `ψ₄ = ∫ f''(x)² dx` with a Gaussian pilot kernel and plugs the
@@ -40,22 +40,66 @@ with this rule to two or three digits only. With fine bins it agrees to about
 `1e-6` for `method = :dpi` and `4e-5` for `:ste`, where R rounds the constant
 `(2 φ⁽⁴⁾(0) μ₂(k)² / R(k))^(1/7) = 1.35733` of the Gaussian kernel to 1.357. This rule is the recommended default for
 densities without boundaries (Jones, Marron and Sheather 1996).
+
+With rounded data, pairs of equal values make `ψ̂₄(g)` grow like `g⁻⁵` as the pilot
+bandwidth shrinks, and the equation gains roots at bandwidths that resolve the grid
+of the values: for `10⁵` normal observations rounded to `0.1`, the roots were `0.0026`,
+`0.017` and `0.106`, and R's `bw.SJ` takes the smallest, at which the estimate is a
+comb of spikes. The rule therefore searches only bandwidths with `h sd(k) ≥ r/2`,
+where `sd(k) = √μ₂(k)` and `r` is the median gap between neighbouring distinct
+values, which for data that are not rounded is of the order of their range over
+`n` and changes nothing. Where no root is left, or where the direct plug-in falls
+below this bound, the normal-reference bandwidth is used, raised to the bound if it
+is smaller, with a warning; for integers with a standard deviation of 2, the normal
+reference alone gave 0.25 for the Gaussian kernel, which still resolves the integers.
+
+`compat = true` gives R's `bw.SJ` exactly, as `density(x, bw = "SJ", kernel = …)`
+uses it: the bandwidth for the Gaussian kernel, from R's binned pair counts, rounded
+constants and root search, divided by `√μ₂(k)` for other kernels, so that the kernel
+has the standard deviation of R's bandwidth. Like `bw.SJ`, it takes no weights and
+throws where `bw.SJ` stops. For data far from zero relative to their range, beyond
+about `2 × 10¹²` times the range, R 4.5's integer bins overflow and put every pair
+at distance zero; the port bins from the minimum, as R's development sources do.
 """
 struct SheatherJones <: BandwidthSelector
   method::Symbol
   exact::Int
+  compat::Bool    # R's bw.SJ
 
-  function SheatherJones(method::Symbol, exact::Integer)
+  function SheatherJones(method::Symbol, exact::Integer, compat::Bool)
     method in (:ste, :dpi) || throw(ArgumentError("method must be :ste or :dpi, got :$method"))
-    new(method, exact)
+    new(method, exact, compat)
   end
 end
 
-SheatherJones(; method::Symbol = :ste, exact::Integer = 100) = SheatherJones(method, exact)
+SheatherJones(; method::Symbol = :ste, exact::Integer = 100, compat::Bool = false) =
+  SheatherJones(method, exact, compat)
+
+# The details of a selection, in the units of the data, of one shape in every case,
+# so that the selection is inferable
+_sjdetails(; scale, pilots, pilot = NaN, alpha2 = NaN, psi4 = NaN, psi6 = NaN, exact, iterations = 0,
+           fallback = false, resolution) =
+  (scale = Float64(scale), pilots = Float64.(pilots), pilot = Float64(pilot), alpha2 = Float64(alpha2),
+   psi4 = Float64(psi4), psi6 = Float64(psi6), exact = exact, iterations = Int(iterations), fallback = fallback,
+   resolution = Float64(resolution))
+
+# The median gap between neighbouring distinct values, the resolution of rounded data,
+# from about 1000 gaps evenly spread over them: for rounded data most gaps equal the
+# rounding unit, and for other data only the order of the median matters, so that a
+# sort of all gaps, which took ten times the rest of the rule at n = 10⁶, is not needed
+function _mediangap(d::SmoothingData)
+  U = nunique(d)
+  U < 2 && return 0.0
+  v = d.values
+  g = [v[i + 1] - v[i] for i in 1:max(1, (U - 1) ÷ 1000):U-1]
+  m = length(g)
+  return isodd(m) ? partialsort!(g, (m + 1) ÷ 2) : (partialsort!(g, m ÷ 2) + partialsort!(g, m ÷ 2 + 1)) / 2
+end
 
 function selectbandwidth(rule::SheatherJones, d::SmoothingData, k::AbstractKernel)
   nobs(d) >= 2 || throw(ArgumentError("SheatherJones needs at least two observations"))
   _check_mass(k, rule)
+  rule.compat && return _bwsj(rule, d, k)
   sd, iqr = _sdiqr(d)
   σ = _robustscale(sd, iqr / 1.349)
   _check_scale(σ, rule)
@@ -68,12 +112,12 @@ function selectbandwidth(rule::SheatherJones, d::SmoothingData, k::AbstractKerne
   # underflows or overflows at extreme scales of the data. The normal-reference pilot
   # bandwidths for ψ₄ and ψ₆ (Sheather and Jones 1991) in these units:
   a, b = 1.24 * n^(-1 / 7), 1.23 * n^(-1 / 9)
-  # the details, in the units of the data, have one shape in every case, so that the
-  # selection is inferable
+  # bandwidths that resolve the grid of rounded data, t σ sd(k) < r/2, are left out
+  r = _mediangap(d)
+  tres = r / (2σ * sqrt(μ2))
   details(; pilot = NaN, alpha2 = NaN, psi4 = NaN, psi6 = NaN, iterations = 0, fallback = false) =
-    (scale = σ, pilots = (σ * a, σ * b), pilot = σ * Float64(pilot), alpha2 = Float64(alpha2) * σ^(2 / 7),
-     psi4 = Float64(psi4) / σ^5, psi6 = Float64(psi6) / σ^7, exact = exact, iterations = iterations,
-     fallback = fallback)
+    _sjdetails(; scale = σ, pilots = (σ * a, σ * b), pilot = σ * pilot, alpha2 = alpha2 * σ^(2 / 7),
+               psi4 = psi4 / σ^5, psi6 = psi6 / σ^7, exact, iterations, fallback, resolution = r)
   # ψ̃ᵣ(t) from data binned with at least m grid points per pilot bandwidth, from a
   # grid with 500 at the smaller pilot; the root finding evaluates ψ₄ down to about
   # a / 5, and rarely above a few times the larger pilot. The evaluator is one of two
@@ -90,7 +134,10 @@ function selectbandwidth(rule::SheatherJones, d::SmoothingData, k::AbstractKerne
     ψ4 = ψ(4, g)
     ψ4 > 0 || return _sparse(rule, d, k, "the estimate of ψ₄ is not positive",
                              details(pilot = g, psi4 = ψ4, psi6 = -TD, fallback = true))
-    return BandwidthSelection(σ * (c1 / ψ4)^(1 / 5), rule, details(pilot = g, psi4 = ψ4, psi6 = -TD))
+    t = (c1 / ψ4)^(1 / 5)
+    t >= tres || return _sparse(rule, d, k, "its bandwidth resolves the grid of the rounded data",
+                                details(pilot = g, psi4 = ψ4, psi6 = -TD, fallback = true); floor = σ * tres)
+    return BandwidthSelection(σ * t, rule, details(pilot = g, psi4 = ψ4, psi6 = -TD))
   end
   SD = ψ(4, a)
   SD > 0 || return _sparse(rule, d, k, "the estimate of ψ₄ is not positive",
@@ -98,15 +145,17 @@ function selectbandwidth(rule::SheatherJones, d::SmoothingData, k::AbstractKerne
   # g(h) = α₂ h^(5/7) balances the bias and variance of ψ̂₄ at the optimal h
   α2 = (2 * 3 * INV_SQRT_2PI * μ2^2 / roughness(k))^(1 / 7) * (SD / TD)^(1 / 7)
   hmax = (243 * roughness(k) / (35 * μ2^2 * n))^(1 / 5)   # Terrell's oversmoothed bandwidth
-  lower, upper = 0.1 * hmax, hmax
+  lower = max(0.1 * hmax, tres)
+  upper = max(hmax, 1.2 * lower)
   # the bracket needs only the signs, which a coarser grid gives
   fm(h, m) = (c1 / max(ψm(4, α2 * h^(5 / 7), m), floatmin()))^(1 / 5) - h
   f(h) = fm(h, 50)
   tries = 0
-  while f(lower) * f(upper) > 0   # widen the bracket, as R's bw.SJ does
-    tries < 100 || return _sparse(rule, d, k, "its equation has no solution",
-                                  details(alpha2 = α2, psi6 = -TD, fallback = true))
-    isodd(tries) ? (lower /= 1.2) : (upper *= 1.2)
+  while f(lower) * f(upper) > 0   # widen the bracket, as R's bw.SJ does, not below tres
+    tries < 100 || return _sparse(rule, d, k, lower > tres ? "its equation has no solution" :
+                                  "its equation has no solution at bandwidths that do not resolve the grid of the rounded data",
+                                  details(alpha2 = α2, psi6 = -TD, fallback = true); floor = σ * tres)
+    isodd(tries) && lower / 1.2 >= tres ? (lower /= 1.2) : (upper *= 1.2)
     tries += 1
   end
   # with binned data, ψ̂₄ jitters slightly as the grid changes with g, so the
@@ -117,7 +166,7 @@ function selectbandwidth(rule::SheatherJones, d::SmoothingData, k::AbstractKerne
   # root is solved again on a grid with at least 250, within a quarter of the first
   # root, which is accurate to about 1e-3 there
   if !exact && σ * α2 * t^(5 / 7) < 100Δ
-    lo, hi = t / 1.25, t * 1.25
+    lo, hi = max(t / 1.25, tres), t * 1.25
     if fm(lo, 250) * fm(hi, 250) <= 0
       t, more = _findroot(h -> fm(h, 250), lo, hi; rtol = 1e-8)
       iterations += more
@@ -127,11 +176,150 @@ function selectbandwidth(rule::SheatherJones, d::SmoothingData, k::AbstractKerne
   return BandwidthSelection(σ * t, rule, details(; pilot = g, alpha2 = α2, psi4 = ψ(4, g), psi6 = -TD, iterations))
 end
 
+# R's stats::bw.SJ (R 4.5), exactly: the pairs of observations counted by their
+# distance in nb = 1000 bins of 1.01 times the range over nb, from the observations
+# binned once n > 500 (bw_pair_cnts, bw_den, bw_den_binned); ψ̂₄ and ψ̂₆ from these
+# counts with the Gaussian kernel cut where δ² ≥ 1000 (bw_phi4, bw_phi6); the
+# constants 1.357 and 2.394; for :ste, the bracket [0.1 hmax, hmax] widened by 1.2,
+# alternately above and below, and uniroot (R_zeroin2) with the tolerance 0.1 lower,
+# which R evaluates after the widening. The bandwidth, for the Gaussian kernel, is
+# divided by √μ₂(k), as density() scales its kernels to the standard deviation bw.
+function _bwsj(rule, d, k)
+  d.w === nothing || throw(ArgumentError("R's bw.SJ takes no weights, so SheatherJones(compat = true) has no " *
+                                         "counterpart for weighted data"))
+  x, n, nb = d.x, nobs(d), 1000
+  cnt, dd, binned = _bwpaircounts(x, nb, n > nb ÷ 2)
+  scale = min(_std(d), (_unweightedquantile(x, 0.75) - _unweightedquantile(x, 0.25)) / 1.349)
+  a, b = 1.24 * scale * n^(-1 / 7), 1.23 * scale * n^(-1 / 9)
+  c1 = 1 / (2 * sqrt(π) * n)
+  TD = -_bwphi(cnt, dd, n, b, 6)
+  isfinite(TD) && TD > 0 || throw(ArgumentError("sample is too sparse to find TD (R's bw.SJ)"))
+  r = _mediangap(d)
+  if rule.method == :dpi
+    g = (2.394 / (n * TD))^(1 / 7)
+    ψ4 = _bwphi(cnt, dd, n, g, 4)
+    h = (c1 / ψ4)^(1 / 5)
+    return BandwidthSelection(h / sqrt(_mu2centred(k)), rule,
+      _sjdetails(; scale, pilots = (a, b), pilot = g, psi4 = ψ4, psi6 = -TD, exact = !binned, resolution = r))
+  end
+  hmax = 1.144 * scale * n^(-1 / 5)
+  lower, upper = 0.1 * hmax, hmax
+  α2 = 1.357 * (_bwphi(cnt, dd, n, a, 4) / TD)^(1 / 7)
+  isfinite(α2) || throw(ArgumentError("sample is too sparse to find alph2 (R's bw.SJ)"))
+  fSD(h) = (c1 / _bwphi(cnt, dd, n, α2 * h^(5 / 7), 4))^(1 / 5) - h
+  itry = 1
+  while fSD(lower) * fSD(upper) > 0
+    itry > 99 && throw(ArgumentError("no solution in the specified range of bandwidths (R's bw.SJ)"))
+    isodd(itry) ? (upper *= 1.2) : (lower /= 1.2)
+    itry += 1
+  end
+  h, iterations = _zeroin(fSD, lower, upper, fSD(lower), fSD(upper), 0.1 * lower)
+  g = α2 * h^(5 / 7)
+  return BandwidthSelection(h / sqrt(_mu2centred(k)), rule,
+    _sjdetails(; scale, pilots = (a, b), pilot = g, alpha2 = α2, psi4 = _bwphi(cnt, dd, n, g, 4), psi6 = -TD,
+               exact = !binned, iterations, resolution = r))
+end
+
+# R's pair counts of bw.SJ: cnt[m + 1] pairs at a distance of m bins of width dd
+function _bwpaircounts(x, nb, binned)
+  n = length(x)
+  xmin, xmax = x[1], x[end]   # sorted
+  if binned   # bw_pair_cnts: trunc(|x| / d) sign(x), shifted to start at 1, tabulated
+    dd = (xmax - xmin) * 1.01 / nb
+    xx = [trunc(abs(v) / dd) * sign(v) for v in x]
+    lo = minimum(xx)
+    tab = zeros(Int, nb)
+    for v in xx
+      j = Int(v - lo + 1)
+      1 <= j <= nb && (tab[j] += 1)   # tabulate ignores the others
+    end
+    cnt = zeros(nb)
+    for ii in 1:nb   # bw_den_binned
+      w = Float64(tab[ii])
+      cnt[1] += w * (w - 1)
+      for jj in 1:ii-1
+        cnt[ii - jj + 1] += w * tab[jj]
+      end
+    end
+    cnt[1] *= 0.5
+    return cnt, dd, true
+  end
+  rang = (xmax - xmin) * 1.01   # bw_den
+  rang == 0 && throw(ArgumentError("data are constant in bandwidth calculation (R's bw.SJ)"))
+  de = rang / nb
+  # the bins of R's development sources, from the minimum for data far from zero
+  origin = xmin / de < typemin(Int32) || xmax / de > typemax(Int32) ? xmin : 0.0
+  bins = [trunc(Int, (v - origin) / de) for v in x]
+  cnt = zeros(nb)
+  for i in 2:n, j in 1:i-1
+    cnt[abs(bins[i] - bins[j]) + 1] += 1.0
+  end
+  return cnt, de, false
+end
+
+# R's bw_phi4 (r = 4) and bw_phi6 (r = 6), with the diagonal added
+function _bwphi(cnt, dd, n, h, r)
+  s = 0.0
+  for i in 0:length(cnt)-1
+    δ = i * dd / h
+    δ *= δ
+    δ >= 1000 && break
+    term = r == 4 ? exp(-δ / 2) * (δ * δ - 6 * δ + 3) : exp(-δ / 2) * (δ * δ * δ - 15 * δ * δ + 45 * δ - 15)
+    s += term * cnt[i + 1]
+  end
+  s = r == 4 ? 2 * s + n * 3 : 2 * s - 15 * n
+  return s / (Float64(n) * (n - 1) * h^Float64(r + 1)) * 0.3989422804014327   # M_1_SQRT_2PI
+end
+
+# R's R_zeroin2 (Brent's zeroin), as uniroot calls it with f(a) and f(b) known: the
+# root and the number of evaluations
+function _zeroin(f, ax, bx, fa, fb, tol; maxit = 1000)
+  a, b, c, fc = ax, bx, ax, fa
+  fa == 0 && return a, 0
+  fb == 0 && return b, 0
+  for it in 1:maxit+1
+    prev_step = b - a
+    if abs(fc) < abs(fb)
+      a, b, c = b, c, b
+      fa, fb, fc = fb, fc, fb
+    end
+    tol_act = 2 * eps() * abs(b) + tol / 2
+    new_step = (c - b) / 2
+    (abs(new_step) <= tol_act || fb == 0) && return b, it - 1
+    if abs(prev_step) >= tol_act && abs(fa) > abs(fb)
+      cb = c - b
+      if a == c
+        t1 = fb / fa
+        p, q = cb * t1, 1.0 - t1
+      else
+        q, t1, t2 = fa / fc, fb / fc, fb / fa
+        p = t2 * (cb * q * (q - t1) - (b - a) * (t1 - 1.0))
+        q = (q - 1.0) * (t1 - 1.0) * (t2 - 1.0)
+      end
+      p > 0 ? (q = -q) : (p = -p)
+      if p < 0.75 * cb * q - abs(tol_act * q) / 2 && p < abs(prev_step * q / 2)
+        new_step = p / q
+      end
+    end
+    abs(new_step) < tol_act && (new_step = new_step > 0 ? tol_act : -tol_act)
+    a, fa = b, fb
+    b += new_step
+    fb = f(b)
+    if (fb > 0 && fc > 0) || (fb < 0 && fc < 0)
+      c, fc = a, fa
+    end
+  end
+  return b, -1
+end
+
 # For a sample too sparse for the estimates of Sheather and Jones: the normal-reference
-# bandwidth, with a warning
-function _sparse(rule, d, k, why, details)
-  @warn "SheatherJones: $why, so the normal-reference bandwidth is used instead"
-  return BandwidthSelection(bandwidth(NormalReference(), d, k), rule, details)
+# bandwidth, with a warning; for rounded data at least `floor`, the bandwidth at which
+# the estimate stops resolving the grid of the values
+function _sparse(rule, d, k, why, details; floor = 0.0)
+  h = bandwidth(NormalReference(), d, k)
+  @warn "SheatherJones: $why, so the normal-reference bandwidth" *
+        (floor > h ? ", raised to half the resolution of the rounded data," : "") * " is used instead"
+  return BandwidthSelection(max(h, floor), rule, details)
 end
 
 # Points and weights for double sums ∑ᵢ ∑ⱼ wᵢ wⱼ k((xⱼ - xᵢ) / g): the observations

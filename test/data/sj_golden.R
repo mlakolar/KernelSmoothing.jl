@@ -8,3 +8,13 @@ cat("const SJ_STE = ", f(bw.SJ(x, nb = 2000000L, tol = 1e-12)), "\n")
 cat("const SJ_DPI = ", f(bw.SJ(x, nb = 2000000L, method = "dpi")), "\n")
 cat("const SJ_STE_TIES = ", f(bw.SJ(x2, nb = 200000L, tol = 1e-12)), "\n")
 cat("const NRD0 = ", f(bw.nrd0(x)), "\n")
+
+# R's own bw.SJ, with its default binning and tolerance, for SheatherJones(compat = true)
+y <- qnorm(((1:2000) * 0.6180339887498949) %% 1)            # binned pair counts, n > 500
+z <- round(qnorm(((1:100000) * 0.6180339887498949) %% 1), 1)  # rounded: R takes the root of the ties
+cat("const R_BWSJ_Q = ", f(bw.SJ(x)), "\n")
+cat("const R_BWSJ_Q_DPI = ", f(bw.SJ(x, method = "dpi")), "\n")
+cat("const R_BWSJ_Y = ", f(bw.SJ(y)), "\n")
+cat("const R_BWSJ_Y_DPI = ", f(bw.SJ(y, method = "dpi")), "\n")
+cat("const R_BWSJ_Z = ", f(bw.SJ(z)), "\n")
+cat("const R_BWSJ_Z_DPI = ", f(bw.SJ(z, method = "dpi")), "\n")

@@ -15,6 +15,13 @@ const Z = [quantile(Normal(), mod(i * 0.7548776662466927, 1)) + 0.4 * sin(i^2) f
 # bw.SJ(Q, nb = 2000000L, tol = 1e-12); at this binning R is converged to about 1e-7
 const R_SJ_DPI = 0.433791922029472
 const R_SJ_STE = 0.434594593895941
+# R 4.5.1's bw.SJ with its defaults (data/sj_golden.R), for SheatherJones(compat = true)
+const R_BWSJ_Q = 0.433072676538878
+const R_BWSJ_Q_DPI = 0.432088327060061
+const R_BWSJ_Y = 0.241278958679031
+const R_BWSJ_Y_DPI = 0.241188342451224
+const R_BWSJ_Z = 0.00255067563899276
+const R_BWSJ_Z_DPI = 0.104129646272677
 
 # ψ̂ᵣ(g) and the Sheather–Jones equation by their definitions
 phi4(u) = (u^4 - 6u^2 + 3) * exp(-u^2 / 2) / sqrt(2π)
@@ -64,6 +71,43 @@ psi(x, f, g, r) = sum(f((xi - xj) / g) for xi in x, xj in x) / (length(x) * (len
   @test_throws ArgumentError selectbandwidth(SheatherJones(), SmoothingData([1.0]), g)
   # the default bandwidth of a density estimate
   @test bandwidth(fit(KDE, Q)) == bandwidth(SheatherJones(), d, EpanechnikovKernel())
+end
+
+@testset "Sheather and Jones on rounded data, and R's bw.SJ" begin
+  g = GaussianKernel()
+  q(n) = [quantile(Normal(), mod(i * 0.6180339887498949, 1)) for i in 1:n]
+  y, z = q(2000), round.(q(100_000); digits = 1)
+  # compat = true is R's bw.SJ: exact pair counts up to 500 observations, binned above
+  for (x, ste, dpi) in ((Q, R_BWSJ_Q, R_BWSJ_Q_DPI), (y, R_BWSJ_Y, R_BWSJ_Y_DPI), (z, R_BWSJ_Z, R_BWSJ_Z_DPI))
+    d = SmoothingData(x)
+    @test bandwidth(SheatherJones(compat = true), d, g) ≈ ste rtol = 1e-10
+    @test bandwidth(SheatherJones(method = :dpi, compat = true), d, g) ≈ dpi rtol = 1e-10
+  end
+  # density() scales other kernels to the standard deviation of R's bandwidth
+  @test bandwidth(SheatherJones(compat = true), SmoothingData(Q), EpanechnikovKernel()) ≈ sqrt(5) * R_BWSJ_Q rtol = 1e-10
+  @test_throws ArgumentError bandwidth(SheatherJones(compat = true), SmoothingData(Q; weights = fill(2.0, 300)), g)
+  @test repr(SheatherJones(compat = true)) == "SheatherJones(compat = true)"
+  # rounded data: R takes the root that the ties create, 0.0026, at which the estimate is
+  # a comb of spikes; the default rule searches only bandwidths that do not resolve the grid
+  s = selectbandwidth(SheatherJones(), SmoothingData(z), g)
+  @test 0.09 < s.h < 0.12 && !s.details.fallback && s.details.resolution ≈ 0.1
+  @test 0.09 < bandwidth(SheatherJones(method = :dpi), SmoothingData(z), g) < 0.12
+  # integers with a standard deviation of 1: no root is left above half the resolution, and
+  # the normal reference, 0.17, is raised to it
+  zi = SmoothingData(round.(q(10_000)))
+  si = @test_logs (:warn, r"raised to half the resolution") selectbandwidth(SheatherJones(), zi, g)
+  @test si.details.fallback && si.h == 0.5
+  sd = @test_logs (:warn, r"resolves the grid") selectbandwidth(SheatherJones(method = :dpi), zi, g)
+  @test sd.h == 0.5
+  # data that are not rounded are not affected: the bound is far below the bandwidth
+  sy = selectbandwidth(SheatherJones(), SmoothingData(y), g)
+  @test sy.details.resolution < 1e-2 && !sy.details.fallback
+  # R's zeroin
+  r, it = KernelSmoothing._zeroin(x -> x^2 - 2, 0.0, 2.0, -2.0, 2.0, 1e-12)
+  @test r ≈ sqrt(2) atol = 1e-11
+  @test it > 0
+  @test KernelSmoothing._zeroin(x -> x^2 - 2, 0.0, 2.0, -2.0, 2.0, 1e-12; maxit = 2)[2] == -1   # not converged
+  @test KernelSmoothing._zeroin(x -> x - 1, 1.0, 2.0, 0.0, 1.0, 1e-12) == (1.0, 0)            # a root at an end
 end
 
 @testset "small positive definite solves" begin
