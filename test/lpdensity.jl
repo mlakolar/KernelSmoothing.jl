@@ -172,4 +172,73 @@ end
   end
 end
 
+@testset "defaults that depart from lpdensity" begin
+  # one outlier at 10⁴ among 2000 normal observations: lpdensity standardizes by the
+  # standard deviation, 224, rejects its ill-conditioned pilot fits and falls back on
+  # its floors (values of lpdensity 3.0.1 from data/lpdensity_outlier.R); the robust
+  # scale keeps the bandwidths of the sample without the outlier
+  x0 = [nquantile(Normal(), mod(i * 0.6180339887498949, 1)) for i in 1:2000]
+  x = [x0; 1e4]
+  pts = [-1.0, 0.0, 1.0]
+  mc = fit(LocalPolynomialDensity, x; points = pts, compat = true)
+  @test mc.h ≈ [0.023299337596531949, 0.014217074455036427, 0.023998069528984867] rtol = 1e-6
+  @test mc.estimate ≈ [0.23901286365944835, 0.39597569918395253, 0.23774253636740228] rtol = 1e-6
+  mi = fit(LocalPolynomialDensity, x; points = pts, bandwidth = IMSEOptimal(), compat = true)
+  @test mi.h ≈ fill(10001.0, 3) rtol = 1e-6
+  @test isnan(mi.estimate[1])
+  @test mi.estimate[2:3] ≈ [0.2824969325450723, 0.28243992855339889] rtol = 1e-6
+  @test fit(LocalPolynomialDensity, x; points = pts, bandwidth = NormalReference(), compat = true).h ≈
+        [123.93772069778373, 123.92407595116968, 123.91291603402243] rtol = 1e-6
+  @test fit(LocalPolynomialDensity, x; points = pts).h ≈ fit(LocalPolynomialDensity, x0; points = pts).h rtol = 0.02
+  @test fit(LocalPolynomialDensity, x; points = pts, bandwidth = NormalReference()).h ≈
+        fit(LocalPolynomialDensity, x0; points = pts, bandwidth = NormalReference()).h rtol = 0.02
+  @test all(fit(LocalPolynomialDensity, x; points = pts, bandwidth = NormalReference(robust = false)).h .> 100)
+  # one far evaluation point leaves the bandwidths at the others as they were; lpdensity
+  # integrates its pilots over the evaluation points
+  @test fit(LocalPolynomialDensity, x0; points = [pts; 8.0]).h[1:3] == fit(LocalPolynomialDensity, x0; points = pts).h
+  @test fit(LocalPolynomialDensity, x0; points = [pts; 8.0], compat = true).h[1:3] !=
+        fit(LocalPolynomialDensity, x0; points = pts, compat = true).h
+  # at the inflection points ±1 of the normal density, lpdensity's rule of thumb jumps
+  # towards the distance to the farther end of the data; the next term of the bias keeps it
+  hr = fit(LocalPolynomialDensity, x0; points = pts, bandwidth = NormalReference()).h
+  hc = fit(LocalPolynomialDensity, x0; points = pts, bandwidth = NormalReference(), compat = true).h
+  @test all(hc[[1, 3]] .> 4) && all(hr[[1, 3]] .< 2)
+  # a point far outside the data is NaN, a natural boundary just below the data is not
+  mo = fit(LocalPolynomialDensity, XE; points = [-1.0, 0.0, 0.5])
+  @test isnan(mo.estimate[1]) && isnan(mo.se_rbc[1]) && all(isfinite, mo.estimate[2:3])
+  @test all(isnan, vcov(mo)[1, :]) && isfinite(vcov(mo)[2, 2])
+  @test all(isfinite, fit(LocalPolynomialDensity, XE; points = [-1.0, 0.0, 0.5], compat = true).estimate)
+  # the rule is by the bandwidth: with data from 0.1, the window of 0 with h = 0.5 holds
+  # data on most of its right half, that of -1 none
+  mb = fit(LocalPolynomialDensity, 0.1 .+ collect(range(0, 1; length = 500)); points = [0.0, -1.0], bandwidth = 0.5,
+           minobs = 0)
+  @test isfinite(mb.estimate[1]) && isnan(mb.estimate[2])
+  # the lower ends of the intervals and bands for the density are clamped at zero,
+  # those for its derivative are not
+  mt = fit(LocalPolynomialDensity, XE; points = [4.0, 5.0, 6.0])
+  @test all(confint(mt)[:, 1] .>= 0) && any(confint(mt)[:, 1] .== 0)
+  @test all(confband(mt; rng = MersenneTwister(1)).lower .>= 0)
+  @test any(confint(fit(LocalPolynomialDensity, XE; points = [4.0, 5.0, 6.0], compat = true))[:, 1] .< 0)
+  @test any(confint(fit(LocalPolynomialDensity, XE; points = [4.0, 5.0, 6.0], derivative = 1, degree = 3))[:, 1] .< 0)
+  # given bandwidths are not raised, as in lpdensity, with a warning where the floor would
+  mg = @test_logs (:warn, r"given bandwidth") fit(LocalPolynomialDensity, XE; points = [0.5, 6.0], bandwidth = 0.05)
+  @test mg.h == [0.05, 0.05] && !any(mg.floored)
+  @test_logs fit(LocalPolynomialDensity, XE; points = [0.5, 6.0], bandwidth = 0.05, minobs = 0)
+  # weighted data: weighted quantiles as default points, lpdensity's unweighted ones under compat
+  w = 1.0 .+ (XE .> 1)
+  @test fit(LocalPolynomialDensity, XE; weights = w, compat = true).points ≈ nquantile(XE, 0.05:0.05:0.95)
+  @test fit(LocalPolynomialDensity, XE; weights = w).points ≈
+        [KernelSmoothing._quantile(SmoothingData(XE; weights = w), q) for q in 0.05:0.05:0.95]
+  # counts: observations and distinct values with positive weight, or under compat all
+  # those within h, as lpdensity's nh and nhu; the triangular kernel gives the ties at
+  # the edges of the window no weight
+  xt = repeat(collect(0.0:0.1:2.0), 10)
+  m0 = fit(LocalPolynomialDensity, xt; points = [1.0], bandwidth = 0.5, minobs = 0)
+  m1 = fit(LocalPolynomialDensity, xt; points = [1.0], bandwidth = 0.5, minobs = 0, compat = true)
+  @test (m0.nwindow, m0.nunique, m1.nwindow, m1.nunique) == ([90], [9], [110], [11])
+  # the integrated rule sums over the evaluation points by default, as lpdensity
+  @test fit(LocalPolynomialDensity, XE; points = [0.2, 1.0, 2.0], bandwidth = IMSEOptimal()).h ==
+        fit(LocalPolynomialDensity, XE; points = [0.2, 1.0, 2.0], bandwidth = IMSEOptimal(grid = :points)).h
+end
+
 end

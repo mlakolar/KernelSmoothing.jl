@@ -54,9 +54,11 @@ function StatsAPI.vcov(m::PointwiseDensity; method::InferenceMethod = Convention
   end
   W, sw2 = d.sumw, d.sumw^2 / d.neff
   C = _gram([v.range for v in vs], [v.wg for v in vs])
-  est = bc ? m.estimate_bc : m.estimate
+  est, se = bc ? (m.estimate_bc, m.se_rbc) : (m.estimate, m.se)
   for j in axes(C, 1), l in axes(C, 2)
     C[j, l] = (C[j, l] - est[l] * vs[j].s1 - est[j] * vs[l].s1 + est[j] * est[l] * sw2) / W^2
+    # an estimate without an observation of nonzero weight has no variance (see fit)
+    isnan(se[j]) | isnan(se[l]) && (C[j, l] = NaN)
   end
   return C
 end
@@ -110,7 +112,7 @@ function _confband(m; level::Real = 0.95, method::InferenceMethod = RobustBiasCo
   se = sqrt.(max.(LinearAlgebra.diag(C), 0.0))
   c = _supt(C, se, level, draws, rng)
   est = _usesbc(method) ? m.estimate_bc : m.estimate
-  return (lower = est .- c .* se, upper = est .+ c .* se, critical = c)
+  return (lower = _lowerend(m, est .- c .* se), upper = est .+ c .* se, critical = c)
 end
 
 """

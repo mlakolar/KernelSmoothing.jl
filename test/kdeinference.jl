@@ -210,4 +210,27 @@ end
   @inferred confband(ml)
 end
 
+@testset "windows without data, intervals at zero, counts" begin
+  xe = -log.(1 .- mod.((1:500) .* 0.7548776662466927, 1))
+  m = fit(PointwiseDensity, xe; points = [4.0, 30.0], bandwidth = 0.3, minobs = 0)
+  mc = fit(PointwiseDensity, xe; points = [4.0, 30.0], bandwidth = 0.3, minobs = 0, compat = true)
+  # no observation has positive weight at 30: no standard error, rather than zero
+  @test m.estimate[2] == 0 && isnan(m.se[2]) && isnan(m.se_rbc[2]) && mc.se[2] == 0
+  @test all(isnan, confint(m)[2, :]) && confint(mc)[2, :] == [0.0, 0.0]
+  @test all(isnan, vcov(m)[2, :]) && isfinite(vcov(m)[1, 1])
+  b = confband(m; rng = MersenneTwister(1))
+  @test isnan(b.lower[2]) && isfinite(b.lower[1])
+  # the lower ends are clamped at zero, unless compat
+  @test confint(m)[1, 1] == 0 && confint(mc)[1, 1] < 0
+  f = fit(KDE, xe; bandwidth = 0.3)
+  @test confint(f, 5.0)[1] == 0 && all(isnan, confint(f, 30.0))
+  # counts: positive weight in the larger window, or all within max(h, b) under compat
+  xt = repeat(collect(0.0:0.1:2.0), 10)
+  @test fit(PointwiseDensity, xt; points = [1.0], bandwidth = 0.5, minobs = 0).nwindow == [90]
+  @test fit(PointwiseDensity, xt; points = [1.0], bandwidth = 0.5, minobs = 0, compat = true).nwindow == [110]
+  # grid = :points needs the evaluation points
+  @test_throws ArgumentError selectbandwidth(IMSEOptimal(grid = :points), SmoothingData(xe), EpanechnikovKernel())
+  @test IMSEOptimal().grid === nothing
+end
+
 end

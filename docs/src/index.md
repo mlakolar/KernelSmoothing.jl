@@ -105,6 +105,18 @@ places the defaults depart from the R packages, which `compat = true` reproduces
    rate at interior points is that of the mean squared error, and
    [`CoverageOptimal`](@ref) uses it by default, so that it leaves local linear
    bandwidths unchanged.
+8. The bandwidth rules of lpdensity standardize the data by their mean and standard
+   deviation: one outlier at ``10^4`` among 2000 normal observations moved its rule
+   of thumb at 0 from 0.55 to 124. We standardize by the median and a robust scale.
+   Its pilot bandwidths are integrated over the evaluation points, so that one far
+   point changes the bandwidths at all the others, and ours over the quantiles of
+   the data. Its rule of thumb jumps towards the range of the data at the inflection
+   points of the normal density, where the leading bias vanishes, and ours adds the
+   next term of the bias.
+9. nprobust gives a standard error of zero where no observation has positive weight,
+   lpdensity extrapolates to points far outside the data, and both let intervals for
+   a density reach below zero. We return `NaN` in the first two cases and clamp the
+   lower ends at zero.
 
 The pages of the estimators give the details.
 
