@@ -9,8 +9,9 @@ or with `method = RobustBiasCorrected()` of the bias-corrected estimates.
 
 Each estimate is linear in the data, and its standard error is the norm of a
 vector of residual-weighted kernel weights. The covariances are the inner products
-of these vectors, so that the matrix is positive semidefinite and its diagonal
-holds the squared standard errors of the fit. Regression estimates whose windows do
+of these vectors, so that the block of identified estimates is positive
+semidefinite and its diagonal holds the squared standard errors of the fit.
+Regression estimates whose windows do
 not overlap are uncorrelated; density estimates are then slightly negatively
 correlated, since every observation counts towards the total weight. For
 regression, these are the covariances of nprobust's `covgrid` with HC variances;
@@ -18,13 +19,23 @@ nprobust recomputes nearest-neighbour residuals on the union of two windows, whi
 changes them slightly near the edges. With [`ClusterVariance`](@ref), the vectors
 hold sums over clusters, so that estimates whose windows share a cluster are
 correlated; nprobust's `covgrid` ignores the clusters off the diagonal.
+Unidentified estimates have `NaN` rows and columns.
 """
 function StatsAPI.vcov(m::LocalPolynomialRegression; method::InferenceMethod = Conventional())
   vs = _pointwise(j -> _localfit(m.data, m.kernel, m.points[j], m.h[j], m.b[j], m.degree, m.derivative,
                                  m.vce; vectors = true, compat = m.compat), eachindex(m.points))
-  vals = [_usesbc(method) ? v.arb : v.aus for v in vs]
+  bc = _usesbc(method)
+  vals = [bc ? v.arb : v.aus for v in vs]
   # with clusters, the vectors hold the sums over the clusters in the windows
-  return m.vce isa ClusterVariance ? _clustergram([v.keys for v in vs], vals) : _gram([v.range for v in vs], vals)
+  C = m.vce isa ClusterVariance ? _clustergram([v.keys for v in vs], vals) : _gram([v.range for v in vs], vals)
+  se = bc ? m.se_rbc : m.se
+  for j in eachindex(se)
+    isnan(se[j]) || continue
+    for l in axes(C, 2)
+      C[j, l] = C[l, j] = NaN
+    end
+  end
+  return C
 end
 
 # C[j, l] = ∑ᵢ A[j][i] A[l][i] over the overlap of the index ranges of j and l

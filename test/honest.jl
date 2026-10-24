@@ -125,4 +125,31 @@ end
   @test Honest(:rot).M == :rot && FLCIOptimal(:rot).M == :rot
 end
 
+@testset "stored bounds, levels and FLCI inputs" begin
+  for M in (-1.0, Inf, NaN, big"1e400", -big"1e-400")
+    @test_throws ArgumentError Honest(M)
+    @test_throws ArgumentError FLCIOptimal(M)
+  end
+  for level in (0.0, 1.0, Inf, NaN, big"1e-400", 1 - big"1e-40")
+    @test_throws ArgumentError FLCIOptimal(1.0; level)
+  end
+  # a pair of bounds for fuzzy designs is checked as stored, too
+  @test_throws ArgumentError Honest((1.0, big"1e400"))
+  @test_throws ArgumentError Honest((-big"1e-400", 1.0))
+  @test Honest((big"2.5", 1)).M === (2.5, 1.0)
+  for M in (0.0, 1.0, floatmax(Float64))
+    @test Honest(M).M === M
+    @test FLCIOptimal(M).M === M
+  end
+  @test FLCIOptimal(big"2.5"; level = big"0.8").M == 2.5
+  @test FLCIOptimal(big"2.5"; level = big"0.8").level == 0.8
+  d = SmoothingData(ones(30), collect(1.0:30))
+  k = EpanechnikovKernel()
+  for points in (nothing, [1.0])
+    @test_throws "the data have no spread" selectbandwidth(FLCIOptimal(1.0), d, k; points)
+  end
+  @test_throws "minobs must be nonnegative" selectbandwidth(FLCIOptimal(1.0), SmoothingData(X, Y), k;
+                                                            points = [0.5], minobs = -1)
+end
+
 end
