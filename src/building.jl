@@ -6,7 +6,7 @@
 # weighted least squares fit, and the critical value of uniform bands.
 
 """
-    kernelweights(d::SmoothingData, k::AbstractKernel, x0, h)
+    kernel_weights(d::SmoothingData, k::AbstractKernel, x0, h)
 
 The observations that the nonnegative kernel `k` weights at the point `x0` with the
 bandwidth `h`, and their weights `wᵢ k((xᵢ - x0)/h)`, where `wᵢ` are the observation
@@ -20,15 +20,15 @@ the length of the window.
 # Examples
 ```julia
 d = SmoothingData(x, y)
-r = kernelweights(d, EpanechnikovKernel(), 0.5, 0.2)
+r = kernel_weights(d, EpanechnikovKernel(), 0.5, 0.2)
 Z = [ones(length(r.window)) (d.x[r.window] .- 0.5) ./ 0.2]   # a local linear design
 θ = (Z' * (r.weights .* Z)) \\ (Z' * (r.weights .* d.y[r.window]))
 ```
 """
-function kernelweights(d::SmoothingData, k::AbstractKernel, x0::Real, h::Real)
+function kernel_weights(d::SmoothingData, k::AbstractKernel, x0::Real, h::Real)
   _check_point(x0)
   0 < h < Inf || throw(ArgumentError("bandwidth h must be positive and finite, got $h"))
-  _isnonnegative(k) || throw(ArgumentError("$k takes negative values; kernelweights needs a nonnegative kernel"))
+  _isnonnegative(k) || throw(ArgumentError("$k takes negative values; kernel_weights needs a nonnegative kernel"))
   x0f, hf = Float64(x0), Float64(h)
   r = _poswindow(d, k, x0f, hf)
   w = Float64[_weight(d.w, i) * k((d.x[i] - x0f) / hf) for i in r]
@@ -36,17 +36,17 @@ function kernelweights(d::SmoothingData, k::AbstractKernel, x0::Real, h::Real)
 end
 
 """
-    regressionpoints(d::SmoothingData; compat = false)
+    regression_points(d::SmoothingData; compat = false)
 
 The default evaluation points of the regression estimators: 30 equally spaced points
 between the quantiles of order 0.025 and 0.975 of `x`, which keeps them out of sparse
 tails, or between the extremes of `x` with `compat = true`, as nprobust, and where
 these quantiles coincide.
 """
-regressionpoints(d::SmoothingData; compat::Bool = false) = _regressionpoints(d, compat)
+regression_points(d::SmoothingData; compat::Bool = false) = _regressionpoints(d, compat)
 
 """
-    bandwidthgrid(d::SmoothingData; minobs = 2, mindistinct = 2, gridsize = 30)
+    bandwidth_grid(d::SmoothingData; minobs = 2, mindistinct = 2, gridsize = 30)
 
 `gridsize` bandwidths spaced evenly on the log scale, from the smallest one at which
 the window of every observation holds at least `minobs` observations (itself
@@ -56,7 +56,7 @@ exceeds it). Below the lower end, the local fit at some observation has too few
 observations or distinct values to be identified, as for a fit of order `p` with
 `mindistinct ≤ p`, so that a cross-validation criterion is not finite there.
 """
-function bandwidthgrid(d::SmoothingData; minobs::Integer = 2, mindistinct::Integer = 2, gridsize::Integer = 30)
+function bandwidth_grid(d::SmoothingData; minobs::Integer = 2, mindistinct::Integer = 2, gridsize::Integer = 30)
   gridsize >= 2 || throw(ArgumentError("gridsize must be at least 2, got $gridsize"))
   minobs >= 1 || throw(ArgumentError("minobs must be at least 1, got $minobs"))
   1 <= mindistinct <= nunique(d) || throw(ArgumentError("mindistinct must be between 1 and the " *
@@ -73,7 +73,7 @@ function bandwidthgrid(d::SmoothingData; minobs::Integer = 2, mindistinct::Integ
 end
 
 """
-    gridminimize(f, grid; largest = false, rtol = 1e-3)
+    grid_minimize(f, grid; largest = false, rtol = 1e-3)
 
 The minimizer of the criterion `f` over the increasing `grid`, refined by a
 golden-section search between the neighbours of the minimizer on the grid, to the
@@ -86,7 +86,7 @@ are not finite count as `Inf`, and an error is thrown when none is. Returns
 local `minimizers`, and `atbound`, whether the minimizer is an end of the grid, beyond
 which the minimum may lie.
 """
-function gridminimize(f, grid::AbstractVector{<:Real}; largest::Bool = false, rtol::Real = 1e-3)
+function grid_minimize(f, grid::AbstractVector{<:Real}; largest::Bool = false, rtol::Real = 1e-3)
   isempty(grid) && throw(ArgumentError("the grid is empty"))
   all(isfinite, grid) || throw(ArgumentError("the grid must be finite"))
   all(i -> grid[i] < grid[i + 1], 1:length(grid)-1) || throw(ArgumentError("the grid must be increasing"))

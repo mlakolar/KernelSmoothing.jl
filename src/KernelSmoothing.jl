@@ -48,7 +48,7 @@ export
   RegressionDiscontinuity, RDOptimal, RDHonestOptimal, DensityDiscontinuity, RDDensityOptimal,
   coef, confint, coeftable, predict, fitted, residuals, vcov, conf_band,
   local_polynomial, smoother_matrix, PartiallyLinear, LocalLikelihood,
-  kernelweights, regressionpoints, bandwidthgrid, gridminimize, sandwich, supt_critical
+  kernel_weights, regression_points, bandwidth_grid, grid_minimize, sandwich, supt_critical
 
 include("polynomials.jl")
 include("kernels.jl")

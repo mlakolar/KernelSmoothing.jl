@@ -16,3 +16,7 @@ function Base.getproperty(m::Honest, name::Symbol)
   return getfield(m, name)
 end
 Base.propertynames(::Honest, private::Bool = false) = (fieldnames(Honest)..., :biascorrected)
+Base.@deprecate_binding kernelweights kernel_weights
+Base.@deprecate_binding regressionpoints regression_points
+Base.@deprecate_binding bandwidthgrid bandwidth_grid
+Base.@deprecate_binding gridminimize grid_minimize
