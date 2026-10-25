@@ -121,6 +121,31 @@ function _surfacewindow(b, k, s, h1)
   return a:e
 end
 
+# The normal equations of the fit of order p at (s, t), with the sums as scalars so
+# that the loop over the window neither allocates nor branches on p
+function _surfacesums(b, k, s, t, h, skip, r, ::Val{p}) where {p}
+  s00 = s01 = s02 = s11 = s12 = s22 = c0 = c1 = c2 = 0.0
+  for i in r
+    skip > 0 && b.groups[i] == skip && continue
+    u, v = (b.x1[i] - s) / h[1], (b.x2[i] - t) / h[2]
+    kw = _weight(b.w, i) * k(u) * k(v)
+    kw == 0 && continue
+    yi = b.y === nothing ? 0.0 : b.y[i]
+    s00 += kw
+    c0 += kw * yi
+    if p == 1
+      s01 += kw * u
+      s02 += kw * v
+      s11 += kw * u * u
+      s12 += kw * u * v
+      s22 += kw * v * v
+      c1 += kw * u * yi
+      c2 += kw * v * yi
+    end
+  end
+  return p == 0 ? (fill(s00, 1, 1), [c0]) : ([s00 s01 s02; s01 s11 s12; s02 s12 s22], [c0, c1, c2])
+end
+
 # The fit of order p at (s, t): the estimate, and with `weights = true` the weights of
 # the observations in the window (in sorted order); observations of group `skip`,
 # when positive, are left out, and with `self`, the weight of observation self in its
@@ -128,24 +153,7 @@ end
 function _surfacefit(b, k, s, t, h, p, skip; weights::Bool = false, self::Int = 0)
   r = _surfacewindow(b, k, s, h[1])
   P = p == 0 ? 1 : 3   # the intercept, and two slopes for a local linear fit
-  A, c = zeros(P, P), zeros(P)
-  for i in r
-    skip > 0 && b.groups[i] == skip && continue
-    u, v = (b.x1[i] - s) / h[1], (b.x2[i] - t) / h[2]
-    kw = _weight(b.w, i) * k(u) * k(v)
-    kw == 0 && continue
-    z = p == 0 ? (1.0,) : (1.0, u, v)
-    yi = b.y === nothing ? 0.0 : b.y[i]
-    for a in 1:P
-      c[a] += kw * z[a] * yi
-      for e in a:P
-        A[a, e] += kw * z[a] * z[e]
-      end
-    end
-  end
-  for a in 1:P, e in 1:a-1
-    A[a, e] = A[e, a]
-  end
+  A, c = p == 0 ? _surfacesums(b, k, s, t, h, skip, r, Val(0)) : _surfacesums(b, k, s, t, h, skip, r, Val(1))
   C = LinearAlgebra.cholesky(LinearAlgebra.Symmetric(A); check = false)
   ok = LinearAlgebra.issuccess(C) && minimum(j -> C.factors[j, j]^2 / A[j, j], 1:P) > 1e-8
   ok || return (estimate = NaN, range = r, ℓ = fill(NaN, weights ? length(r) : 0), self = NaN)
@@ -191,11 +199,12 @@ function selectbandwidth(rule::CrossValidation, x::Tuple{AbstractVector,Abstract
     cands = sort(collect(Float64, bandwidths))
     all(v -> 0 < v < Inf, cands) || throw(ArgumentError("bandwidths must be positive and finite"))
     vals = crit.(cands)
+    # (the grid search above throws when no criterion is finite)
+    any(isfinite, vals) || throw(ArgumentError("cross-validation failed at every bandwidth; " *
+      "the fits are not identified, so pass larger bandwidths"))
     h = cands[argmin(vals)]
     details = (grid = cands, criterion = vals)
   end
-  isfinite(h) && isfinite(crit(h)) || throw(ArgumentError("cross-validation failed at every bandwidth; " *
-    "the fits are not identified, so pass larger bandwidths"))
   return BandwidthSelection([h, aspect * h], rule, (grid = details.grid, criterion = details.criterion,
                                                     groups = groups !== nothing))
 end
