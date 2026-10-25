@@ -262,49 +262,105 @@ _fifthroot(t) = t >= 0 ? t^(1 / 5) : NaN
 # The numbers c[ℓ + 1] of the pairs of distinct observations whose bins on a grid of
 # width Δ are ℓ apart, ℓ = 0, …, _SJR_NBINS - 1, from the sorted x; the bins truncate
 # toward zero, so that the bin around zero is twice as wide as the others.
-# - Binned (`pairwise = false`): observation i is in bin trunc(xᵢ / Δ), counted from the
-#   bin of x₁, and the observations beyond the last bin of the grid are left out.
 # - Pairwise: observation i is in bin trunc((xᵢ - o) / Δ), with o = 0 unless the bins of
 #   x₁ or xₙ would be outside the range of 32-bit integers, and o = x₁ then.
-# Both are counted in the same way. The bins of the sorted observations do not decrease,
-# so that they form runs of equal bins, and the pairs within a run of m observations
-# number m (m - 1) / 2, those between two runs the product of their lengths.
+# - Binned (`pairwise = false`): observation i is in bin trunc(xᵢ / Δ), counted from the
+#   bin of x₁, and the observations beyond the last bin of the grid are left out.
+# The bins of the sorted observations do not decrease, so that they form runs of equal
+# bins, and the pairs within a run of m observations number m (m - 1) / 2, those between
+# two runs the product of their lengths: summed over pairs of runs for the pairwise bins,
+# of which there are at most 500, and as lagged products of the dense occupancies of the
+# grid for the binned ones. Neither loop over pairs divides.
 function _sjpaircounts(x::Vector{Float64}, Δ::Float64, pairwise::Bool)
   N, n = _SJR_NBINS, length(x)
-  o = pairwise && (x[1] / Δ < -2.0^31 || x[end] / Δ > 2.0^31 - 1) ? x[1] : 0.0
-  # each run is stored as one integer, its length times N plus its bin counted from the
-  # first, in 32 bits where they suffice; there are at most min(n, N) runs, since these
-  # bins are 0, …, N - 1
-  K = min(n, N)
-  runs = (n + 1) * N <= typemax(Int32) ? Vector{Int32}(undef, K) : Vector{Int}(undef, K)
-  return _sjpaircounts!(zeros(Int, N), runs, x, Δ, o)
-end
-
-function _sjpaircounts!(c::Vector{Int}, runs::Vector{<:Integer}, x, Δ, o)
-  N = length(c)
-  bin1 = trunc((x[1] - o) / Δ)
-  nruns, current = 0, -1
-  for xi in x
-    t = trunc((xi - o) / Δ) - bin1
-    t < N || break   # beyond the grid; for the pairwise bins, (xₙ - x₁) / Δ < N - 1 anyway
-    j = Int(t)
-    if j == current
-      runs[nruns] += N
-    else
-      nruns += 1
-      runs[nruns] = N + j
-      current = j
+  c = zeros(Int, N)
+  if pairwise
+    o = x[1] / Δ < -2.0^31 || x[end] / Δ > 2.0^31 - 1 ? x[1] : 0.0
+    # the bins of the runs, counted from the first, in runs[1:K] and their lengths in
+    # runs[n+1:n+K]; with n ≤ _SJR_PAIRWISE both are below 2^16
+    runs = Vector{UInt16}(undef, 2n)
+    K = _sjruns!(runs, n, x, Δ, o, N)
+    @inbounds for r in 1:K
+      j, m = Int(runs[r]), Int(runs[n + r])
+      c[1] += (m * (m - 1)) >> 1
+      for s in r+1:K
+        c[Int(runs[s]) - j + 1] += m * Int(runs[n + s])
+      end
     end
-  end
-  @inbounds for r in 1:nruns
-    m, j = divrem(Int(runs[r]), N)
-    c[1] += m * (m - 1) ÷ 2
-    for s in r+1:nruns
-      ms, js = divrem(Int(runs[s]), N)
-      c[js - j + 1] += m * ms
-    end
+  else
+    # the occupancies of the bins, in 32 bits when they suffice
+    h = n < typemax(Int32) ? zeros(Int32, N) : zeros(Int, N)
+    _sjbinlags!(c, h, x, Δ)
   end
   return c
+end
+
+# c from the occupancies h of the bins: c[ℓ + 1] = ∑ⱼ h[j] h[j + ℓ] for ℓ ≥ 1, a dense loop
+# over the occupied stretch of the grid that vectorizes
+function _sjbinlags!(c::Vector{Int}, h::Vector{<:Integer}, x, Δ)
+  N = length(c)
+  K = _sjruns!(h, 0, x, Δ, 0.0, N; dense = true)   # bins 0 and K - 1 are the first and last occupied
+  @inbounds for j in 1:K
+    m = Int(h[j])
+    c[1] += (m * (m - 1)) >> 1
+  end
+  @inbounds for l in 1:K-1
+    t = 0
+    @simd for j in 1:K-l
+      t += Int(h[j]) * Int(h[j + l])
+    end
+    c[l + 1] = t
+  end
+  return c
+end
+
+# Finds the runs of equal bins trunc((xᵢ - o) / Δ) of the sorted x, up to the first bin
+# that is N or more from the bin of x₁. With `dense`, the length of the run in bin j
+# (counted from the first) is stored in v[j + 1] and the result is the last bin plus one;
+# otherwise the bin of run r is stored in v[r] and its length in v[off + r], and the
+# result is the number of runs. As the bins do not decrease, the end of a run is found by
+# doubling a step and then halving it, so that a run of m observations costs about
+# 2 log₂ m divisions rather than m.
+function _sjruns!(v, off, x, Δ, o, N; dense::Bool = false)
+  n = length(x)
+  bin(i) = @inbounds trunc((x[i] - o) / Δ)
+  bin1 = bin(1)
+  i, b = 1, bin1
+  count = 0
+  while true
+    j = b - bin1
+    j < N || break   # also for a NaN bin, from Δ = 0
+    # bin(lo) = b, and hi is n + 1 or the first index found with bin(hi) > b
+    lo, hi, bhi, step = i, n + 1, NaN, 1
+    while lo + step <= n
+      bp = bin(lo + step)
+      if bp != b
+        hi, bhi = lo + step, bp
+        break
+      end
+      lo += step
+      step *= 2
+    end
+    while hi - lo > 1
+      mid = (lo + hi) >>> 1
+      bm = bin(mid)
+      if bm == b
+        lo = mid
+      else
+        hi, bhi = mid, bm
+      end
+    end
+    if dense
+      v[Int(j) + 1] = hi - i
+      count = Int(j) + 1
+    else
+      count += 1
+      v[count], v[off + count] = Int(j), hi - i
+    end
+    hi > n && break
+    i, b = hi, bhi
+  end
+  return count
 end
 
 # The estimates of Sheather and Jones (1991, sec. 2) for r = 4, 6, with the diagonal,
