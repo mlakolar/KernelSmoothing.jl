@@ -11,7 +11,8 @@ bounded by `M` (`criterion = :mse`, the default), the length of the honest inter
 (`:oci`). The standard errors come from preliminary variances that are constant on
 each side, estimated by local linear fits with the bandwidth of Imbens and
 Kalyanaraman (2012), as in RDHonest. `M` is a number, a pair `(M_Y, M_T)` for a
-fuzzy design, or `:rot` for the rule of thumb of RDHonest; `class` is `:holder` or
+fuzzy design, or `:rot` for the rule of thumb of RDHonest, which needs 5 distinct values of
+x on each side of the cutoff; `class` is `:holder` or
 `:taylor`, and for a fuzzy design `T0` is the initial value of the effect that the
 worst-case bias of the rule uses. The pilot bandwidth is `b = h`.
 """
@@ -122,8 +123,9 @@ end
 # the range [x₁, xₙ] of the sorted x. q is a quadratic, so its largest absolute value
 # lies at an end of the range or at its vertex -r₃/(4r₄).
 function _mrot(x, y, w)
-  _hasdistinct(x, 4) ||
-    throw(ArgumentError("the rule of thumb for M fits a quartic on each side and needs at least 4 distinct values of x there; pass M"))
+  # a quartic has 5 coefficients, so it needs 5 distinct values; RDHonest stops below that too
+  _hasdistinct(x, 5) ||
+    throw(ArgumentError("the rule of thumb for M fits a quartic on each side, which needs at least 5 distinct values of x there; pass M"))
   n = length(x)
   A = Matrix{Float64}(undef, n, 5)
   z = Vector{Float64}(undef, n)
