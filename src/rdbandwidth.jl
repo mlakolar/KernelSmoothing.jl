@@ -110,7 +110,7 @@ function _rdselect(rule::RDOptimal, sides, c, k, p, ν, vce, masspoints, bwcheck
   M′₋ = constants(S₋, q + 1, q + 1, hmax₋ * (1 + sqrt(eps())), 0.0)
   M′₊ = constants(S₊, q + 1, q + 1, hmax₊ * (1 + sqrt(eps())), 0.0)
   base = Symbol(replace(String(rule.bwselect), "cer" => "mse"))   # the rule of the MSE bandwidths
-  local jump, total, two
+  local jump, total, two   # COV_EXCL_LINE, a declaration that coverage never counts as run
   if base in (:mserd, :msecomb1, :msecomb2)
     jump = _rdcommon(constants, S₋, S₊, M′₋, M′₊, -, p, ν, λ, hmax, max(hmin₋, hmin₊))
   end
