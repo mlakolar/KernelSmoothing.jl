@@ -10,21 +10,26 @@
 #
 # whose multipliers of the equality constraints are β̂: at the optimum the basic
 # observations are interpolated, aᵢ = 1 where yᵢ > zᵢᵀβ̂ and aᵢ = 0 where yᵢ < zᵢᵀβ̂.
-# Z has one row per observation; the observations with wᵢ = 0 are left out.
-# Returns β̂ and the indices of the interpolated observations.
+# Z has one row per observation; the observations with wᵢ = 0 are left out, and the
+# weights and responses are scaled to a largest value of one, so that the tolerances
+# do not depend on their units. Returns β̂ and the indices of the interpolated
+# observations; NaN where the design does not identify β.
 function _rqsimplex(Z::AbstractMatrix{Float64}, y::AbstractVector{Float64}, w::AbstractVector{Float64}, τ::Float64)
   keep = findall(>(0), w)
   n, m = length(keep), size(Z, 2)
   n >= m || return fill(NaN, m), Int[]
+  wmax = maximum(w[i] for i in keep)
+  ymax = maximum(abs(y[i]) for i in keep)
   A = Matrix{Float64}(undef, m, n)
   c = Vector{Float64}(undef, n)
   for (k, i) in enumerate(keep)
+    wi = w[i] / wmax
     for j in 1:m
-      A[j, k] = w[i] * Z[i, j]
+      A[j, k] = wi * Z[i, j]
     end
-    c[k] = w[i] * y[i]
+    c[k] = ymax > 0 ? wi * y[i] / ymax : 0.0
   end
-  scale = maximum(abs, c) + eps()
+  tol = 1e-11 * max(maximum(abs, c), floatmin())
   # a basic feasible solution from the interior point a = 1 - τ: move within the null
   # space of the columns of m + 1 free variables, never lowering the objective,
   # until one reaches a bound, as long as more than m are free or their columns are
@@ -34,7 +39,7 @@ function _rqsimplex(Z::AbstractMatrix{Float64}, y::AbstractVector{Float64}, w::A
   while !isempty(free)
     S = length(free) > m ? free[1:m+1] : copy(free)
     F = LinearAlgebra.svd(A[:, S]; full = true)
-    length(S) <= m && F.S[end] > 1e-12 * F.S[1] && break   # independent columns
+    length(S) <= m && F.S[end] > 1e-10 * F.S[1] && break   # independent columns
     d = F.V[:, end]
     LinearAlgebra.dot(view(c, S), d) < 0 && (d = -d)
     t, hit = Inf, 0
@@ -54,8 +59,7 @@ function _rqsimplex(Z::AbstractMatrix{Float64}, y::AbstractVector{Float64}, w::A
     for j in 1:n
       length(basis) == m && break
       j in basis && continue
-      B = A[:, vcat(basis, j)]
-      LinearAlgebra.rank(B; rtol = 1e-10) == length(basis) + 1 && push!(basis, j)
+      LinearAlgebra.rank(A[:, vcat(basis, j)]; rtol = 1e-10) == length(basis) + 1 && push!(basis, j)
     end
     length(basis) < m && return fill(NaN, m), Int[]   # the design does not identify β
   end
@@ -63,18 +67,22 @@ function _rqsimplex(Z::AbstractMatrix{Float64}, y::AbstractVector{Float64}, w::A
   isbasic[basis] .= true
   degenerate = 0
   π = zeros(m)
+  F = LinearAlgebra.lu(A[:, basis]; check = false)
+  changed = true
   for _ in 1:50*(n+m)
-    B = A[:, basis]
-    F = LinearAlgebra.lu(B; check = false)
-    LinearAlgebra.issuccess(F) || return fill(NaN, m), Int[]
-    π = F' \ c[basis]
+    if changed   # a new basis: factorize it, and its multipliers
+      B = A[:, basis]
+      F = LinearAlgebra.lu(B; check = false)
+      LinearAlgebra.issuccess(F) && LinearAlgebra.cond(B, 1) < 1e12 || return fill(NaN, m), Int[]
+      π = F' \ c[basis]
+      changed = false
+    end
     # the entering variable: the largest improving reduced cost, or the first one
     # (Bland's rule) after a run of degenerate pivots
     enter, best, s = 0, 0.0, 0
     for j in 1:n
       isbasic[j] && continue
       dj = c[j] - LinearAlgebra.dot(view(A, :, j), π)
-      tol = 1e-11 * scale
       sj = a[j] == 0 ? (dj > tol ? 1 : 0) : (dj < -tol ? -1 : 0)
       sj == 0 && continue
       if degenerate > 30
@@ -84,14 +92,15 @@ function _rqsimplex(Z::AbstractMatrix{Float64}, y::AbstractVector{Float64}, w::A
         enter, best, s = j, abs(dj), sj
       end
     end
-    enter == 0 && return π, keep[basis]
+    enter == 0 && return π .* ymax, keep[basis]
     u = F \ A[:, enter]
     # the ratio test: the entering variable moves by t s, the basic ones by -t s u
+    tolu = 1e-12 * maximum(abs, u)
     t, leave = 1.0, 0
     for k in 1:m
       δ = -s * u[k]
       j = basis[k]
-      tk = δ > 1e-14 ? (1 - a[j]) / δ : δ < -1e-14 ? a[j] / -δ : Inf
+      tk = δ > tolu ? (1 - a[j]) / δ : δ < -tolu ? a[j] / -δ : Inf
       if tk < t || (degenerate > 30 && tk == t && leave > 0 && j < basis[leave])
         t, leave = tk, k
       end
@@ -101,7 +110,7 @@ function _rqsimplex(Z::AbstractMatrix{Float64}, y::AbstractVector{Float64}, w::A
       a[basis[k]] = clamp(a[basis[k]] - t * s * u[k], 0.0, 1.0)
     end
     degenerate = t == 0 ? degenerate + 1 : 0
-    if leave == 0   # the entering variable reaches its other bound
+    if leave == 0   # the entering variable reaches its other bound; the basis stays
       a[enter] = s > 0 ? 1.0 : 0.0
     else
       j = basis[leave]
@@ -110,9 +119,11 @@ function _rqsimplex(Z::AbstractMatrix{Float64}, y::AbstractVector{Float64}, w::A
       isbasic[j] = false
       isbasic[enter] = true
       basis[leave] = enter
+      changed = true
     end
   end
-  return π, keep[basis]
+  @warn "the simplex method for quantile regression stopped at its iteration limit"
+  return fill(NaN, m), Int[]
 end
 
 """
@@ -132,7 +143,7 @@ so that the fit interpolates `degree + 1` observations of its window. Fitted wit
 the points, `stderror(m)` and `confint(m; level)` the standard errors and
 intervals of [`stderror`](@ref).
 """
-struct LocalQuantileRegression{D<:SmoothingData,K<:AbstractKernel,S<:BandwidthSelection}
+struct LocalQuantileRegression{D<:SmoothingData,K<:AbstractKernel,S<:BandwidthSelection} <: StatsAPI.RegressionModel
   data::D
   kernel::K
   tau::Float64
@@ -145,30 +156,35 @@ struct LocalQuantileRegression{D<:SmoothingData,K<:AbstractKernel,S<:BandwidthSe
 end
 
 """
-    fit(LocalQuantileRegression, x, y; tau = 0.5, bandwidth = YuJones(), degree = 1, derivative = 0,
-        kernel = EpanechnikovKernel(), points = nothing, weights = nothing)
+    fit(LocalQuantileRegression, x, y; tau = 0.5, bandwidth = YuJones(), derivative = 0,
+        degree = derivative + 1, kernel = EpanechnikovKernel(), points = nothing, weights = nothing)
 
 Local polynomial estimates of the quantile of order `tau` of `y` given `x`, or of
 its derivative of order `derivative`, at `points` (by default 30 points between
 the quantiles of order 0.025 and 0.975 of `x`). The `bandwidth` is a positive number
-or a rule, by default [`YuJones`](@ref)`()`.
+or a rule, by default [`YuJones`](@ref)`()`, which rescales a bandwidth for the mean
+regression of the same `degree`. The kernel must be nonnegative. quantreg's `lprq`
+estimates the derivative from the same local linear fits, `degree = 1`.
 """
 function fit(::Type{LocalQuantileRegression}, x::AbstractVector, y::AbstractVector; weights = nothing, kwargs...)
   return fit(LocalQuantileRegression, SmoothingData(x, y; weights); kwargs...)
 end
 
 function fit(::Type{LocalQuantileRegression}, d::SmoothingData; tau::Real = 0.5, bandwidth = YuJones(),
-             degree::Integer = 1, derivative::Integer = 0, kernel::AbstractKernel = EpanechnikovKernel(),
-             points = nothing)
+             derivative::Integer = 0, degree::Integer = derivative + 1,
+             kernel::AbstractKernel = EpanechnikovKernel(), points = nothing)
   _noclusters(d, "LocalQuantileRegression")
   d.y === nothing && throw(ArgumentError("quantile regression needs responses; use SmoothingData(x, y)"))
   0 < tau < 1 || throw(ArgumentError("tau must be between 0 and 1, got $tau"))
   _check_degree(degree, derivative)
+  _isnonnegative(kernel) || throw(ArgumentError("quantile regression needs a nonnegative kernel, got $kernel"))
   τ, p = Float64(tau), Int(degree)
   pts = points === nothing ? _regressionpoints(d, false) : _checkpoints(points)
   bandwidth === nothing && (bandwidth = YuJones())
   sel = bandwidth isa YuJones ? select_bandwidth(bandwidth, d, kernel; degree = p, tau = τ) :
-        bandwidth isa BandwidthSelector ? select_bandwidth(bandwidth, d, kernel; degree = p) : BandwidthSelection(bandwidth)
+        bandwidth isa BandwidthSelector ? select_bandwidth(bandwidth, d, kernel; degree = p) :
+        bandwidth isa Real ? BandwidthSelection(bandwidth) :
+        throw(ArgumentError("bandwidth must be a positive number or a BandwidthSelector, got $(repr(bandwidth))"))
   h = sel.h
   h isa Float64 || throw(ArgumentError("quantile regression takes one bandwidth for all points"))
   rows = _pointwise(x0 -> _localquantile(d, kernel, x0, h, p, τ), pts)
@@ -205,20 +221,26 @@ function select_bandwidth(rule::YuJones, d::SmoothingData, k::AbstractKernel; de
 end
 
 # the coefficients of the local fit at x0, NaN where its window does not identify
-# them
+# them; the responses are centred at their median in the window, so that the
+# tolerances of the simplex do not depend on their location
 function _localquantile(d, k, x0, h, p, τ)
   r = _poswindow(d, k, x0, h)
   length(r) >= p + 1 && nunique(d, r) >= p + 1 || return fill(NaN, p + 1)
   Z = [((d.x[i] - x0) / h)^j for i in r, j in 0:p]
   w = [_weight(d.w, i) * k((d.x[i] - x0) / h) for i in r]
-  β, _ = _rqsimplex(Z, d.y[r], w, τ)
+  y0 = _plainmedian(view(d.y, r))
+  β, _ = _rqsimplex(Z, d.y[r] .- y0, w, τ)
+  β[1] += y0
   return β ./ h .^ (0:p)
 end
 
+# the median of the values
+_plainmedian(v) = (s = sort(v); n = length(s); isodd(n) ? s[(n + 1) ÷ 2] : (s[n ÷ 2] + s[n ÷ 2 + 1]) / 2)
+
 function Base.show(io::IO, m::LocalQuantileRegression)
-  print(io, "LocalQuantileRegression(tau = ", m.tau, ", degree = ", m.degree,
-        m.derivative == 0 ? "" : ", derivative = $(m.derivative)", ", bandwidth = ", round(m.h; sigdigits = 4), ", ",
-        length(m.points), " points, ", nobs(m.data), " observations)")
+  print(io, "LocalQuantileRegression(tau ", m.tau, ", degree ", m.degree,
+        m.derivative == 0 ? "" : ", derivative $(m.derivative)", ", ", m.kernel, ", bandwidth ", round(m.h; sigdigits = 4),
+        ", ", length(m.points), " points, ", nobs(m.data), " observations)")
 end
 
 bandwidth(m::LocalQuantileRegression) = m.h
@@ -238,7 +260,8 @@ where `W` holds the kernel weights times the weights of the observations and `s`
 the sparsity `1 / f(q_τ(x₀) | x₀)`, estimated by the difference quotient
 `(q̂_{τ+δ}(x₀) - q̂_{τ-δ}(x₀)) / (2δ)` of local fits at the orders `τ ± δ`, with the
 bandwidth `δ` of Hall and Sheather (1988) for the effective number of observations
-in the window. They describe the variability of the estimates, not their bias, so
+in the window. Where the two fits do not increase, as for discrete responses, the
+sparsity cannot be estimated and the standard error is `NaN`. They describe the variability of the estimates, not their bias, so
 that intervals from them cover only when the bandwidth is small enough for the bias
 to be negligible.
 """
@@ -255,7 +278,8 @@ function _rqse(m::LocalQuantileRegression, j)
   δ = neff^(-1 / 3) * z^(2 / 3) * (1.5 * Distributions.pdf(Distributions.Normal(), qz)^2 / (2 * qz^2 + 1))^(1 / 3)
   δ = min(δ, τ / 2, (1 - τ) / 2)
   hi, lo = _localquantile(d, k, x0, h, p, τ + δ)[1], _localquantile(d, k, x0, h, p, τ - δ)[1]
-  s = max(hi - lo, 0.0) / (2δ)
+  hi > lo || return NaN   # the difference quotient estimates no sparsity
+  s = (hi - lo) / (2δ)
   Z = [((d.x[i] - x0) / h)^q for i in r, q in 0:p]
   G = Z' * (w .* Z)
   V = G \ (Z' * (w .^ 2 .* Z)) / G
@@ -263,6 +287,12 @@ function _rqse(m::LocalQuantileRegression, j)
   return sqrt(max(τ * (1 - τ) * V[ν + 1, ν + 1], 0.0)) * s * factorial(ν) / h^ν
 end
 
+"""
+    confint(m::LocalQuantileRegression; level = 0.95)
+
+The intervals `coef(m) ± z stderror(m)` at the points, as a matrix with the lower
+and upper ends as columns; like the standard errors, they ignore the bias.
+"""
 function confint(m::LocalQuantileRegression; level::Real = 0.95)
   0 < level < 1 || throw(ArgumentError("level must be between 0 and 1, got $level"))
   z = quantile(Distributions.Normal(), (1 + level) / 2)

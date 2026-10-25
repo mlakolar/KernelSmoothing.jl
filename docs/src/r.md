@@ -216,3 +216,13 @@ that rdrobust's `rdrobust(y, x)` becomes `fit(RegressionDiscontinuity, x, y)`.
 | `sclass = "H"`, `"T"` | `class = :holder`, `:taylor` |
 | `se.method = "nn"`, `"EHW"` | `vce = NNVariance()`, `HCVariance(0)` |
 | `T0` | `RDHonestOptimal(M; T0)` |
+
+**np** (`npcdens`, `npcdensbw`) and **quantreg** (`lprq`)
+
+| R | Julia |
+|---|---|
+| `npcdens(txdat = x, tydat = y, bws = c(b, h))`, the bandwidths ordered (y, x) | `fit(ConditionalDensity, x, y; bandwidth = (h, b))`, ordered (x, y) |
+| `exdat`, `eydat` | `pdf(m, y, x)` at each pair |
+| `npcdensbw(bwmethod = "cv.ml")`, `"cv.ls"` | `ConditionalCV()`, `ConditionalCV(criterion = :leastsquares)` |
+| `lprq(x, y, h, tau, m)` | `fit(LocalQuantileRegression, x, y; bandwidth = h, tau, kernel = GaussianKernel(), points = range(minimum(x), maximum(x); length = m))` |
+| `lprq(...)$dv` | the same with `derivative = 1, degree = 1` |

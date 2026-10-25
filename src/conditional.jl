@@ -49,11 +49,12 @@ function fit(::Type{ConditionalDensity}, d::SmoothingData; bandwidth = Condition
   _noclusters(d, "ConditionalDensity")
   d.y === nothing && throw(ArgumentError("a conditional density needs responses; use SmoothingData(x, y)"))
   _check_degree(degree, 0)
+  _isnonnegative(kernel) || throw(ArgumentError("the kernel in x must be nonnegative, got $kernel"))
   _isnonnegative(ykernel) && isapprox(moment(ykernel, 0), 1; rtol = 1e-10) ||
     throw(ArgumentError("the kernel in y must be a probability density, got $ykernel"))
   bandwidth === nothing && (bandwidth = ConditionalCV())
   sel = if bandwidth isa ConditionalCV
-    select_bandwidth(bandwidth, d, kernel, ykernel; degree)
+    select_bandwidth(bandwidth, d, kernel; ykernel, degree)
   else
     (bandwidth isa Union{Tuple,AbstractVector} && length(bandwidth) == 2 && all(v -> v isa Real, bandwidth)) ||
       throw(ArgumentError("bandwidth must be a pair (h, b) of positive numbers or ConditionalCV(), got $(repr(bandwidth))"))
@@ -63,7 +64,7 @@ function fit(::Type{ConditionalDensity}, d::SmoothingData; bandwidth = Condition
 end
 
 function Base.show(io::IO, m::ConditionalDensity)
-  print(io, "ConditionalDensity(degree = ", m.degree, ", bandwidth = (", round(m.hx; sigdigits = 4), ", ",
+  print(io, "ConditionalDensity(degree ", m.degree, ", ", m.kernel, ", bandwidth (", round(m.hx; sigdigits = 4), ", ",
         round(m.hy; sigdigits = 4), "), ", nobs(m.data), " observations)")
 end
 
@@ -76,8 +77,9 @@ _cdweights(m::ConditionalDensity, x) = _smootherrow(m.data, m.kernel, Float64(x)
 """
     pdf(m::ConditionalDensity, y, x)
 
-The estimate `f̂(y | x)` of the conditional density of `y` given `x`; `NaN` where the
-window of `x` does not identify the local fit.
+The estimate `f̂(y | x)` of the conditional density of `y` given `x`, the arguments in
+the order of the notation; `NaN` where the window of `x` does not identify the local
+fit. For a local constant fit, `pdf(conditional(m, x), y)` is the same.
 """
 function pdf(m::ConditionalDensity, y::Real, x::Real)
   r, ℓ = _cdweights(m, x)
@@ -138,10 +140,14 @@ estimate of the integrated squared error of Hall, Racine and Li (2004),
 
     ∑ᵢ wᵢ ∫ f̂₋ᵢ(y | xᵢ)² dy / W - 2 ∑ᵢ wᵢ f̂₋ᵢ(yᵢ | xᵢ) / W,
 
-whose cost grows as `n³`. The search starts on a grid of `gridsize × gridsize` pairs,
-from an eighth to four times the normal-reference bandwidths `1.06 σ̂ n^(-1/6)` of each
-variable, and refines the best one by the method of Nelder and Mead on the
-logarithms of the bandwidths.
+which takes a time of order `n³`. Observations with no other observation in their
+window in `x` are left out of the criteria, so that an isolated `x` does not set a
+floor on `h`. The search starts on a grid of `gridsize × gridsize` pairs, from an
+eighth to four times the normal-reference bandwidths, which give the kernels the
+standard deviations `1.06 σ̂ n^(-1/6)` of each variable, and refines the best pair by
+the method of Nelder and Mead on the logarithms of the bandwidths, within a factor
+of 1000 of the reference ones; a warning tells when the search ends near that
+limit, as when tied responses let the likelihood grow without bound as `b` shrinks.
 """
 struct ConditionalCV <: BandwidthSelector
   criterion::Symbol
@@ -157,7 +163,15 @@ end
 
 ConditionalCV(; criterion::Symbol = :likelihood, gridsize::Integer = 7) = ConditionalCV(criterion, gridsize)
 
-function select_bandwidth(rule::ConditionalCV, d::SmoothingData, k::AbstractKernel, K::AbstractKernel = k; degree::Integer = 0)
+"""
+    select_bandwidth(rule::ConditionalCV, d::SmoothingData, k::AbstractKernel; ykernel = k, degree = 0)
+
+The bandwidths `[h, b]` that `rule` chooses for the conditional density of the
+responses of `d` given `x`, with the kernels `k` in `x` and `ykernel` in `y`.
+"""
+function select_bandwidth(rule::ConditionalCV, d::SmoothingData, k::AbstractKernel; ykernel::AbstractKernel = k,
+                          degree::Integer = 0)
+  K = ykernel
   degree == 0 || throw(ArgumentError("ConditionalCV chooses the bandwidths of local constant estimates, degree = 0"))
   d.y === nothing && throw(ArgumentError("ConditionalCV needs responses; use SmoothingData(x, y)"))
   n = effective_nobs(d)
@@ -168,13 +182,16 @@ function select_bandwidth(rule::ConditionalCV, d::SmoothingData, k::AbstractKern
   # bandwidths as standard deviations of the kernels
   cx, cy = sqrt(moment(k, 2)), sqrt(moment(K, 2))
   h0, b0 = 1.06 * sx * n^(-1 / 6) / cx, 1.06 * sy * n^(-1 / 6) / cy
-  crit(t) = _cdcv(rule.criterion, d, k, K, exp(t[1]), exp(t[2]))
+  lo, hi = log.([h0, b0] ./ 1000), log.([h0, b0] .* 1000)
+  crit(t) = all(lo .<= t .<= hi) ? _cdcv(rule.criterion, d, k, K, exp(t[1]), exp(t[2])) : Inf
   factors = exp.(range(log(1 / 8), log(4); length = rule.gridsize))
   grid = [[log(h0 * f), log(b0 * g)] for f in factors, g in factors]
   values = _pointwise(crit, vec(grid))
   any(isfinite, values) || throw(ArgumentError("the cross-validation criterion is not finite on the grid"))
   start = vec(grid)[argmin(map(v -> isfinite(v) ? v : Inf, values))]
   t, value = _neldermead(crit, start, log(factors[2] / factors[1]) / 2)
+  (any(abs.(t .- lo) .< log(2)) || any(abs.(t .- hi) .< log(2))) &&
+    @warn "ConditionalCV ended near the limit of its search, at bandwidths $(exp.(t))"
   return BandwidthSelection([exp(t[1]), exp(t[2])], rule, (criterion = value, start = exp.(start)))
 end
 
@@ -187,76 +204,80 @@ function _wvar(y, w)
   return s * n / (n - 1)
 end
 
-# the criterion to minimize: minus the leave-one-out log-likelihood per unit weight,
-# or the least-squares criterion of Hall, Racine and Li
+# The criterion to minimize: minus the leave-one-out log-likelihood per unit weight,
+# or the least-squares criterion of Hall, Racine and Li, over the observations with
+# another observation in their window in x. For the least-squares criterion,
+# ∫ f̂₋ᵢ(y | xᵢ)² dy = ∑ⱼ ∑ₗ κᵢⱼ κᵢₗ (K⋆K̃)((yⱼ - yₗ)/b) / (b den²), with κᵢⱼ the kernel
+# weights in x and K̃ the reflection of K, which is a quadratic form computed for all
+# i at once by matrix products.
 function _cdcv(criterion, d, k, K, h, b)
   n = nobs(d)
   x, y = d.x, d.y
-  # ∫ K((u - y₁)/b) K((u - y₂)/b) du / b² = (K⋆K)((y₁ - y₂)/b) / b
-  Kc = criterion === :leastsquares ? convolve(K, K) : K
-  kv = zeros(n)
+  den, num = zeros(n), zeros(n)
+  for i in 1:n, j in 1:n
+    j == i && continue
+    κ = _weight(d.w, j) * k((x[j] - x[i]) / h)
+    den[i] += κ
+    num[i] += κ * K((y[i] - y[j]) / b) / b
+  end
+  sq = if criterion === :leastsquares
+    kv = [i == j ? 0.0 : _weight(d.w, j) * k((x[j] - x[i]) / h) for i in 1:n, j in 1:n]
+    Kc = convolve(K, _reflect(K))
+    C = [Kc((y[j] - y[l]) / b) for j in 1:n, l in 1:n]
+    vec(sum((kv * C) .* kv; dims = 2)) ./ b
+  else
+    num
+  end
   s = 0.0
+  W = 0.0
   for i in 1:n
     wi = _weight(d.w, i)
-    wi == 0 && continue
-    den = num = 0.0
-    for j in 1:n
-      kv[j] = j == i ? 0.0 : _weight(d.w, j) * k((x[j] - x[i]) / h)
-      den += kv[j]
-      num += kv[j] * K((y[i] - y[j]) / b) / b
-    end
-    den > 0 || return Inf
+    (wi == 0 || den[i] == 0) && continue   # isolated in x: left out
+    W += wi
     if criterion === :likelihood
-      num > 0 || return Inf
-      s -= wi * log(num / den)
+      num[i] > 0 || return Inf
+      s -= wi * log(num[i] / den[i])
     else
-      sq = 0.0
-      for j in 1:n
-        kv[j] == 0 && continue
-        t = 0.0
-        for l in 1:n
-          kv[l] == 0 || (t += kv[l] * Kc((y[j] - y[l]) / b))
-        end
-        sq += kv[j] * t
-      end
-      s += wi * (sq / (b * den^2) - 2 * num / den)
+      s += wi * (sq[i] / den[i]^2 - 2 * num[i] / den[i])
     end
   end
-  return s / d.sumw
+  W >= d.sumw / 2 || return Inf   # most observations isolated: h too small
+  return s / W
 end
 
 # Minimizes f over ℝ² by the method of Nelder and Mead from x0 with the initial
 # simplex of size δ, until the values of the simplex agree to 1e-14 relative or its
 # size falls below 1e-10
 function _neldermead(f, x0, δ; maxiter = 400)
-  P = [copy(x0), x0 .+ [δ, 0.0], x0 .+ [0.0, δ]]
-  F = [f(p) for p in P]
+  pts = [copy(x0), x0 .+ [δ, 0.0], x0 .+ [0.0, δ]]
+  F = [f(p) for p in pts]
   for _ in 1:maxiter
     o = sortperm(F)
-    P, F = P[o], F[o]
-    (abs(F[3] - F[1]) <= 1e-14 * (abs(F[1]) + 1e-300) || maximum(p -> maximum(abs, p .- P[1]), P) < 1e-10) && break
-    c = (P[1] .+ P[2]) ./ 2
-    r = c .+ (c .- P[3])
+    pts, F = pts[o], F[o]
+    best = pts[1]
+    (abs(F[3] - F[1]) <= 1e-14 * (abs(F[1]) + 1e-300) || maximum(p -> maximum(abs, p .- best), pts) < 1e-10) && break
+    c = (pts[1] .+ pts[2]) ./ 2
+    r = c .+ (c .- pts[3])
     fr = f(r)
     if fr < F[1]
-      e = c .+ 2 .* (c .- P[3])
+      e = c .+ 2 .* (c .- pts[3])
       fe = f(e)
-      fe < fr ? ((P[3], F[3]) = (e, fe)) : ((P[3], F[3]) = (r, fr))
+      fe < fr ? ((pts[3], F[3]) = (e, fe)) : ((pts[3], F[3]) = (r, fr))
     elseif fr < F[2]
-      P[3], F[3] = r, fr
+      pts[3], F[3] = r, fr
     else
-      q = fr < F[3] ? c .+ (r .- c) ./ 2 : c .+ (P[3] .- c) ./ 2
+      q = fr < F[3] ? c .+ (r .- c) ./ 2 : c .+ (pts[3] .- c) ./ 2
       fq = f(q)
       if fq < min(fr, F[3])
-        P[3], F[3] = q, fq
+        pts[3], F[3] = q, fq
       else   # shrink toward the best point
         for j in 2:3
-          P[j] = P[1] .+ (P[j] .- P[1]) ./ 2
-          F[j] = f(P[j])
+          pts[j] = pts[1] .+ (pts[j] .- pts[1]) ./ 2
+          F[j] = f(pts[j])
         end
       end
     end
   end
   i = argmin(F)
-  return P[i], F[i]
+  return pts[i], F[i]
 end

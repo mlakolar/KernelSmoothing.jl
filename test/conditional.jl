@@ -38,13 +38,32 @@ check(z, y, β, τ, w) = sum(w[i] * (y[i] - z[i, :]' * β) * (τ - (y[i] < z[i, 
   @test all(isfinite, β)
   @test all(isnan, _rqsimplex(hcat(ones(3), [1.0, 1.0, 1.0]), [1.0, 2.0, 3.0], ones(3), 0.5)[1])
   @test all(isnan, _rqsimplex(hcat(ones(3), [1.0, 2.0, 3.0]), [1.0, 2.0, 3.0], [1.0, 0.0, 0.0], 0.5)[1])
+  # equivariance: in the scale and location of the responses and the scale of the
+  # weights, also for weights far below one
+  β, _ = _rqsimplex(Z, Y, w, 0.3)
+  γ = [3.0, -1.0, 0.5]
+  @test _rqsimplex(Z, 2.5 .* Y .+ Z * γ, 1e-30 .* w, 0.3)[1] ≈ 2.5 .* β .+ γ rtol = 1e-10
+  @test _rqsimplex(Z, Y .+ 1e8, w, 0.3)[1] ≈ β .+ [1e8, 0, 0] rtol = 1e-12
+  # tied covariates and degenerate problems against the best line through two
+  # observations with distinct covariates
+  for _ in 1:30
+    n = rand(rng, 5:10)
+    x, y, w = Float64.(rand(rng, 1:3, n)), Float64.(rand(rng, -2:2, n)), rand(rng, (1.0, 1e4), n)
+    length(unique(x)) >= 2 || continue
+    τ = rand(rng, (0.25, 0.5))
+    z = hcat(ones(n), x)
+    best = minimum(check(z, y, z[[i, j], :] \ y[[i, j]], τ, w) for i in 1:n for j in i+1:n if x[i] != x[j])
+    β, _ = _rqsimplex(z, y, w, τ)
+    @test check(z, y, β, τ, w) ≈ best rtol = 1e-10 atol = 1e-10
+  end
 end
 
 @testset "local quantile regression" begin
   for (τ, fv, dv) in ((0.25, LPRQ_FV_25, LPRQ_DV_25), (0.5, LPRQ_FV_50, LPRQ_DV_50), (0.9, LPRQ_FV_90, LPRQ_DV_90))
     m = fit(LocalQuantileRegression, X, Y; tau = τ, bandwidth = 0.4, kernel = GaussianKernel(), points = LPRQ_XX)
     @test coef(m) ≈ fv rtol = 1e-12
-    m1 = fit(LocalQuantileRegression, X, Y; tau = τ, bandwidth = 0.4, kernel = GaussianKernel(), points = LPRQ_XX, derivative = 1)
+    m1 = fit(LocalQuantileRegression, X, Y; tau = τ, bandwidth = 0.4, kernel = GaussianKernel(), points = LPRQ_XX,
+             derivative = 1, degree = 1)
     @test coef(m1) ≈ dv rtol = 1e-11
   end
   # the bandwidth of Yu and Jones rescales the mean-regression bandwidth, the same
@@ -69,12 +88,20 @@ end
   @test all(ci[:, 1] .< coef(m) .< ci[:, 2])
   @test ci[:, 2] .- ci[:, 1] ≈ 2 * Distributions.quantile(Distributions.Normal(), 0.95) .* se
   @test all(isfinite, stderror(fit(LocalQuantileRegression, X, Y; tau = 0.5, derivative = 1)))
-  # ties in x
+  # ties in x; discrete responses, whose sparsity the difference quotient cannot
+  # estimate
   xt = round.(X; digits = 1)
   @test all(isfinite, coef(fit(LocalQuantileRegression, xt, Y; tau = 0.5, bandwidth = 0.5)))
+  sed = stderror(fit(LocalQuantileRegression, X, round.(Y); tau = 0.5, bandwidth = 0.5))
+  @test any(isnan, sed) && all(v -> isnan(v) || v > 0, sed)
+  # the degree follows the derivative, as for local polynomial regression
+  @test fit(LocalQuantileRegression, X, Y; derivative = 1, bandwidth = 0.5).degree == 2
   # a window with too few distinct values gives NaN
   @test isnan(only(coef(fit(LocalQuantileRegression, X, Y; bandwidth = 0.01, points = [10.0]))))
-  @test sprint(show, m) == "LocalQuantileRegression(tau = 0.25, degree = 1, bandwidth = $(round(m.h; sigdigits = 4)), 30 points, 150 observations)"
+  @test sprint(show, m) == "LocalQuantileRegression(tau 0.25, degree 1, $(EpanechnikovKernel()), bandwidth $(round(m.h; sigdigits = 4)), 30 points, 150 observations)"
+  @test_throws ArgumentError fit(LocalQuantileRegression, X, Y; bandwidth = (0.3, 0.4))
+  @test_throws ArgumentError fit(LocalQuantileRegression, X, Y; bandwidth = 0.5,
+                                 kernel = PiecewisePolynomialKernel([-1.0, 1.0], [[9/8, 0.0, -15/8]]))
   @test_throws ArgumentError fit(LocalQuantileRegression, X, Y; tau = 1.0)
   @test_throws ArgumentError fit(LocalQuantileRegression, X, Y; degree = 1, derivative = 2)
   @test_throws ArgumentError fit(LocalQuantileRegression, SmoothingData(X); tau = 0.5)
@@ -111,9 +138,26 @@ end
   @test s.h ≈ CVML rtol = 1e-3
   @test _cdcv(:likelihood, d, GaussianKernel(), GaussianKernel(), s.h...) <=
         _cdcv(:likelihood, d, GaussianKernel(), GaussianKernel(), CVML...) * (1 + 1e-12)
+  # the criterion is np's: its value at np's bandwidths is minus np's log-likelihood
+  @test _cdcv(:likelihood, d, GaussianKernel(), GaussianKernel(), CVML...) * 150 ≈ -CVML_FVAL[1] rtol = 1e-10
   @test bandwidth(fit(ConditionalDensity, X, Y)) == Tuple(s.h)
   # least squares: our criterion at our minimum is below its value at np's
   # bandwidths, whose own criterion differs
+  # the least-squares criterion by quadrature on a small sample
+  ds = SmoothingData(X[1:30], Y[1:30])
+  G = GaussianKernel()
+  h, b = 0.5, 0.4
+  function fminus(i, t)
+    ws = [j == i ? 0.0 : G((X[j] - X[i]) / h) for j in 1:30]
+    return sum(ws[j] * G((t - Y[j]) / b) / b for j in 1:30) / sum(ws)
+  end
+  brute = sum(quadgk(t -> fminus(i, t)^2, -Inf, Inf; rtol = 1e-11)[1] - 2 * fminus(i, Y[i]) for i in 1:30) / 30
+  @test _cdcv(:leastsquares, ds, G, G, h, b) ≈ brute rtol = 1e-9
+  # np's least-squares criterion differs from this one by about 0.6% at its bandwidths
+  @test 0.003 < abs(_cdcv(:leastsquares, d, G, G, CVLS...) + CVLS_FVAL[1]) / CVLS_FVAL[1] < 0.01
+  # an isolated covariate does not set a floor on h
+  me2 = fit(ConditionalDensity, vcat(X, 40.0), vcat(Y, 0.0); kernel = EpanechnikovKernel())
+  @test bandwidth(me2)[1] < 5
   sl = select_bandwidth(ConditionalCV(criterion = :leastsquares), d, GaussianKernel())
   @test _cdcv(:leastsquares, d, GaussianKernel(), GaussianKernel(), sl.h...) <=
         _cdcv(:leastsquares, d, GaussianKernel(), GaussianKernel(), CVLS...)
@@ -122,7 +166,9 @@ end
   @test all(isfinite, bandwidth(me))
   @test quadgk(t -> pdf(me, t, 0.0), -10, 10; maxevals = 10^6)[1] ≈ 1 rtol = 1e-6
   @test isnan(pdf(fit(ConditionalDensity, X, Y; bandwidth = (0.1, 0.3), kernel = EpanechnikovKernel()), 0.0, 9.0))
-  @test sprint(show, m) == "ConditionalDensity(degree = 0, bandwidth = (0.4, 0.3), 150 observations)"
+  @test sprint(show, m) == "ConditionalDensity(degree 0, $(GaussianKernel()), bandwidth (0.4, 0.3), 150 observations)"
+  @test_throws ArgumentError fit(ConditionalDensity, X, Y; bandwidth = (0.4, 0.3),
+                                 kernel = PiecewisePolynomialKernel([-1.0, 1.0], [[9/8, 0.0, -15/8]]))
   @test_throws ArgumentError fit(ConditionalDensity, X, Y; bandwidth = 0.3)
   @test_throws ArgumentError fit(ConditionalDensity, X, Y; degree = 1)
   @test_throws ArgumentError fit(ConditionalDensity, X, Y; bandwidth = (0.4, 0.3), ykernel = derivative(GaussianKernel(), 1))
