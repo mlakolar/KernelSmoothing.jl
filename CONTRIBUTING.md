@@ -6,8 +6,6 @@ Keep established numerical abbreviations (`nobs`, `atol`, `rtol`), mathematical
 identifiers (`X`, `M`, `Σ`, `λ`) and names required by external interfaces.
 
 Develop and test against local `master` checkouts of workspace dependencies.
-Retain package UUIDs and version numbers during this migration. Use canonical
-names in new code; deprecated bindings remain available for downstream users.
 Frozen reference data and recorded numerical results are not renamed.
 
 From the package root, run the complete suite with:
