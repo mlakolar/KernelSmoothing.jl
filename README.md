@@ -27,9 +27,10 @@ development.
   rdrobust (Calonico, Cattaneo and Titiunik 2014), with the honest intervals and
   bandwidths of RDHonest, and `fit(DensityDiscontinuity, x; cutoff)`, the
   manipulation test of rddensity (Cattaneo, Jansson and Ma 2020).
-- `fit(VaryingCoefficient, u, X, y)` and `fit(PartiallyLinear, u, X, y)`:
-  varying-coefficient models and partially linear models (Robinson's double
+- `fit(PartiallyLinear, u, X, y)`: partially linear models (Robinson's double
   residuals), with sandwich standard errors and cross-validated bandwidths.
+  Varying-coefficient models are in CoordinateDescent.jl, on the kernels of this
+  package.
 - `fit(LocalLikelihood, x, y; family)`: local logistic and Poisson regression.
 - `localpolynomial` and `smoothermatrix`: local polynomial estimates and their
   weights at given points and bandwidths, without inference, for smoothing many

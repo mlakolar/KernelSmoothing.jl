@@ -128,16 +128,7 @@ Modules = [KernelSmoothing]
 Pages = ["locpoly.jl", "surface.jl"]
 ```
 
-## Varying-coefficient and partially linear models
-
-Two semiparametric models are built on the same local fits.
-[`VaryingCoefficient`](@ref) fits `y = β₁(u) x₁ + ⋯ + β_q(u) x_q + ε`, whose
-coefficients are smooth functions of an index variable `u` (Hastie and Tibshirani
-1993; Fan and Zhang 1999): at each point, every coefficient is a local polynomial in
-`u`, all estimated by one weighted least squares fit, with sandwich standard errors
-and a bandwidth by leave-one-out cross-validation. A column of ones in `X` gives an
-intercept that varies with `u`; with only that column, the fit is that of
-[`LocalPolynomialRegression`](@ref).
+## Partially linear models
 
 [`PartiallyLinear`](@ref) fits `y = x'β + g(u) + ε` by the double residuals of
 Robinson (1988): the regression of `y` on `X` after removing from both their local
@@ -145,9 +136,10 @@ polynomial smooths in `u`, which removes `g` without estimating it first, so tha
 `β̂` is `√n`-consistent with sandwich standard errors; `ĝ` is then the smooth of
 `y - x'β̂`.
 
+Varying-coefficient models, with or without penalties, are in [CoordinateDescent.jl](https://github.com/mlakolar/CoordinateDescent.jl),
+which uses the kernels of this package.
+
 ```julia
-m = fit(VaryingCoefficient, u, hcat(ones(n), x), y)    # β₀(u) + β₁(u) x
-coef(m), confint(m).lower                              # one row per point, one column per coefficient
 p = fit(PartiallyLinear, u, X, y)
 coeftable(p)                                           # β̂ with standard errors; p.smooth is ĝ at p.points
 ```
