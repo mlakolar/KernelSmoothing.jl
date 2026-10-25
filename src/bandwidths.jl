@@ -37,12 +37,12 @@ end
 """
     BandwidthSelection
 
-The result of [`select_bandwidth`](@ref): the bandwidth `h`, a number or a vector
-with one bandwidth per evaluation point, the `rule` that chose it (`nothing` for a
+The result of [`select_bandwidth`](@ref): the bandwidth `h`, a number, a vector
+with one bandwidth per evaluation point or a bandwidth matrix, the `rule` that chose it (`nothing` for a
 bandwidth given by the user) and the named tuple `details` with what the rule
 computed on the way, such as the scale estimate of a rule of thumb.
 """
-struct BandwidthSelection{H<:Union{Float64,Vector{Float64}},R,T<:NamedTuple}
+struct BandwidthSelection{H<:Union{Float64,Vector{Float64},Matrix{Float64}},R,T<:NamedTuple}
   h::H
   rule::R
   details::T

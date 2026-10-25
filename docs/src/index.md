@@ -10,6 +10,9 @@ It provides:
   Distributions.jl, robust bias-corrected intervals for densities at interior
   points, and the local polynomial density estimator of Cattaneo, Jansson and Ma
   for densities with a boundary;
+- [multivariate kernel density estimates](@ref multivariate-page) with a bandwidth
+  matrix, chosen by normal scale, plug-in, smoothed or least-squares
+  cross-validation rules;
 - [local polynomial regression](@ref regression-page) of a regression function or
   its derivatives, with conventional, robust bias-corrected and honest intervals,
   covariances between points and uniform bands;

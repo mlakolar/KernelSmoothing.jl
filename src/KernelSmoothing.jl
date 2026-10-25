@@ -7,11 +7,13 @@ bandwidth selection and robust bias-corrected inference.
 The estimators are [`KDE`](@ref), a kernel density estimate that is a distribution
 of Distributions.jl; [`PointwiseDensity`](@ref), density estimates at a set of
 points with robust bias-corrected intervals; [`LocalPolynomialDensity`](@ref), the
-boundary-adaptive density estimator of Cattaneo, Jansson and Ma; and
+boundary-adaptive density estimator of Cattaneo, Jansson and Ma;
 [`LocalPolynomialRegression`](@ref), local polynomial estimates of a regression
 function or its derivatives with conventional, robust bias-corrected and
-[`Honest`](@ref) intervals and uniform bands, see [`conf_band`](@ref); and
-[`RegressionDiscontinuity`](@ref), estimates for regression discontinuity designs.
+[`Honest`](@ref) intervals and uniform bands, see [`conf_band`](@ref);
+[`RegressionDiscontinuity`](@ref), estimates for regression discontinuity designs; and
+[`MultivariateKDE`](@ref), a kernel density estimate in several dimensions with a
+bandwidth matrix.
 They are fitted
 with `fit` and choose their bandwidths with a [`BandwidthSelector`](@ref).
 Underneath are the smoothing kernels, see [`AbstractKernel`](@ref), samples
@@ -22,7 +24,7 @@ module KernelSmoothing
 
 import Distributions
 import Distributions: cdf, ccdf, cquantile, support, convolve, moment, pdf, logpdf, quantile, insupport, mean, var,
-  std, median
+  std, median, cov
 import LinearAlgebra
 import StatsAPI
 import StatsAPI: fit, nobs, stderror, coef, confint, coeftable, predict, fitted, residuals, vcov
@@ -48,7 +50,8 @@ export
   RegressionDiscontinuity, RDOptimal, RDHonestOptimal, DensityDiscontinuity, RDDensityOptimal,
   coef, confint, coeftable, predict, fitted, residuals, vcov, conf_band,
   local_polynomial, smoother_matrix, PartiallyLinear, LocalLikelihood,
-  kernel_weights, regression_points, bandwidth_grid, grid_minimize, sandwich, supt_critical
+  kernel_weights, regression_points, bandwidth_grid, grid_minimize, sandwich, supt_critical,
+  MultivariateKDE, marginal, cov, MatrixSelector, NormalScaleMatrix, PlugInMatrix, SCVMatrix, LSCVMatrix
 
 include("polynomials.jl")
 include("kernels.jl")
@@ -71,6 +74,8 @@ include("rdhonest.jl")
 include("semiparametric.jl")
 include("locallik.jl")
 include("rddensity.jl")
+include("mvkde.jl")
+include("mvbandwidths.jl")
 include("building.jl")
 include("precompile.jl")
 
