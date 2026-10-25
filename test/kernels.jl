@@ -218,6 +218,18 @@ end
   @test derivative(s, 1)(0.4) ≈ 3 * derivative(base, 1)(0.4)
   @test_throws ArgumentError GaussianDerivativeKernel(1.0, 0, Inf)
   @test_throws ArgumentError GaussianDerivativeKernel(Inf, 0)
+  for σ in (big"1e-400", big"1e400")
+    @test_throws ArgumentError GaussianDerivativeKernel(σ, 0)
+  end
+  for a in (big"1e400", -big"1e400")
+    @test_throws ArgumentError GaussianDerivativeKernel(1.0, 0, a)
+  end
+  k = GaussianDerivativeKernel(big"1.5", 2, big"3.0")
+  @test k.σ === 1.5 && k.a === 3.0
+  @test k(0.4) == GaussianDerivativeKernel(1.5, 2, 3.0)(0.4)
+  for σ in (nextfloat(0.0), floatmin(Float64), floatmax(Float64))
+    @test GaussianDerivativeKernel(σ, 0).σ === σ
+  end
 end
 
 @testset "products" begin
@@ -283,6 +295,63 @@ end
     @test d(Inf) == 0 && d(-Inf) == 0 && d(40.0) == 0 && isnan(d(NaN))
     @test isfinite(d(38.0))
   end
+end
+
+@testset "Gaussian derivatives with an overflowing normalizer" begin
+  # These Hermite formulas give an independent reference without overflowing the
+  # scale factor or underflowing the Gaussian before multiplying them.
+  hermite(r, z) = r == 0 ? one(z) : r == 1 ? z : r == 2 ? z^2 - 1 : z^4 - 6z^2 + 3
+  function reference(σ, r, a, u)
+    setprecision(BigFloat, 256) do
+      sb, zb = BigFloat(σ), BigFloat(u) / BigFloat(σ)
+      Float64(BigFloat(a) * (-1)^r * hermite(r, zb) * exp(-zb^2 / 2) /
+              (sqrt(2 * BigFloat(π)) * sb^(r + 1)))
+    end
+  end
+  for (σ, r, a) in ((1e-150, 2, 1.0), (1e-200, 1, 1.0), (1e-320, 0, 1.0),
+                    (1e-100, 4, -0.75), (1e-150, 2, 0.0))
+    k = GaussianDerivativeKernel(σ, r, a)
+    @test !isfinite(k.c)
+    for z in (0.0, 1.0, 2.0, -40.0, 40.0)
+      u = z * σ
+      expected = reference(σ, r, a, u)
+      if isfinite(expected)
+        @test k(u) ≈ expected rtol = 2e-12
+      else
+        @test k(u) == expected
+      end
+    end
+    @test k(Inf) == 0 && k(-Inf) == 0 && k(1.0) == 0
+    @test isnan(k(NaN))
+  end
+  k = GaussianDerivativeKernel(1e-150, 2)
+  u = 40 * k.σ
+  expected = k(u)
+  @test isfinite(expected) && expected > 1e100
+  @inferred k(u)
+  # Evaluation uses no BigFloat precision context, including concurrent calls.
+  setprecision(BigFloat, 80) do
+    tasks = [Threads.@spawn k(u) for _ in 1:16]
+    @test all(==(expected), fetch.(tasks))
+    @test precision(BigFloat) == 80
+  end
+end
+
+@testset "Gaussian derivatives with a zero cached normalizer" begin
+  k = GaussianDerivativeKernel(1e100, 4, 1e308)
+  @test iszero(k.c)
+  for z in (0.0, 1.0, 2.0)
+    u = z * k.σ
+    expected = setprecision(BigFloat, 256) do
+      sb, zb = BigFloat(k.σ), BigFloat(u) / BigFloat(k.σ)
+      Float64(BigFloat(k.a) * (zb^4 - 6zb^2 + 3) * exp(-zb^2 / 2) /
+              (sqrt(2 * BigFloat(π)) * sb^5))
+    end
+    @test isfinite(expected) && expected != 0
+    @test k(u) ≈ expected rtol = 2e-12
+  end
+  @test k(1.0) > 0 && k(Inf) == 0 && k(-Inf) == 0
+  @test GaussianDerivativeKernel(1e100, 4)(0.0) == 0
 end
 
 @testset "convolutions and products on narrow pieces" begin

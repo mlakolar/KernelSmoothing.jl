@@ -619,13 +619,16 @@ struct GaussianDerivativeKernel <: AbstractKernel
   a::Float64      # amplitude
   invσ::Float64   # 1 / σ
   c::Float64      # a (-1)^r / (sqrt(2π) σ^(r+1))
+  scaled::Bool    # c overflowed or vanished, so that values are combined in logarithms
 
   function GaussianDerivativeKernel(σ::Real, r::Integer, a::Real = 1.0)
-    isfinite(σ) && σ > 0 ||
+    σf, af = Float64(σ), Float64(a)
+    isfinite(σf) && σf > 0 ||
       throw(ArgumentError("standard deviation σ must be positive and finite, got $σ"))
     _check_order(r)
-    isfinite(a) || throw(ArgumentError("amplitude a must be finite, got $a"))
-    new(σ, r, a, 1 / σ, a * (-1)^r * INV_SQRT_2PI / Float64(σ)^(r + 1))
+    isfinite(af) || throw(ArgumentError("amplitude a must be finite, got $a"))
+    c = af * (-1)^r * INV_SQRT_2PI / σf^(r + 1)
+    new(σf, r, af, 1 / σf, c, !isfinite(c) || (iszero(c) && !iszero(af)))
   end
 end
 
@@ -646,9 +649,36 @@ _amplitude(k::GaussianDerivativeKernel) = k.a
 # φ^(r)(z) = (-1)^r He_r(z) φ(z), with He_r the probabilists' Hermite polynomials;
 # beyond |z| = 38.6 the exponential is zero while the polynomial can overflow
 function (k::GaussianDerivativeKernel)(u::Real)
+  k.scaled && return _scaledgaussian(k, u)
   z = u * k.invσ
   e = exp(-z^2 / 2)
   return iszero(e) ? k.c * e : k.c * _hermite(k.r, z) * e
+end
+
+# The normalizer or its denominator can overflow while the final value is finite.
+# Keep the Hermite polynomial scaled and combine all factors in logarithms.
+function _scaledgaussian(k::GaussianDerivativeKernel, u)
+  z = u / k.σ
+  isnan(z) && return z
+  (!isfinite(z) || iszero(k.a) || (iszero(z) && isodd(k.r))) && return zero(z)
+  z2 = z^2 / 2
+  isfinite(z2) || return zero(z)
+  h, logscale = if k.r == 0
+    one(z), zero(z)
+  else
+    h0, h1, s = one(z), z, zero(z)
+    for n in 1:k.r-1
+      scale = max(abs(h0), abs(h1))
+      h0, h1 = h0 / scale, h1 / scale
+      s += log(scale)
+      h0, h1 = h1, z * h1 - n * h0
+    end
+    h1, s
+  end
+  iszero(h) && return zero(z)
+  logvalue = log(abs(k.a)) + log(INV_SQRT_2PI) - (k.r + 1) * log(k.σ) +
+             log(abs(h)) + logscale - z2
+  return (isodd(k.r) ? -sign(k.a) : sign(k.a)) * sign(h) * exp(logvalue)
 end
 
 # He_r(z), from He_{n+1} = z He_n - n He_{n-1}
@@ -890,6 +920,8 @@ function _kernelquantile(k::AbstractKernel, p)
   return _invertcdf(u -> cdf(k, u), k, p, a, b)
 end
 
+_cdfmidpoint(a, b) = (s = a + b; isfinite(s) ? s / 2 : a / 2 + b / 2)
+
 # The smallest x in [a, b] with F(x) ≥ p, to a few units in the last place, for a
 # nondecreasing F with derivative f, F(a) ≤ p ≤ F(b): Newton steps where they stay
 # inside the bracket and at least halve the step before the last one, bisection
@@ -898,22 +930,22 @@ end
 # closed around its limit. Where F is flat at the level p, bisection moves to the
 # left end of the flat part.
 function _invertcdf(F, f, p, a, b)
-  x = (a + b) / 2
+  x = _cdfmidpoint(a, b)
   step, before = b - a, b - a   # the last step and the one before it
   for _ in 1:2000
     Fx = F(x)
     Fx < p ? (a = x) : (b = x)
     b - a <= 4 * eps(max(abs(a), abs(b))) && break
     fx = f(x)
-    xn = fx > 0 ? x - (Fx - p) / fx : (a + b) / 2
+    xn = fx > 0 ? x - (Fx - p) / fx : _cdfmidpoint(a, b)
     if !(a < xn < b) || 2 * abs(xn - x) > abs(before)
-      xn = (a + b) / 2
+      xn = _cdfmidpoint(a, b)
     elseif abs(xn - x) <= 4 * eps(abs(x))
       δ = 8 * eps(abs(xn)) + floatmin()
       lo, hi = max(a, xn - δ), min(b, xn + δ)
       F(lo) < p && (a = lo)
       F(hi) >= p && (b = hi)
-      xn = (a + b) / 2
+      xn = _cdfmidpoint(a, b)
     end
     before, step = step, xn - x
     x = xn

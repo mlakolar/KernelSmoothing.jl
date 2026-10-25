@@ -149,6 +149,52 @@ function _secondderivative(k)
   return -μ2 * c2, c2
 end
 
+# The bias term ρ³ κ k(v) (c₀ + c₂ v²) of the robust density estimate is the product
+# where that is finite, except that a Gaussian tail k(v) = c exp(-z²/2) that
+# underflowed, which is at most max(c, 1) 2^-1075, can be a normal number when
+# ρ³ κ |q| max(c, 1) ≥ 2^53, for an extreme ratio ρ = h / b or scale. The loops over
+# a window sum the products, and only where a sum is not finite or _biascare finds
+# such a tail possible, they sum the window again with _densitybias, which evaluates
+# these terms in logarithms.
+function _biascare(d, k, x0, h, ρ, r, c0, c2, κ)
+  k isa GaussianFamily && !isempty(r) || return false
+  # |q| is largest at the observation farthest from x0; a factor 2 covers rounding
+  vmax = ρ * max(abs(x0 - d.x[first(r)]), abs(x0 - d.x[last(r)])) / h
+  c = abs(_amplitude(k)) * INV_SQRT_2PI / first(_scale_order(k))
+  return !(ρ^3 * κ * (abs(c0) + abs(c2) * vmax^2) * max(c, 1.0) < 0x1p52)
+end
+
+# the bias term with this care
+@inline function _densitybias(k, v, ρ, c0, c2, κ)
+  kv = k(v)
+  q = c0 + c2 * v^2
+  t = ρ^3 * κ * kv * q
+  if k isa GaussianFamily && iszero(kv)
+    c = abs(_amplitude(k)) * INV_SQRT_2PI / first(_scale_order(k))
+    abs(ρ^3 * κ * q) * max(c, 1.0) < 0x1p53 && return zero(t)
+  elseif isfinite(t)
+    return t
+  end
+  return _densitybiaslog(k, v, ρ, c0, c2, κ, kv, q)
+end
+
+# the bias term without the product, which overflows, multiplies zero by infinity
+# or loses an underflowed Gaussian tail; exactly zero contributions stay zero
+@noinline function _densitybiaslog(k, v, ρ, c0, c2, κ, kv, q)
+  iszero(kv) && !(k isa GaussianFamily) && return zero(kv)
+  iszero(q) && return zero(q)
+  logq = isfinite(q) ? log(abs(q)) : log(abs(c2)) + 2log(abs(v))
+  logk = if k isa GaussianFamily
+    σ = first(_scale_order(k))
+    z = v / σ
+    isinf(z^2) && return zero(kv)
+    log(_amplitude(k) * INV_SQRT_2PI) - log(σ) - z^2 / 2
+  else
+    log(kv)
+  end
+  return copysign(exp(3log(ρ) + log(κ) + logk + logq), q)
+end
+
 # the estimates and their standard errors at one point, summed over the window of
 # the larger bandwidth; with sᵣ = ∑ wᵢʳ kᵢ and s₂ = ∑ wᵢ² kᵢ², as for KDE. Unless
 # compat, a standard error without an observation of nonzero weight, where the sum
@@ -174,12 +220,36 @@ function _densityfit(d::SmoothingData, k, x0, h, b, c0, c2, κ, compat::Bool)
     t1 += w^2 * m
     t2 += w^2 * m^2
   end
+  if !compat && (!isfinite(t0 + t1 + t2) || _biascare(d, k, x0, h, ρ, r, c0, c2, κ))
+    s0, s1, s2, t0, t1, t2 = _densitysumscareful(d, k, x0, h, ρ, r, c0, c2, κ)
+  end
   W = d.sumw
   se(s0, s1, s2) = !compat && s2 == 0 ? NaN : _densityse(s0, s1, s2, h, W, d.neff)
   e = !compat && k(1.0) == 0   # the edges of the window get no weight
   nwin = isfinite(rad) ? _firsttrue(i -> e ? xs[i] - x0 >= hb : xs[i] - x0 > hb, n) -
                          _firsttrue(i -> e ? xs[i] - x0 > -hb : xs[i] - x0 >= -hb, n) : n
   return (f = s0 / (h * W), se = se(s0, s1, s2), fbc = t0 / (h * W), sebc = se(t0, t1, t2), n = nwin)
+end
+
+# the sums of _densityfit over the window r with the bias terms from _densitybias;
+# kept out of line, so that the usual loop compiles as it would without it
+@noinline function _densitysumscareful(d, k, x0, h, ρ, r, c0, c2, κ)
+  xs = d.x
+  s0 = s1 = s2 = t0 = t1 = t2 = 0.0
+  for i in r
+    u = (x0 - xs[i]) / h
+    kv = k(u)
+    v = ρ * u
+    m = kv - _densitybias(k, v, ρ, c0, c2, κ)
+    w = _weight(d.w, i)
+    s0 += w * kv
+    s1 += w^2 * kv
+    s2 += w^2 * kv^2
+    t0 += w * m
+    t1 += w^2 * m
+    t2 += w^2 * m^2
+  end
+  return s0, s1, s2, t0, t1, t2
 end
 
 

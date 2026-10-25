@@ -305,6 +305,24 @@ end
   @test fetch.(tasks) == [1, 2] || fetch.(tasks) == [2, 1]
 end
 
+@testset "compensated Gaussian tails use full sums" begin
+  k = KernelSmoothing.GaussianDerivativeKernel(1e-150, 2)
+  d = SmoothingData([40 * k.σ, 80 * k.σ])
+  @test KernelSmoothing._zerosupport(k) == (-Inf, Inf)
+  @test _choose_engine(k, d.x, 1.0, [0.0], 0) isa DirectSums
+  for kmax in (0, 1, 2)
+    direct = kernelsums(d, k, 1.0, [0.0]; kmax, engine = DirectSums())
+    @test direct[1, 1] ≈ 2.339769131090447e105 rtol = 2e-12
+    @test kernelsums(d, k, 1.0, [0.0]; kmax) == direct
+  end
+  # A zero cached normalizer can also hide a nonzero derivative.
+  broad = KernelSmoothing.GaussianDerivativeKernel(1e100, 4, 1e308)
+  @test KernelSmoothing._zerosupport(broad) == (-Inf, Inf)
+  @test KernelSmoothing._zerosupport(GaussianKernel()) == (-38.62, 38.62)
+  ordinary = KernelSmoothing.GaussianDerivativeKernel(2.0, 3)
+  @test KernelSmoothing._zerosupport(ordinary) == (-77.24, 77.24)
+end
+
 @testset "bandwidths stay positive and finite after conversion" begin
   d, k = SmoothingData([0.0, 1.0]), EpanechnikovKernel()
   for h in (big"1e-400", big"1e400")
