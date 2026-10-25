@@ -90,6 +90,25 @@ observations and keeps at least 10 distinct values in every window. A bandwidth 
 also be given, as one number or a pair for the left and the right side, with
 `pilot` (by default ``b = h``) or `rho` (``b = h / \rho``).
 
+## Several cutoffs
+
+In a design with several cutoffs (Cattaneo, Keele, Titiunik and Vazquez-Bare 2016),
+different units face different cutoffs, as when a program's eligibility threshold
+varies by region or year. `fit(MultipleCutoffs, x, y, c)`, with `c` the cutoff that
+each unit faces, estimates the effect at each cutoff from its units, their weighted
+average with weights proportional to the observations in the windows, and the
+pooled effect, from the running variable normalized to ``x - c``; the pooled
+estimand is an average of the effects at the cutoffs weighted by the densities of
+the running variable there. With cumulative cutoffs, one running variable crosses
+several thresholds at which the treatment changes, and `fit(CumulativeCutoffs, x, y;
+cutoffs)` estimates the effect at each, optionally from the observations in a range
+around it. Both reproduce rdmulti's `rdmc` and `rdms`.
+
+```julia
+fit(MultipleCutoffs, x, y, c)                          # cutoffs per unit
+fit(CumulativeCutoffs, x, y; cutoffs = [33, 66])        # thresholds of one score
+```
+
 ## Honest intervals
 
 Robust bias correction estimates the bias and removes it, while honest intervals
@@ -158,5 +177,5 @@ agree with rddensity to rounding.
 
 ```@autodocs
 Modules = [KernelSmoothing]
-Pages = ["rd.jl", "rdbandwidth.jl", "rdhonest.jl", "rddensity.jl"]
+Pages = ["rd.jl", "rdbandwidth.jl", "rdhonest.jl", "rddensity.jl", "rdmulti.jl"]
 ```
