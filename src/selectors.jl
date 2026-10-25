@@ -308,7 +308,7 @@ function _sjbinlags!(c::Vector{Int}, h::Vector{<:Integer}, x, Δ)
     t = 0
     @simd for j in 1:K-l
       t += Int(h[j]) * Int(h[j + l])
-    end
+    end  # COV_EXCL_LINE, coverage counts the end of a @simd loop as never run
     c[l + 1] = t
   end
   return c
