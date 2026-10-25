@@ -180,5 +180,5 @@ agree with rddensity to rounding.
 
 ```@autodocs
 Modules = [KernelSmoothing]
-Pages = ["rd.jl", "rdbandwidth.jl", "rdhonest.jl", "rddensity.jl"]
+Pages = ["rd.jl", "rdbandwidth.jl", "rdhonest.jl", "rddensity.jl", "rdpower.jl"]
 ```
