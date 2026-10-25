@@ -72,7 +72,6 @@ include("semiparametric.jl")
 include("locallik.jl")
 include("rddensity.jl")
 include("building.jl")
-include("compat_naming.jl")
 include("precompile.jl")
 
 end

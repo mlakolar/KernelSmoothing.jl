@@ -13,8 +13,6 @@ const W = 1.0 .+ mod.(1:N, 3)
 const CL = ["c$(mod(i, 25))" for i in 1:N]   # 25 clusters, labelled by strings
 
 @testset "kernel weights" begin
-  # the names before the snake_case convention still work, deprecated
-  @test KernelSmoothing.kernelweights === kernel_weights && KernelSmoothing.gridminimize === grid_minimize
   for w in (nothing, W), k in (EpanechnikovKernel(), GaussianKernel(), UniformKernel()),
       (x0, h) in ((0.5, 0.1), (0.02, 0.05), (2.0, 0.1))
     d = SmoothingData(X, Y; weights = w)

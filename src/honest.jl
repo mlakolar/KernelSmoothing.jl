@@ -48,23 +48,9 @@ struct Honest <: InferenceMethod
   end
 end
 
-# Accept the old spelling during the naming transition, while rejecting ambiguous calls.
-function _bias_corrected_keyword(bias_corrected, biascorrected)
-  if biascorrected !== nothing
-    bias_corrected === nothing || throw(ArgumentError("specify only bias_corrected, not both keyword spellings"))
-    Base.depwarn("keyword biascorrected is deprecated; use bias_corrected", :biascorrected)
-    return biascorrected::Bool
-  end
-  return bias_corrected === nothing ? false : bias_corrected::Bool
-end
-
-function Honest(M::Union{Real,Symbol,Tuple{Real,Real}};
-                bias_corrected::Union{Nothing,Bool} = nothing,
-                biascorrected::Union{Nothing,Bool} = nothing, class::Symbol = :default)
-  return Honest(M, _bias_corrected_keyword(bias_corrected, biascorrected), class)
-end
-Honest(; bias_corrected::Union{Nothing,Bool} = nothing,
-         biascorrected::Union{Nothing,Bool} = nothing) = throw(ArgumentError("Honest needs a bound M on the " *
+Honest(M::Union{Real,Symbol,Tuple{Real,Real}}; bias_corrected::Bool = false, class::Symbol = :default) =
+  Honest(M, bias_corrected, class)
+Honest(; bias_corrected::Bool = false) = throw(ArgumentError("Honest needs a bound M on the " *
   "derivative of order p + 1, chosen in advance, such as Honest(40), or Honest(:rot) for the rule of thumb"))
 
 function Base.show(io::IO, m::Honest)
@@ -82,10 +68,7 @@ The worst-case bias `M / (p + 1)! ∑ᵢ |ℓᵢ| |xᵢ - x₀|^(p+1)` of the es
 points over the Taylor class with bound `M` on the derivative of order `p + 1`, as
 in [`Honest`](@ref); `M = :rot` uses the rule of thumb.
 """
-function worst_case_bias(m::LocalPolynomialRegression, M;
-                         bias_corrected::Union{Nothing,Bool} = nothing,
-                         biascorrected::Union{Nothing,Bool} = nothing)
-  bias_corrected = _bias_corrected_keyword(bias_corrected, biascorrected)
+function worst_case_bias(m::LocalPolynomialRegression, M; bias_corrected::Bool = false)
   Honest(M)   # checks M
   M isa Tuple && throw(ArgumentError("a pair of bounds M is for fuzzy regression discontinuity designs"))
   Mv = M === :rot ? _honest_bound(m.data, m.degree) : Float64(M)::Float64

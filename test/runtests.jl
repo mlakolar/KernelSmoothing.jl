@@ -23,7 +23,6 @@ tests = [
   "lpdensity",
   "recipes",
   "building",
-  "naming",
   "aqua"
 ]
 
