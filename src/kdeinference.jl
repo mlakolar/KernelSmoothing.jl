@@ -121,10 +121,10 @@ _default_density_rule(m) = m == 1 ? MSEOptimal() : IMSEOptimal()
 _density_selection(h::Union{Real,AbstractVector{<:Real}}, d, k, pts, minobs, compat) =
   _regression_selection(h, d, k, 0, 0, pts, nothing, minobs)
 _density_selection(rule::Union{MSEOptimal,IMSEOptimal,CoverageOptimal}, d, k, pts, minobs, compat) =
-  selectbandwidth(rule, d, k; points = pts, minobs, compat)
+  select_bandwidth(rule, d, k; points = pts, minobs, compat)
 _density_selection(rule::Union{RuleOfThumb,CrossValidation}, d, k, pts, minobs, compat) =
   throw(ArgumentError("$rule chooses bandwidths for regression; use a density rule"))
-_density_selection(rule::BandwidthSelector, d, k, pts, minobs, compat) = selectbandwidth(rule, d, k)
+_density_selection(rule::BandwidthSelector, d, k, pts, minobs, compat) = select_bandwidth(rule, d, k)
 _density_selection(h, d, k, pts, minobs, compat) =
   throw(ArgumentError("bandwidth must be a positive number, a vector or a BandwidthSelector, got $(repr(h))"))
 
@@ -420,7 +420,7 @@ _densitygrid(rule, d, points) = rule.grid === :points ? _gridpoints(points) :
 # windows for compactly supported kernels and by the exact choice of the engines
 # otherwise
 _pilotsums(d, k, h, c, kmax) =
-  kernelsums(d, k, h, c; kmax, engine = all(isfinite, support(k)) ? WindowSums() : nothing)
+  kernel_sums(d, k, h, c; kmax, engine = all(isfinite, support(k)) ? WindowSums() : nothing)
 
 # The bandwidth at a point between the floor and the cap. Where the pilot estimates
 # vanish, as between two clusters, the rule gives NaN or zero, and the floor is

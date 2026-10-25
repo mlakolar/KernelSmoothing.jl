@@ -20,7 +20,7 @@ well causes no conflict. The density is
 computed exactly from the observations, without a grid. A point costs a binary
 search in the sorted data and a sum over the observations within ``h`` of it, and
 broadcasting `pdf.(f, xs)` over many points uses the engines of
-[`kernelsums`](@ref), also inside fused broadcasts such as `pdf.(f, xs .+ 1)`.
+[`kernel_sums`](@ref), also inside fused broadcasts such as `pdf.(f, xs .+ 1)`.
 Points that are not plain numbers, such as the dual numbers of ForwardDiff.jl, go
 through the scalar methods, so that the estimate can be differentiated
 automatically. Bandwidths are numbers or [`BandwidthSelector`](@ref)s, by default

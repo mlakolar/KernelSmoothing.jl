@@ -18,7 +18,7 @@ standard errors come from the influence function of `F̂` on the fit, so that th
 account for its estimation.
 
 `coef(m; method)`, `stderror(m; method)`, `confint(m; level, method)`, `coeftable(m)`,
-[`vcov`](@ref) and [`confband`](@ref) work as for [`PointwiseDensity`](@ref). The
+[`vcov`](@ref) and [`conf_band`](@ref) work as for [`PointwiseDensity`](@ref). The
 columns `nobs` and `nunique` of `coeftable` count the observations and the distinct
 values with positive weight in the window of each point, or with `compat = true`
 all those within `h`, as lpdensity's `nh` and `nhu`.
@@ -404,7 +404,7 @@ function _lpdensity_nr(d::SmoothingData, k, p, v; robust::Bool = false, guard::B
   e = v + 1
   c1, c2, c3 = (Si * C1)[e], (Si * C2)[e], (Si * C3)[e]
   vfac = factorial(v)
-  sdconst = sqrt(abs((Si * _cjmG(k, p) * Si)[e, e]))
+  sdconst = sqrt(abs((Si * _cjm_g(k, p) * Si)[e, e]))
   # derivatives of the normal density with mean μ and standard deviation σ
   φr(x, r) = (-1)^r * _hermite(r, (x - μ) / σ) * exp(-((x - μ) / σ)^2 / 2) / (sqrt(2π) * σ^(r + 1))
   function terms(x0)
@@ -565,7 +565,7 @@ end
 # G[i, j] = ∫∫_{x<y} x^i y^(j-1) k(x) k(y) + ∫∫_{x>y} x^(i-1) y^j k(x) k(y), i, j = 1, …, p + 1,
 # over [a0, b0]² (by default the support of the kernel), by Gauss–Legendre quadrature on
 # the pieces of the kernel, exact for these polynomials
-function _cjmG(k, p, a0 = first(first(pieces(k))), b0 = last(first(pieces(k))))
+function _cjm_g(k, p, a0 = first(first(pieces(k))), b0 = last(first(pieces(k))))
   G = zeros(p + 1, p + 1)
   for i in 1:p+1, j in 1:p+1
     G[i, j] = _kintegral(k, y -> y^(j - 1) * k(y) * _kintegral(k, x -> x^i * k(x), a0, y), a0, b0) +
@@ -592,7 +592,7 @@ function _kintegral(k, f, a, b)
 end
 
 
-confband(m::LocalPolynomialDensity; kwargs...) = _confband(m; kwargs...)
+conf_band(m::LocalPolynomialDensity; kwargs...) = _confband(m; kwargs...)
 _nonnegative(m::LocalPolynomialDensity) = !m.compat && m.derivative == 0
 _confint(m::LocalPolynomialDensity, level, method::Honest) =
   throw(ArgumentError("honest intervals are implemented for local polynomial regression"))

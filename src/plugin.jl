@@ -187,9 +187,9 @@ end
 # the plug-in rules take the choice between the adaptive pilots and nprobust's
 _regression_selection(rule::Union{MSEOptimal,IMSEOptimal,CoverageOptimal}, d, k, p, ν, pts, vce, minobs;
                       compat = false) =
-  selectbandwidth(rule, d, k; degree = p, derivative = ν, points = pts, vce, minobs, compat)
+  select_bandwidth(rule, d, k; degree = p, derivative = ν, points = pts, vce, minobs, compat)
 
-function selectbandwidth(rule::MSEOptimal, d::SmoothingData, k::AbstractKernel; derivative::Integer = 0,
+function select_bandwidth(rule::MSEOptimal, d::SmoothingData, k::AbstractKernel; derivative::Integer = 0,
                          degree::Integer = derivative + 1, points = nothing,
                          vce::Union{Nothing,VarianceEstimator} = nothing, minobs::Integer = 21, compat::Bool = false)
   d.y === nothing && return _densityplugin(rule, d, k, points === nothing ? nothing : _checkpoints(points),
@@ -207,7 +207,7 @@ function selectbandwidth(rule::MSEOptimal, d::SmoothingData, k::AbstractKernel; 
                             crossvalidation = compat ? NaN : pilots.crossvalidation))
 end
 
-function selectbandwidth(rule::IMSEOptimal, d::SmoothingData, k::AbstractKernel; derivative::Integer = 0,
+function select_bandwidth(rule::IMSEOptimal, d::SmoothingData, k::AbstractKernel; derivative::Integer = 0,
                          degree::Integer = derivative + 1, points = nothing,
                          vce::Union{Nothing,VarianceEstimator} = nothing, minobs::Integer = 21, compat::Bool = false)
   d.y === nothing && return _densityplugin(rule, d, k, points === nothing ? nothing : _checkpoints(points),
@@ -242,9 +242,9 @@ function selectbandwidth(rule::IMSEOptimal, d::SmoothingData, k::AbstractKernel;
   return BandwidthSelection(h, rule, (b = Float64(b), grid = grid, crossvalidation = NaN))
 end
 
-function selectbandwidth(rule::CoverageOptimal, d::SmoothingData, k::AbstractKernel; derivative::Integer = 0,
+function select_bandwidth(rule::CoverageOptimal, d::SmoothingData, k::AbstractKernel; derivative::Integer = 0,
                          degree::Integer = derivative + 1, compat::Bool = false, kwargs...)
-  s = selectbandwidth(rule.base, d, k; degree, derivative, compat, kwargs...)
+  s = select_bandwidth(rule.base, d, k; degree, derivative, compat, kwargs...)
   convention = something(rule.convention, compat ? :nprobust : :interior)
   # for densities with second-order kernels (p = 2) the factors are one, as in nprobust
   d.y === nothing && return BandwidthSelection(s.h, rule, (s.details..., mse = s.h))
@@ -269,8 +269,8 @@ _check_responses(d, rule) = allequal(d.y) && throw(ArgumentError("the responses 
 # derivatives of orders p + 1 (fit of order p + 1) and p + 2 (fit of order p + 2) to
 # that for the regression function
 function _regressionpilots(d, k, p)
-  hcv = selectbandwidth(CrossValidation(), d, k; degree = p).h
-  rot(o, ν) = selectbandwidth(RuleOfThumb(), d, k; degree = o, derivative = ν).h
+  hcv = select_bandwidth(CrossValidation(), d, k; degree = p).h
+  rot(o, ν) = select_bandwidth(RuleOfThumb(), d, k; degree = o, derivative = ν).h
   h0 = rot(p, 0)
   return (b1 = hcv * rot(p + 1, p + 1) / h0, b2 = hcv * rot(p + 2, p + 2) / h0, crossvalidation = hcv)
 end

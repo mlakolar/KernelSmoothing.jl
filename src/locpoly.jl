@@ -300,7 +300,7 @@ _regression_selection(rule::Union{NormalReference,SilvermanRule,SheatherJones,LS
                       compat = false) =
   throw(ArgumentError("$rule chooses bandwidths for densities; use a regression rule such as RuleOfThumb()"))
 _regression_selection(rule::BandwidthSelector, d, k, p, ν, pts, vce, minobs; compat = false) =
-  selectbandwidth(rule, d, k; degree = p, derivative = ν, points = pts, vce, minobs)
+  select_bandwidth(rule, d, k; degree = p, derivative = ν, points = pts, vce, minobs)
 _regression_selection(::Nothing, d, k, p, ν, pts, vce, minobs; compat = false) =   # nprobust's default
   _regression_selection(length(pts) == 1 ? MSEOptimal() : IMSEOptimal(), d, k, p, ν, pts, vce, minobs; compat)
 _regression_selection(h, d, k, p, ν, pts, vce, minobs; compat = false) = throw(ArgumentError(
@@ -630,7 +630,7 @@ end
 
 The estimates of the fit at new points `x`, with the same kernel, order and
 bandwidth, and the same floor on the windows. The sums are computed by
-[`kernelsums`](@ref) for all points at once. Needs a fit with one bandwidth for all
+[`kernel_sums`](@ref) for all points at once. Needs a fit with one bandwidth for all
 points.
 """
 function StatsAPI.predict(m::LocalPolynomialRegression, x::AbstractVector{<:Real})
@@ -647,8 +647,8 @@ end
 
 # estimates of order p at the points from kernel sums
 function _estimates(d, k, h, points, p, ν)
-  S = kernelsums(d, k, h, points; kmax = 2p)
-  T = kernelsums(d, k, h, points; kmax = p, z = d.y)
+  S = kernel_sums(d, k, h, points; kmax = 2p)
+  T = kernel_sums(d, k, h, points; kmax = p, z = d.y)
   out = Vector{Float64}(undef, length(points))
   for j in eachindex(points)
     C, ok = _gramfactor([S[i + l + 1, j] for i in 0:p, l in 0:p], () -> nunique(d, _poswindow(d, k, points[j], h[j])))
@@ -661,34 +661,34 @@ end
 ## Local polynomial smoothing, without inference
 
 """
-    localpolynomial(x, y, points; bandwidth, derivative = 0, degree = derivative + 1,
+    local_polynomial(x, y, points; bandwidth, derivative = 0, degree = derivative + 1,
                     kernel = EpanechnikovKernel(), weights = nothing)
-    localpolynomial(d::SmoothingData, points; bandwidth, kwargs...)
+    local_polynomial(d::SmoothingData, points; bandwidth, kwargs...)
 
 The local polynomial estimates of the regression function, or of its derivative of
 order `derivative`, at `points`, with a given `bandwidth`, a number or one per
 point: the estimates of [`LocalPolynomialRegression`](@ref), without floors on the
 windows and without standard errors. Estimates whose window holds fewer distinct
 values of `x` with positive weight than coefficients are `NaN`. The sums come from
-[`kernelsums`](@ref) for all points at once, so that smoothing many curves, or
-building other estimators on local fits, costs little. [`smoothermatrix`](@ref)
+[`kernel_sums`](@ref) for all points at once, so that smoothing many curves, or
+building other estimators on local fits, costs little. [`smoother_matrix`](@ref)
 gives the weights of the estimates.
 
 # Examples
 ```julia
 julia> x = collect(range(0, 1; length = 200)); y = sin.(2π .* x);
 
-julia> round.(localpolynomial(x, y, [0.25, 0.5]; bandwidth = 0.1); digits = 3)
+julia> round.(local_polynomial(x, y, [0.25, 0.5]; bandwidth = 0.1); digits = 3)
 2-element Vector{Float64}:
  0.961
  0.0
 ```
 """
-function localpolynomial(x::AbstractVector, y::AbstractVector, points; weights = nothing, kwargs...)
-  return localpolynomial(SmoothingData(x, y; weights), points; kwargs...)
+function local_polynomial(x::AbstractVector, y::AbstractVector, points; weights = nothing, kwargs...)
+  return local_polynomial(SmoothingData(x, y; weights), points; kwargs...)
 end
 
-function localpolynomial(d::SmoothingData, points; bandwidth, derivative::Integer = 0,
+function local_polynomial(d::SmoothingData, points; bandwidth, derivative::Integer = 0,
                          degree::Integer = derivative + 1, kernel::AbstractKernel = EpanechnikovKernel())
   d.y === nothing && throw(ArgumentError("local polynomial smoothing needs responses; use SmoothingData(x, y)"))
   p, ν = Int(degree), Int(derivative)
@@ -698,26 +698,26 @@ function localpolynomial(d::SmoothingData, points; bandwidth, derivative::Intege
 end
 
 """
-    smoothermatrix(x, points; bandwidth, derivative = 0, degree = derivative + 1,
+    smoother_matrix(x, points; bandwidth, derivative = 0, degree = derivative + 1,
                    kernel = EpanechnikovKernel(), weights = nothing)
-    smoothermatrix(d::SmoothingData, points; bandwidth, kwargs...)
+    smoother_matrix(d::SmoothingData, points; bandwidth, kwargs...)
 
-The matrix `L` of the linear smoother of [`localpolynomial`](@ref): the estimate at
+The matrix `L` of the linear smoother of [`local_polynomial`](@ref): the estimate at
 `points[j]` is `∑ᵢ L[j, i] yᵢ`, so that `L * y` gives the estimates. The columns
 follow the observations in the input order of `x` (observations with zero weight
 get zero columns), or for `d::SmoothingData` the sorted order of `d.x`. For the
 regression function, every row sums to one and reproduces polynomials of order
 `degree` exactly. Rows of estimates that are not identified are `NaN`.
 """
-function smoothermatrix(x::AbstractVector, points; weights = nothing, kwargs...)
+function smoother_matrix(x::AbstractVector, points; weights = nothing, kwargs...)
   d = SmoothingData(x; weights)
-  Ls = smoothermatrix(d, points; kwargs...)
+  Ls = smoother_matrix(d, points; kwargs...)
   L = zeros(size(Ls, 1), length(x))
   L[:, d.perm] = Ls
   return L
 end
 
-function smoothermatrix(d::SmoothingData, points; bandwidth, derivative::Integer = 0,
+function smoother_matrix(d::SmoothingData, points; bandwidth, derivative::Integer = 0,
                         degree::Integer = derivative + 1, kernel::AbstractKernel = EpanechnikovKernel())
   p, ν = Int(degree), Int(derivative)
   _check_degree(p, ν)
@@ -818,7 +818,7 @@ _selection(rule::Union{RuleOfThumb,CrossValidation}, d, k) =
   throw(ArgumentError("$rule chooses bandwidths for regression; use a density rule such as SheatherJones()"))
 
 # (the fits pass vce and minobs to every regression rule; this one does not use them)
-function selectbandwidth(rule::RuleOfThumb, d::SmoothingData, k::AbstractKernel;
+function select_bandwidth(rule::RuleOfThumb, d::SmoothingData, k::AbstractKernel;
                          derivative::Integer = 0, degree::Integer = derivative + 1, points = nothing,
                          vce::Union{Nothing,VarianceEstimator} = nothing, minobs::Integer = 0)
   d.y === nothing && throw(ArgumentError("RuleOfThumb needs responses; use SmoothingData(x, y)"))

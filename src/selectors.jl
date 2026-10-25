@@ -96,7 +96,7 @@ function _mediangap(d::SmoothingData)
   return isodd(m) ? partialsort!(g, (m + 1) ÷ 2) : (partialsort!(g, m ÷ 2) + partialsort!(g, m ÷ 2 + 1)) / 2
 end
 
-function selectbandwidth(rule::SheatherJones, d::SmoothingData, k::AbstractKernel)
+function select_bandwidth(rule::SheatherJones, d::SmoothingData, k::AbstractKernel)
   nobs(d) >= 2 || throw(ArgumentError("SheatherJones needs at least two observations"))
   _check_mass(k, rule)
   rule.compat && return _sjcompat(rule, d, k)
@@ -836,7 +836,7 @@ end
 
 LSCV(; gridsize::Integer = 60, exact::Integer = 1000) = LSCV(gridsize, exact)
 
-function selectbandwidth(rule::LSCV, d::SmoothingData, k::AbstractKernel)
+function select_bandwidth(rule::LSCV, d::SmoothingData, k::AbstractKernel)
   nobs(d) >= 2 || throw(ArgumentError("LSCV needs at least two observations"))
   _check_mass(k, rule)
   sd, iqr = _sdiqr(d)
@@ -867,8 +867,8 @@ function _lscvcriterion(d, k::PolynomialKernel, exact, hmin)
   W, sw2 = d.sumw, sum(abs2, w)
   ws = SumsWorkspace()
   return function (h)
-    s1 = sum(w .* vec(kernelsums(d, kk, h; workspace = ws)))
-    s2 = sum(w .* vec(kernelsums(d, k, h; workspace = ws))) - sw2 * k(0.0)
+    s1 = sum(w .* vec(kernel_sums(d, kk, h; workspace = ws)))
+    s2 = sum(w .* vec(kernel_sums(d, k, h; workspace = ws))) - sw2 * k(0.0)
     return s1 / (h * W^2) - 2 * s2 / (h * (W^2 - sw2))
   end
 end
@@ -912,7 +912,7 @@ minimizes
 
 where `m̂₋ᵢ(xᵢ)` is the fit at `xᵢ` without observation `i` and `ℓᵢᵢ` the weight
 of `yᵢ` in the fit at `xᵢ`. The fits at all observations come from
-[`kernelsums`](@ref), so that a bandwidth costs `O(n)` operations for polynomial
+[`kernel_sums`](@ref), so that a bandwidth costs `O(n)` operations for polynomial
 kernels. Gaussian kernels use exact sums for up to `exact` observations, and
 otherwise, where it is faster, the data binned linearly on a grid of 50 points per
 standard deviation of the kernel, with the sums from FFT convolutions; this changes
@@ -946,7 +946,7 @@ end
 
 CrossValidation(; gridsize::Integer = 40, exact::Integer = 1000) = CrossValidation(gridsize, exact)
 
-function selectbandwidth(rule::CrossValidation, d::SmoothingData, k::AbstractKernel;
+function select_bandwidth(rule::CrossValidation, d::SmoothingData, k::AbstractKernel;
                          degree::Integer = 1, derivative::Integer = 0, points = nothing,
                          vce = nothing, minobs::Integer = 0)
   # (the fits pass vce and minobs to every regression rule; this one does not use them)

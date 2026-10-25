@@ -1,5 +1,10 @@
 [deps]
+KernelSmoothing = "724a8e84-0a16-41a9-ba90-78f60180b487"
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 
+[sources]
+KernelSmoothing = {path = ".."}
+
 [compat]
+KernelSmoothing = "0.1"
 Documenter = "1"

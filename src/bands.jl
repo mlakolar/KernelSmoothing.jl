@@ -116,7 +116,7 @@ end
 end
 
 """
-    confband(m; level = 0.95, method = RobustBiasCorrected(), draws = 10_000, rng = Random.default_rng())
+    conf_band(m; level = 0.95, method = RobustBiasCorrected(), draws = 10_000, rng = Random.default_rng())
 
 A uniform confidence band over the points of a pointwise fit `m`
 ([`LocalPolynomialRegression`](@ref) or [`PointwiseDensity`](@ref)): the intervals
@@ -133,7 +133,7 @@ Returns a named tuple with the `lower` and `upper` ends of the band and the
 critical value `critical`. By default the band is robust bias-corrected, centred at
 the bias-corrected estimates; with `method = Conventional()` it ignores the bias.
 """
-confband(m::_PointwiseFit; kwargs...) = _confband(m; kwargs...)
+conf_band(m::_PointwiseFit; kwargs...) = _confband(m; kwargs...)
 
 function _confband(m; level::Real = 0.95, method::InferenceMethod = RobustBiasCorrected(),
                    draws::Integer = 10_000, rng::AbstractRNG = Random.default_rng())
@@ -149,14 +149,14 @@ function _confband(m; level::Real = 0.95, method::InferenceMethod = RobustBiasCo
 end
 
 """
-    confband(f::KDE, x; level = 0.95, method = RobustBiasCorrected(), draws = 10_000, rng)
+    conf_band(f::KDE, x; level = 0.95, method = RobustBiasCorrected(), draws = 10_000, rng)
 
 A uniform confidence band for the density at the points `x`, with the bandwidth of
-the estimate `f`; see [`confband`](@ref) for pointwise fits.
+the estimate `f`; see [`conf_band`](@ref) for pointwise fits.
 """
-function confband(f::KDE, x::AbstractVector{<:Real}; kwargs...)
+function conf_band(f::KDE, x::AbstractVector{<:Real}; kwargs...)
   m = fit(PointwiseDensity, f.data; points = x, kernel = f.kernel, bandwidth = f.h, minobs = 0)
-  return confband(m; kwargs...)
+  return conf_band(m; kwargs...)
 end
 
 # The level quantile of maxⱼ |Zⱼ| for Z with the correlations of C, by simulation,

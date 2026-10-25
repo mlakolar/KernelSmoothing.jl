@@ -117,7 +117,7 @@ end
 
 @testset "bandwidths agree with rdrobust" begin
   for c in RDBWSELECT
-    s = selectbandwidth(RDOptimal(Symbol(c.bwselect)), c.x == "x" ? X : XM, RESPONSES[c.y]; degree = c.p,
+    s = select_bandwidth(RDOptimal(Symbol(c.bwselect)), c.x == "x" ? X : XM, RESPONSES[c.y]; degree = c.p,
                         derivative = c.deriv, kernel = NPKERNELS[c.kernel], vce = rdvce(c.vce),
                         treatment = c.fuzzy ? T : nothing, covariates = c.covs ? hcat(Z1, Z2) : nothing,
                         weights = c.weighted ? W : nothing, cluster = c.clustered ? G : nothing,
@@ -136,25 +136,25 @@ end
 @testset "bandwidth selection" begin
   m = fit(RegressionDiscontinuity, X, Y)
   @test m.selection.rule == RDOptimal(:mserd)
-  s = selectbandwidth(RDOptimal(), X, Y)
+  s = select_bandwidth(RDOptimal(), X, Y)
   @test [m.h...] == s.h && [m.b...] == s.details.b
   # a given rho or pilot bandwidth replaces the selected pilot bandwidth
   @test fit(RegressionDiscontinuity, X, Y; rho = 0.5).b == 2 .* m.h
   @test fit(RegressionDiscontinuity, X, Y; pilot = 0.6).b == (0.6, 0.6)
   # with perfect compliance, the bandwidths are those of the sharp design
-  sf = selectbandwidth(RDOptimal(), X, Y; treatment = Float64.(X .>= 0))
+  sf = select_bandwidth(RDOptimal(), X, Y; treatment = Float64.(X .>= 0))
   @test sf.h == s.h && sf.details.b == s.details.b
   # mass points: the rule keeps 10 distinct values in its windows
-  sm = selectbandwidth(RDOptimal(), XM, Y)
+  sm = select_bandwidth(RDOptimal(), XM, Y)
   @test sm.details.masspoints && sm.details.bwcheck == 10
-  @test !selectbandwidth(RDOptimal(), XM, Y; masspoints = :off).details.masspoints
-  @test !selectbandwidth(RDOptimal(), X, Y).details.masspoints
+  @test !select_bandwidth(RDOptimal(), XM, Y; masspoints = :off).details.masspoints
+  @test !select_bandwidth(RDOptimal(), X, Y).details.masspoints
   # the coverage-error rules shrink h by n^(-p / ((p + 3)(2p + 3))) and keep b
-  sc = selectbandwidth(RDOptimal(:cerrd), X, Y)
+  sc = select_bandwidth(RDOptimal(:cerrd), X, Y)
   @test sc.h ≈ s.h .* 600^(-1 / 20) && sc.details.b == s.details.b
   # with fewer than 20 observations, the largest distance to the cutoff
   x10, y10 = X[1:15], Y[1:15]
-  sh = selectbandwidth(RDOptimal(), x10, y10)
+  sh = select_bandwidth(RDOptimal(), x10, y10)
   @test sh.h == fill(max(-minimum(x10), maximum(x10)), 2)
   @test sprint(show, RDOptimal()) == "RDOptimal(:mserd)"
   @test sprint(show, RDOptimal(:msetwo; regularization = 0)) == "RDOptimal(:msetwo; regularization = 0.0)"
@@ -164,7 +164,7 @@ end
   @test_throws ArgumentError fit(RegressionDiscontinuity, X, Y; masspoints = :yes)
   @test_throws ArgumentError fit(RegressionDiscontinuity, X, Y; bwcheck = 0)
   @test_throws ArgumentError fit(RegressionDiscontinuity, X, Y; rho = 0)
-  @test_throws ArgumentError selectbandwidth(RDOptimal(), SmoothingData(X, Y), TriangularKernel())
+  @test_throws ArgumentError select_bandwidth(RDOptimal(), SmoothingData(X, Y), TriangularKernel())
   @test_throws ArgumentError fit(LocalPolynomialRegression, X, Y; bandwidth = RDOptimal())
   @test_throws ArgumentError fit(KDE, X; bandwidth = RDOptimal())
   @inferred fit(RegressionDiscontinuity, X, Y)
@@ -177,7 +177,7 @@ end
   @test_throws ArgumentError fit(RegressionDiscontinuity, X, Y; bandwidth = 0.001)
   @test_throws ArgumentError fit(RegressionDiscontinuity, X, Y; bandwidth = 0.3, vce = ClusterVariance())
   @test_throws DimensionMismatch fit(RegressionDiscontinuity, X, Y; bandwidth = 0.3, treatment = T[1:10])
-  @test_throws ArgumentError confint(fit(RegressionDiscontinuity, X, Y; bandwidth = 0.3); method = Honest(1.0; biascorrected = true))
+  @test_throws ArgumentError confint(fit(RegressionDiscontinuity, X, Y; bandwidth = 0.3); method = Honest(1.0; bias_corrected = true))
 end
 
 end

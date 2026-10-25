@@ -58,14 +58,14 @@ end
     @test bandwidth(SilvermanRule(), d, EpanechnikovKernel()) ≈ h0 * sqrt(5) rtol = 1e-13
     @test bandwidth(SilvermanRule(), d, UniformKernel()) ≈ h0 * sqrt(3) rtol = 1e-13
   end
-  s = selectbandwidth(NormalReference(), SmoothingData(XT), EpanechnikovKernel())
+  s = select_bandwidth(NormalReference(), SmoothingData(XT), EpanechnikovKernel())
   @test s.details.scale == s.details.iqr / 1.349 < s.details.sd   # heavy tails
   @test s.rule == NormalReference() && bandwidth(s) == s.h
   @test sprint(show, s) == "BandwidthSelection($(s.h), NormalReference())"
   # weighted samples use the effective sample size
   w = 1.0 .+ mod.(1:2000, 3)
   dw = SmoothingData(XR; weights = w)
-  sw = selectbandwidth(NormalReference(), dw, EpanechnikovKernel())
+  sw = select_bandwidth(NormalReference(), dw, EpanechnikovKernel())
   @test sw.details.n == effective_nobs(dw) < 2000
   # location and scale equivariance
   for rule in (NormalReference(), NormalReference(robust = false), SilvermanRule()),
@@ -99,7 +99,7 @@ end
   asym = PiecewisePolynomialKernel([-1.0, 0.0, 2.0], [[2/3, 2/3], [2/3, -1/3]])
   d = SmoothingData(XR)
   for rule in (NormalReference(), SilvermanRule(), SheatherJones())
-    @test_throws ArgumentError selectbandwidth(rule, d, asym)
+    @test_throws ArgumentError select_bandwidth(rule, d, asym)
   end
   @test_throws ArgumentError fit(KDE, XR; kernel = asym)
   @test pdf(fit(KDE, XR; kernel = asym, bandwidth = 0.5), 0.0) > 0
@@ -120,12 +120,12 @@ end
             MSEOptimal(interior = true), CoverageOptimal(), CoverageOptimal(IMSEOptimal(); convention = :nprobust),
             CoverageOptimal(convention = :interior), CrossValidation(gridsize = 20), LSCV(exact = 0),
             SheatherJones(method = :dpi), NormalReference(robust = false), SilvermanRule(), RuleOfThumb(),
-            FLCIOptimal(40), FLCIOptimal(:rot; level = 0.9), Honest(40), Honest(:rot; biascorrected = true))
+            FLCIOptimal(40), FLCIOptimal(:rot; level = 0.9), Honest(40), Honest(:rot; bias_corrected = true))
     @test eval(Meta.parse(repr(r))) == r
   end
   @test repr(IMSEOptimal()) == "IMSEOptimal()" && repr(IMSEOptimal(grid = :points)) == "IMSEOptimal(grid = :points)"
   @test repr(CoverageOptimal(IMSEOptimal(); convention = :nprobust)) == "CoverageOptimal(IMSEOptimal(); convention = :nprobust)"
-  @test repr(Honest(:rot; biascorrected = true)) == "Honest(:rot; biascorrected = true)"
+  @test repr(Honest(:rot; bias_corrected = true)) == "Honest(:rot; bias_corrected = true)"
   @test endswith(repr(OwnRule(0.5)), "OwnRule(0.5)")
   # the functions of Distributions.jl and Statistics that a density estimate answers,
   # exported as the same functions, so that `using Statistics` causes no conflict

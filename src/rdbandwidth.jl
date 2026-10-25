@@ -45,9 +45,9 @@ function Base.show(io::IO, r::RDOptimal)
   print(io, "RDOptimal(", repr(r.bwselect), r.regularization == 1 ? "" : "; regularization = $(r.regularization)", ")")
 end
 
-selectbandwidth(rule::RDOptimal, d::SmoothingData, k::AbstractKernel; kwargs...) =
+select_bandwidth(rule::RDOptimal, d::SmoothingData, k::AbstractKernel; kwargs...) =
   throw(ArgumentError("$rule chooses bandwidths for regression discontinuity; fit a RegressionDiscontinuity " *
-                      "or call selectbandwidth(rule, x, y; cutoff)"))
+                      "or call select_bandwidth(rule, x, y; cutoff)"))
 
 # The bandwidths h and b on the left and on the right side by rdrobust's rules, from
 # the sides, the cutoff c, and the fuzzy and covariate structure of the columns of D

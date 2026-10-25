@@ -163,9 +163,9 @@ end
   # estimates without variance are left out
   @test supt_critical(Matrix(Diagonal([1.0, 0.0, 2.0])); rng = MersenneTwister(3)) ==
         supt_critical(Matrix(Diagonal([1.0, 2.0])); rng = MersenneTwister(3))
-  # the critical value of confband
+  # the critical value of conf_band
   m = fit(LocalPolynomialRegression, X, Y; bandwidth = 0.1, points = [0.2, 0.4, 0.6, 0.8], vce = HCVariance(0))
-  b = confband(m; rng = MersenneTwister(2))
+  b = conf_band(m; rng = MersenneTwister(2))
   cb = supt_critical(vcov(m; method = RobustBiasCorrected()); rng = MersenneTwister(2))
   @test (b.upper .- m.estimate_bc) ./ m.se_rbc ≈ fill(cb, 4) rtol = 1e-8
   @test_throws ArgumentError supt_critical(Matrix(1.0I, 2, 2); level = 1)

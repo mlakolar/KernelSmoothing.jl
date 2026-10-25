@@ -21,7 +21,7 @@ const K = EpanechnikovKernel()
     h = 0.15
     m = fit(PartiallyLinear, U, X, Yp; bandwidth = h, points = PTS, weights = w, vce)
     # Robinson's estimator with the smoother matrix of the observations
-    S = smoothermatrix(U, U; bandwidth = h, weights = w)
+    S = smoother_matrix(U, U; bandwidth = h, weights = w)
     X̃ = (I - S) * X
     ỹ = (I - S) * Yp
     ww = w === nothing ? ones(N) : w
@@ -32,7 +32,7 @@ const K = EpanechnikovKernel()
     vce.type == 1 && (meat .*= N / (N - 2))
     @test coef(m) ≈ β rtol = 1e-8
     @test vcov(m) ≈ G \ meat / G rtol = 1e-8
-    @test m.smooth ≈ localpolynomial(U, Yp .- X * β, PTS; bandwidth = h, weights = w) rtol = 1e-8
+    @test m.smooth ≈ local_polynomial(U, Yp .- X * β, PTS; bandwidth = h, weights = w) rtol = 1e-8
   end
   m = fit(PartiallyLinear, U, X, Yp)
   @test m.selection.rule == CrossValidation()

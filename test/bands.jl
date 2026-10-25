@@ -66,7 +66,7 @@ end
       @test all(isnan, C[2, :]) && all(isnan, C[:, 2])
       @test C[1, 1] == vcov(valid; method)[1, 1]
       @test C[1, 1] ≈ stderror(m; method)[1]^2 rtol = 1e-12
-      b = confband(m; method, draws = 100, rng = MersenneTwister(1))
+      b = conf_band(m; method, draws = 100, rng = MersenneTwister(1))
       @test isfinite(b.lower[1]) && isfinite(b.upper[1])
       @test isnan(b.lower[2]) && isnan(b.upper[2])
     end
@@ -96,29 +96,29 @@ end
   m = fit(LocalPolynomialRegression, X, Y; bandwidth = 0.05, points = [0.1, 0.3, 0.5, 0.7, 0.9], vce = HCVariance(0))
   C = vcov(m)
   @test all(C[j, l] == 0 for j in 1:5, l in 1:5 if j != l)
-  b = confband(m; draws = 200_000, rng = MersenneTwister(1))
+  b = conf_band(m; draws = 200_000, rng = MersenneTwister(1))
   @test b.critical ≈ quantile(Normal(), (1 + 0.95^(1 / 5)) / 2) atol = 0.02
   @test b.lower ≈ m.estimate_bc .- b.critical .* m.se_rbc
   # perfectly correlated points: the pointwise critical value
   m1 = fit(LocalPolynomialRegression, X, Y; bandwidth = 0.1, points = [0.5, 0.5, 0.5])
-  @test confband(m1; draws = 200_000, rng = MersenneTwister(2)).critical ≈ 1.959963984540054 atol = 0.02
+  @test conf_band(m1; draws = 200_000, rng = MersenneTwister(2)).critical ≈ 1.959963984540054 atol = 0.02
   # in between for correlated neighbours, and reproducible with the same generator
   m2 = fit(LocalPolynomialRegression, X, Y; bandwidth = 0.1, points = range(0.2, 0.8; length = 25))
-  b2 = confband(m2; rng = MersenneTwister(3))
+  b2 = conf_band(m2; rng = MersenneTwister(3))
   @test 1.96 < b2.critical < quantile(Normal(), 1 - 0.025 / 25)
-  @test confband(m2; rng = MersenneTwister(3)) == b2
-  @test confband(m2; method = Conventional(), rng = MersenneTwister(3)).upper ≈
-        m2.estimate .+ confband(m2; method = Conventional(), rng = MersenneTwister(3)).critical .* m2.se
+  @test conf_band(m2; rng = MersenneTwister(3)) == b2
+  @test conf_band(m2; method = Conventional(), rng = MersenneTwister(3)).upper ≈
+        m2.estimate .+ conf_band(m2; method = Conventional(), rng = MersenneTwister(3)).critical .* m2.se
   # densities, and a density estimate with its own bandwidth
   f = fit(KDE, X; bandwidth = 0.08)
   md = fit(PointwiseDensity, X; points = [0.2, 0.25, 0.3], bandwidth = 0.08, minobs = 0)
-  @test confband(f, [0.2, 0.25, 0.3]; rng = MersenneTwister(4)) == confband(md; rng = MersenneTwister(4))
-  @test_throws ArgumentError confband(m2; level = 1.2)
-  @test_throws ArgumentError confband(m2; draws = 10)
+  @test conf_band(f, [0.2, 0.25, 0.3]; rng = MersenneTwister(4)) == conf_band(md; rng = MersenneTwister(4))
+  @test_throws ArgumentError conf_band(m2; level = 1.2)
+  @test_throws ArgumentError conf_band(m2; draws = 10)
   # with one point the simulated quantile scatters around the pointwise critical value,
   # which the band never falls below
   md1 = fit(PointwiseDensity, X; points = [0.5], bandwidth = 0.08)
-  @test all(confband(md1; rng = MersenneTwister(s)).critical >= 1.959963984540054 for s in 1:30)
+  @test all(conf_band(md1; rng = MersenneTwister(s)).critical >= 1.959963984540054 for s in 1:30)
 end
 
 @testset "the critical value lies between the pointwise and Bonferroni values" begin
@@ -126,11 +126,11 @@ end
   zp = quantile(Normal(), 0.975)
   # one point: the pointwise value, exactly
   m1 = fit(LocalPolynomialRegression, x, sin.(2π .* x); bandwidth = 0.1, points = [0.5])
-  @test all(confband(m1; rng = MersenneTwister(s)).critical == zp for s in 1:5)
+  @test all(conf_band(m1; rng = MersenneTwister(s)).critical == zp for s in 1:5)
   # two independent points and few draws: the simulated quantile is clamped
   m2 = fit(LocalPolynomialRegression, x, sin.(2π .* x); bandwidth = 0.1, points = [0.2, 0.8])
   zb = quantile(Normal(), 1 - 0.05 / 4)
-  cs = [confband(m2; draws = 100, rng = MersenneTwister(s)).critical for s in 1:100]
+  cs = [conf_band(m2; draws = 100, rng = MersenneTwister(s)).critical for s in 1:100]
   @test all(zp .<= cs .<= zb)
   @test any(==(zb), cs)
 end
@@ -147,10 +147,10 @@ end
   L = E.vectors .* sqrt.(max.(E.values, 0.0))'
   rng = MersenneTwister(3)
   maxima = [maximum(abs, L * randn(rng, 17)) for _ in 1:100_000]
-  c = confband(m; draws = 100_000, rng = MersenneTwister(4)).critical
+  c = conf_band(m; draws = 100_000, rng = MersenneTwister(4)).critical
   @test abs(c - quantile(maxima, 0.95)) < 0.04
-  @test confband(m; draws = 5000, rng = MersenneTwister(5)).critical == confband(m; draws = 5000, rng = MersenneTwister(5)).critical
-  @test confband(m; draws = 5001, rng = MersenneTwister(5)).critical > 0
+  @test conf_band(m; draws = 5000, rng = MersenneTwister(5)).critical == conf_band(m; draws = 5000, rng = MersenneTwister(5)).critical
+  @test conf_band(m; draws = 5001, rng = MersenneTwister(5)).critical > 0
 end
 
 end

@@ -21,7 +21,7 @@ Since the data are sorted, the questions that the estimators ask at every point
 are cheap. [`window`](@ref) gives the observations within a bandwidth of a point,
 by binary search, with the same floating-point test that a compactly supported
 kernel applies, so that the window holds exactly the observations that the kernel
-reaches. [`nunique`](@ref) and [`weightsum`](@ref) count the distinct values and the
+reaches. [`nunique`](@ref) and [`weight_sum`](@ref) count the distinct values and the
 weight of a range of observations in constant time, and [`knn_distance`](@ref) gives
 the distance to the ``k``-th nearest observation or distinct value, the smallest
 bandwidth whose window holds ``k`` of them. The floors that the estimators put on

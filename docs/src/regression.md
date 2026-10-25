@@ -69,7 +69,7 @@ window instead of the single products, with the factor
 the window and ``k`` coefficients. Types 2 and 3 adjust the residuals of each
 cluster with its block of the hat matrix, as Bell and McCaffrey (2002) do for CR2,
 and type 0 leaves them as they are. The covariances of [`vcov`](@ref) and the bands
-of [`confband`](@ref) sum over clusters in the same way, and so do the variance
+of [`conf_band`](@ref) sum over clusters in the same way, and so do the variance
 constants of the plug-in bandwidths. With one observation per cluster, types 0 to 2
 reduce to [`HCVariance`](@ref) of the same type.
 
@@ -96,31 +96,31 @@ pilot bandwidths anchored on cross-validation; see
 ## Local polynomial smoothing
 
 For smoothing many curves, or for building other estimators on local fits,
-[`localpolynomial`](@ref) gives the estimates of the local polynomial fits at a set
+[`local_polynomial`](@ref) gives the estimates of the local polynomial fits at a set
 of points with a given bandwidth, without the floors on the windows and without
-standard errors, from [`kernelsums`](@ref) for all points at once.
-[`smoothermatrix`](@ref) gives their weights: each estimate is a weighted sum of
+standard errors, from [`kernel_sums`](@ref) for all points at once.
+[`smoother_matrix`](@ref) gives their weights: each estimate is a weighted sum of
 the responses, `L * y`, with columns in the input order of the observations, so
 that linear functionals of the fit, hat matrices and their traces follow directly.
 
 ```julia
-e = localpolynomial(t, y, grid; bandwidth = 0.1)                 # a smoothed curve on a grid
-L = smoothermatrix(t, t; bandwidth = 0.1)                        # the hat matrix of the observations
+e = local_polynomial(t, y, grid; bandwidth = 0.1)                 # a smoothed curve on a grid
+L = smoother_matrix(t, t; bandwidth = 0.1)                        # the hat matrix of the observations
 gcv = length(y) * sum(abs2, y - L * y) / (length(y) - sum(LinearAlgebra.diag(L)))^2
 ```
 
 For a regression function of two covariates, as the covariance surfaces of
-functional data, `localpolynomial((x1, x2), y, (g1, g2); bandwidth)` gives the
+functional data, `local_polynomial((x1, x2), y, (g1, g2); bandwidth)` gives the
 bivariate local constant or local linear estimates on a grid, with a product kernel
-and a bandwidth for each covariate, and `smoothermatrix((x1, x2), points)` their
-weights. `selectbandwidth(CrossValidation(), (x1, x2), y)` chooses the bandwidth by
+and a bandwidth for each covariate, and `smoother_matrix((x1, x2), points)` their
+weights. `select_bandwidth(CrossValidation(), (x1, x2), y)` chooses the bandwidth by
 leave-one-out cross-validation, or with `groups`, as the curves of functional data,
 by leaving out whole groups, so that the dependence within a curve does not lead to
 too small bandwidths.
 
 ```julia
-s = selectbandwidth(CrossValidation(), (t1, t2), products; groups = curve)
-C = localpolynomial((t1, t2), products, (grid, grid); bandwidth = s.h)   # a covariance surface
+s = select_bandwidth(CrossValidation(), (t1, t2), products; groups = curve)
+C = local_polynomial((t1, t2), products, (grid, grid); bandwidth = s.h)   # a covariance surface
 ```
 
 ```@autodocs
@@ -136,7 +136,7 @@ polynomial smooths in `u`, which removes `g` without estimating it first, so tha
 `β̂` is `√n`-consistent with sandwich standard errors; `ĝ` is then the smooth of
 `y - x'β̂`.
 
-Varying-coefficient models, with or without penalties, are in [CoordinateDescent.jl](https://github.com/mlakolar/CoordinateDescent.jl),
+Varying-coefficient models, with or without penalties, are in [HighDimensionalModels.jl](https://github.com/mlakolar/HighDimensionalModels.jl),
 which uses the kernels of this package.
 
 ```julia
@@ -209,7 +209,7 @@ and Kolesár 2020).
 m = fit(LocalPolynomialRegression, x, y; points = [0.5], bandwidth = FLCIOptimal(40))
 confint(m; method = Honest(40))          # covers whenever |m''| ≤ 40
 confint(m; method = Honest(:rot))        # M from a global quartic, a starting point for sensitivity analysis
-worstcasebias(m, 40)
+worst_case_bias(m, 40)
 ```
 
 ```@autodocs
@@ -227,7 +227,7 @@ are the inner products ``a_j' a_l``, so that the matrix is positive semidefinite
 its diagonal holds the squared standard errors of the fit, and estimates whose
 windows do not overlap are uncorrelated.
 
-[`confband`](@ref) returns the sup-t band ``\hat\theta_j \pm c\, \widehat{\mathrm{se}}_j``
+[`conf_band`](@ref) returns the sup-t band ``\hat\theta_j \pm c\, \widehat{\mathrm{se}}_j``
 of Chernozhukov, Chetverikov and Kato (2014), where ``c`` is the quantile of
 ``\max_j |Z_j|`` for a Gaussian vector ``Z`` with the estimated correlations, found
 by simulation. It covers the curve at all points at once, for regression and density
@@ -236,7 +236,7 @@ level.
 
 ```julia
 m = fit(LocalPolynomialRegression, x, y; points = range(0, 1; length = 50))
-b = confband(m)              # robust bias-corrected 95% band
+b = conf_band(m)              # robust bias-corrected 95% band
 b.lower, b.upper, b.critical
 ```
 

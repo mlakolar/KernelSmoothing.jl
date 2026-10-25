@@ -2,7 +2,7 @@ module LPDensityTest
 
 using Test
 using KernelSmoothing
-using KernelSmoothing: _cjmG
+using KernelSmoothing: _cjm_g
 using Distributions: Normal, Exponential, quantile as nquantile, pdf as npdf
 using LinearAlgebra: diag, eigvals, Symmetric
 using Random: MersenneTwister
@@ -111,7 +111,7 @@ end
 
 @testset "kernel constants" begin
   # G of lpdensity for the triangular kernel, exactly (R integrates numerically)
-  G = _cjmG(TriangularKernel(), 2)
+  G = _cjm_g(TriangularKernel(), 2)
   @test G ≈ [-7/30 1/12 -0.053174603174603174; 1/12 0.020634920634920634 1/72; -0.053174603174603174 1/72 -0.00992063492063492] rtol = 1e-12
   @test G ≈ G'
 end
@@ -124,7 +124,7 @@ end
   @test sqrt.(diag(C)) ≈ m.se_rbc rtol = 1e-10
   @test minimum(eigvals(Symmetric(C))) >= -1e-12 * maximum(diag(C))
   @test C == C'
-  b = confband(m; rng = MersenneTwister(2))
+  b = conf_band(m; rng = MersenneTwister(2))
   @test all(b.lower .< m.estimate_bc .< b.upper) && b.critical > 1.96
   t = coeftable(m)
   @test t.estimate == m.estimate && t.upper_rbc == confint(m)[:, 2]
@@ -176,7 +176,7 @@ end
   @test isfinite(m.estimate_bc[1]) && isnan(m.estimate_bc[2])
   C = vcov(m; method = RobustBiasCorrected())
   @test isfinite(C[1, 1]) && C[1, 1] ≈ m.se_rbc[1]^2 && all(isnan, C[2, :])
-  b = confband(m; rng = MersenneTwister(1))
+  b = conf_band(m; rng = MersenneTwister(1))
   @test isfinite(b.lower[1]) && isnan(b.lower[2])
 end
 
@@ -241,7 +241,7 @@ end
   # those for its derivative are not
   mt = fit(LocalPolynomialDensity, XE; points = [4.0, 5.0, 6.0])
   @test all(confint(mt)[:, 1] .>= 0) && any(confint(mt)[:, 1] .== 0)
-  @test all(confband(mt; rng = MersenneTwister(1)).lower .>= 0)
+  @test all(conf_band(mt; rng = MersenneTwister(1)).lower .>= 0)
   @test any(confint(fit(LocalPolynomialDensity, XE; points = [4.0, 5.0, 6.0], compat = true))[:, 1] .< 0)
   @test any(confint(fit(LocalPolynomialDensity, XE; points = [4.0, 5.0, 6.0], derivative = 1, degree = 3))[:, 1] .< 0)
   # given bandwidths are not raised, as in lpdensity, with a warning where the floor would

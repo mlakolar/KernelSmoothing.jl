@@ -116,7 +116,7 @@ function fit(::Type{RegressionDiscontinuity}, x::AbstractVector, y::AbstractVect
 end
 
 """
-    selectbandwidth(rule::RDOptimal, x, y; cutoff = 0, derivative = 0, degree = derivative + 1,
+    select_bandwidth(rule::RDOptimal, x, y; cutoff = 0, derivative = 0, degree = derivative + 1,
                     kernel = TriangularKernel(), treatment = nothing, covariates = nothing,
                     vce = nothing, weights = nothing, cluster = nothing, masspoints = :adjust,
                     bwcheck = nothing, compat = false)
@@ -125,7 +125,7 @@ The bandwidths of a [`RegressionDiscontinuity`](@ref) fit by the rule, as rdrobu
 `rdbwselect`: `h` holds the bandwidths on the left and on the right, and
 `details.b` the pilot bandwidths. The keywords are those of the fit.
 """
-function selectbandwidth(rule::RDOptimal, x::AbstractVector, y::AbstractVector; cutoff::Real = 0,
+function select_bandwidth(rule::RDOptimal, x::AbstractVector, y::AbstractVector; cutoff::Real = 0,
                          treatment = nothing, covariates = nothing, weights = nothing, cluster = nothing,
                          derivative::Integer = 0, degree::Integer = derivative + 1,
                          kernel::AbstractKernel = TriangularKernel(), vce::Union{Nothing,VarianceEstimator} = nothing,

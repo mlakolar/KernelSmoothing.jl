@@ -14,7 +14,7 @@ const _Fit = Union{LocalPolynomialRegression,PointwiseDensity,LocalPolynomialDen
 @recipe function f(m::_Fit; level = 0.95, method = RobustBiasCorrected(), uniform = false, data = false)  # COV_EXCL_LINE
   x = m.points
   lower, upper = if uniform
-    b = confband(m; level, method)
+    b = conf_band(m; level, method)
     b.lower, b.upper
   else
     c = confint(m; level, method)

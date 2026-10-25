@@ -178,7 +178,7 @@ The critical value of uniform bands for estimates with the covariance matrix `C`
 from `draws` draws, kept between the pointwise and the Bonferroni critical values,
 between which the exact one lies. Estimates with zero or `NaN` variance are left out,
 and with one estimate the pointwise value is exact. This is the critical value of
-[`confband`](@ref).
+[`conf_band`](@ref).
 """
 function supt_critical(C::AbstractMatrix{<:Real}; level::Real = 0.95, draws::Integer = 10_000,
                        rng::Random.AbstractRNG = Random.default_rng())

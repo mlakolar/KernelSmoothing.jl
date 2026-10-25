@@ -10,7 +10,7 @@ over the sorted observations ``x_i`` with weights ``w_i`` and values ``z_i``, at
 evaluation points ``p_j`` with bandwidths ``h_j``. For a symmetric kernel,
 ``S_{0j} / (h_j \sum_i w_i)`` is the kernel density estimate at ``p_j``, and with
 ``k_{\max} = 2p``, and with ``z = y`` and ``k_{\max} = p``, the sums give the normal
-equations of a local polynomial fit of order ``p``. [`kernelsums`](@ref) returns
+equations of a local polynomial fit of order ``p``. [`kernel_sums`](@ref) returns
 the ``(k_{\max} + 1) \times m`` matrix of these sums, with one bandwidth or one per
 point, and computes them with one of four engines.
 

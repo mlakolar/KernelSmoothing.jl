@@ -73,14 +73,14 @@ end
         sortperm([-2.5, 1e300, -1e-300, 0.0, 0.0, 5e-324, -floatmax()])
 
   d, dw = SmoothingData(XS), SmoothingData(XS; weights = WS)
-  @test d.cumw == 0:500 && weightsum(d) == 500
-  @test dw.cumw[end] == dw.sumw && weightsum(dw) ≈ sum(WS)
+  @test d.cumw == 0:500 && weight_sum(d) == 500
+  @test dw.cumw[end] == dw.sumw && weight_sum(dw) ≈ sum(WS)
   for x0 in range(-9, 9; length = 19), h in (0.1, 0.7, 3.0)
     r, rw = window(d, x0, h), window(dw, x0, h)
-    @test weightsum(d, r) == length(r)
-    @test weightsum(dw, rw) ≈ sum(dw.w[rw]) atol = 1e-12
+    @test weight_sum(d, r) == length(r)
+    @test weight_sum(dw, rw) ≈ sum(dw.w[rw]) atol = 1e-12
   end
-  @test weightsum(dw, 1:0) == 0 && weightsum(dw, window(dw, 100.0, 1.0)) == 0
+  @test weight_sum(dw, 1:0) == 0 && weight_sum(dw, window(dw, 100.0, 1.0)) == 0
 end
 
 @testset "invalid input" begin
@@ -148,8 +148,8 @@ end
     # products of such weights underflow or overflow, but only their ratios matter
     d = SmoothingData(v; weights = fill(s, 500))
     @test effective_nobs(d) ≈ 500
-    @test weightsum(d) ≈ 500s rtol = 1e-12
-    @test weightsum(d, 1:10) ≈ 10s rtol = 1e-12
+    @test weight_sum(d) ≈ 500s rtol = 1e-12
+    @test weight_sum(d, 1:10) ≈ 10s rtol = 1e-12
     @test bandwidth(SheatherJones(), d, k) ≈ hsj rtol = 1e-6
     @test pdf(fit(KDE, d; bandwidth = 1.0), 0.3) ≈ pdf(fit(KDE, v; bandwidth = 1.0), 0.3) rtol = 1e-12
   end
@@ -157,8 +157,8 @@ end
   @test SmoothingData(v; weights = fill(3.0, 500)).w == fill(3.0, 500)
   # a small range after a large weight keeps its accuracy
   d = SmoothingData(collect(1.0:11.0); weights = [1e12; fill(0.3, 10)])
-  @test weightsum(d, 2:11) ≈ 3.0 rtol = 1e-14
-  @test weightsum(d, 5:4) == 0
+  @test weight_sum(d, 2:11) ≈ 3.0 rtol = 1e-14
+  @test weight_sum(d, 5:4) == 0
   # values that are not finite as Float64
   @test_throws ArgumentError SmoothingData([1.0, big(10.0)^400])
   @test_throws ArgumentError SmoothingData([1.0, 2.0]; weights = [1.0, big(10.0)^400])
@@ -171,7 +171,7 @@ end
        1.3907487889932169e10, 1.4489369595417734e6, 5.379260538324541e19, 0.5908100074150856]
   d = SmoothingData(collect(1.0:13.0); weights = w)
   @test issorted(d.cumw)
-  @test all(isapprox(weightsum(d, i:i), w[i]; rtol = 1e-10) for i in 1:13)
+  @test all(isapprox(weight_sum(d, i:i), w[i]; rtol = 1e-10) for i in 1:13)
 end
 
 @testset "weights beyond the range of Float64" begin
