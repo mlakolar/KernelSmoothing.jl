@@ -11,6 +11,7 @@ makedocs(;
     "Multivariate density estimation" => "multivariate.md",
     "Local polynomial regression" => "regression.md",
     "Regression discontinuity" => "rd.md",
+    "Shape constraints" => "shape.md",
     "Bandwidth selection" => "bandwidths.md",
     "Kernels" => "kernels.md",
     "Prepared data" => "data.md",

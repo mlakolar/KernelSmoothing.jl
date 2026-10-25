@@ -21,6 +21,7 @@ tests = [
   "rddensity",
   "rdhonest",
   "lpdensity",
+  "shape",
   "mvkde",
   "recipes",
   "building",

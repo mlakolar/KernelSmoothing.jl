@@ -51,7 +51,8 @@ export
   coef, confint, coeftable, predict, fitted, residuals, vcov, conf_band,
   local_polynomial, smoother_matrix, PartiallyLinear, LocalLikelihood,
   kernel_weights, regression_points, bandwidth_grid, grid_minimize, sandwich, supt_critical,
-  MultivariateKDE, marginal, cov, MatrixSelector, NormalScaleMatrix, PlugInMatrix, SCVMatrix, LSCVMatrix
+  MultivariateKDE, marginal, cov, MatrixSelector, NormalScaleMatrix, PlugInMatrix, SCVMatrix, LSCVMatrix,
+  rearrange, Rearranged, constrain, ShapeConstrained, shape_projection
 
 include("polynomials.jl")
 include("kernels.jl")
@@ -77,6 +78,7 @@ include("rddensity.jl")
 # (not named *kde.jl or *bandwidths.jl: the Pages of @autodocs match by suffix)
 include("multivariate.jl")
 include("bandwidthmatrices.jl")
+include("shape.jl")
 include("building.jl")
 include("precompile.jl")
 
