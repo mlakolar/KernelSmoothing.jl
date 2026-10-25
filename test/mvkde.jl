@@ -271,6 +271,14 @@ end
   Hb, _, _, convb = _minimizematrix(fgbad, fill(1.0, 1, 1), true)
   @test convb && 2.4 < Hb[1, 1] <= 2.5
   @test_throws DomainError _minimizematrix(H -> throw(DomainError(H)), fill(1.0, 1, 1), true)
+  # at a kink the quasi-Newton step stops lowering the criterion: the search restarts
+  # from the gradient once, then stops at the kink
+  Hk, _, _, convk = _minimizematrix(H -> (abs(H[1, 1] - 2), fill(sign(H[1, 1] - 2), 1, 1)), fill(0.5, 1, 1), true)
+  @test convk
+  @test Hk[1, 1] ≈ 2 rtol = 1e-6
+  # a vanishing gradient stops the search where it starts
+  H1, _, it1, conv1 = _minimizematrix(H -> (1.0, zeros(1, 1)), fill(0.7, 1, 1), true)
+  @test conv1 && it1 == 1 && H1 ≈ fill(0.7, 1, 1)
 end
 
 end
