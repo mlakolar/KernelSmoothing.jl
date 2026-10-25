@@ -105,6 +105,10 @@ end
   @test (pdf(f, 1e-6) - pdf(f, 0.0)) / 1e-6 ≈ 0 atol = 1e-3
   fg = fit(BoundedKDE, x; support = (0, Inf), kernel = GaussianKernel(), bandwidth = 0.1)
   @test pdf(fg, 50.0) == 0 && isfinite(logpdf(fg, 50.0))
+  # a symmetric kernel that is not one of the named ones, and an asymmetric one
+  kc = convolve(EpanechnikovKernel(), EpanechnikovKernel())
+  fc = fit(BoundedKDE, x; support = (0, Inf), kernel = kc, bandwidth = 0.4)
+  @test pdf(fc, 0.7) ≈ 2 * pdf(fit(KDE, vcat(x, -x); kernel = kc, bandwidth = 0.4), 0.7)
   @test_throws ArgumentError fit(BoundedKDE, x; support = (0, Inf),
                                  kernel = PiecewisePolynomialKernel([-1.0, 0.0, 2.0], [[2/3, 2/3], [2/3, -1/3]]))
   @test_throws ArgumentError fit(BoundedKDE, y; support = (0, 1), kernel = GaussianKernel(), bandwidth = 1000.0)
