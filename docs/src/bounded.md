@@ -12,7 +12,7 @@ with confidence intervals, see [`LocalPolynomialDensity`](@ref).
 ## Methods
 
 **Reflection** (Schuster 1985). The estimate of the observations and their mirror
-images at the boundaries,
+images at the boundaries (for an upper boundary ``b`` alone, the images ``2b - x_i``),
 
 ```math
 \hat f(x) = \frac{1}{hW} \sum_{i=1}^n w_i \sum_{m \in \mathbb{Z}}
@@ -47,14 +47,19 @@ shape ``u/s + 1`` and scale ``s``, and the modified version with shape ``u/s``
 above ``2s`` and ``(u/(2s))^2 + 1`` below.
 
 Neither the beta nor the gamma kernel estimate integrates to one. The estimate is
-``\tilde f`` divided by its integral, which Gauss–Legendre quadrature on panels a
-fraction of the spread of the kernel wide computes to rounding; the same panels
-give the distribution function, and the quantiles invert it within a panel. The
+``\tilde f`` divided by its integral, computed by Gauss–Legendre quadrature on panels
+a quarter of the spread of the kernel wide, over the range where the estimate is
+not negligible; the same panels give the distribution function and its upper tail,
+and the quantiles invert it within a panel. The computations for gamma kernels are
+done on the data divided by their mean distance from the boundary, so that they do
+not depend on the scale of the data. An observation exactly at a boundary gets no
+weight from these kernels anywhere inside the support, so such observations are
+rejected. The
 smoothing parameter is chosen by least-squares cross-validation of ``\tilde f``,
 ``\int \tilde f^2 - 2 \sum_i w_i \tilde f_{-i}(u_i)``, over a grid around the
 parameter whose kernel has the variance of a normal-reference bandwidth.
 
-**Transformation** (Wand, Marron and Ruppert 1991). For a map ``t`` of the support
+**Transformation** (Wand, Marron and Ruppert 1991), `Transformed()`. For a map ``t`` of the support
 onto the real line, the estimate ``\hat g`` of the density of ``t(x_i)``,
 transformed back:
 
@@ -62,7 +67,7 @@ transformed back:
 \hat f(x) = \hat g\big(t(x)\big)\, |t'(x)|, \qquad \hat F(x) = \hat G\big(t(x)\big),
 ```
 
-with ``t(x) = \log(x - a)`` for ``[a, \infty)``, and the logit or probit of
+with ``t(x) = \log(x - a)`` for ``[a, \infty)``, ``-\log(b - x)`` for ``(-\infty, b]``, and the logit or probit of
 ``(x - a)/(b - a)`` for ``[a, b]``. The estimate is a distribution exactly, its
 quantiles and draws come from those of ``\hat g``, and its effective bandwidth
 grows with the distance from the boundary. It suits densities that are steep or
@@ -79,7 +84,7 @@ g = fit(BoundedKDE, x; support = (0, Inf), method = GammaKernels())
 pdf(f, 0.0), pdf(g, 0.0), cdf(g, 1.0), quantile(g, 0.9)
 
 y = rand(Beta(0.5, 0.5), 500)                                       # infinite at both ends
-fit(BoundedKDE, y; support = (0, 1), method = Transformation())
+fit(BoundedKDE, y; support = (0, 1), method = Transformed())
 ```
 
 ## Reference
@@ -91,5 +96,5 @@ BoundaryMethod
 Reflection
 BetaKernels
 GammaKernels
-Transformation
+Transformed
 ```

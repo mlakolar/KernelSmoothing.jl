@@ -74,11 +74,13 @@ end
 end
 
 # A density estimate on a bounded support as a curve over its central 99.9%,
-# extended to the finite boundaries
+# extended to the finite ends of its support; a transformation estimate, which can be
+# infinite at a boundary, without the boundary points
 @recipe function f(k::BoundedKDE; npoints = 401)  # COV_EXCL_LINE
   lo = isfinite(minimum(k)) ? minimum(k) : quantile(k, 0.0005)
   hi = isfinite(maximum(k)) ? maximum(k) : quantile(k, 0.9995)
-  grid = range(lo, hi; length = npoints)
+  grid = collect(range(lo, hi; length = npoints))
+  k.method isa Transformed && (grid = grid[2:end-1])
   seriestype --> :path
   label --> "density"
   xguide --> "x"

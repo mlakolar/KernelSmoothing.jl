@@ -53,7 +53,7 @@ export
   local_polynomial, smoother_matrix, PartiallyLinear, LocalLikelihood,
   kernel_weights, regression_points, bandwidth_grid, grid_minimize, sandwich, supt_critical,
   MultivariateKDE, marginal, cov, MatrixSelector, NormalScaleMatrix, PlugInMatrix, SCVMatrix, LSCVMatrix,
-  BoundedKDE, BoundaryMethod, Reflection, BetaKernels, GammaKernels, Transformation
+  BoundedKDE, BoundaryMethod, Reflection, BetaKernels, GammaKernels, Transformed
 
 include("polynomials.jl")
 include("kernels.jl")
