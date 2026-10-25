@@ -42,6 +42,12 @@ recipe(m; kwargs...) = RecipesBase.apply_recipe(Dict{Symbol,Any}(kwargs...), m)
   (curve,) = recipe(f; npoints = 101)
   @test length(curve.args[1]) == 101
   @test curve.args[2] == pdf.(f, curve.args[1])
+  b = fit(BoundedKDE, X; support = (0, 1))
+  (curve,) = recipe(b; npoints = 51)
+  @test curve.args[1][1] == 0 && curve.args[1][end] == 1
+  @test curve.args[2] == pdf.(b, curve.args[1])
+  (curve,) = recipe(fit(BoundedKDE, X; support = (0, Inf)))
+  @test curve.args[1][1] == 0 && isfinite(curve.args[1][end])
 end
 
 end

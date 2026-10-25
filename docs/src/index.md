@@ -10,6 +10,8 @@ It provides:
   Distributions.jl, robust bias-corrected intervals for densities at interior
   points, and the local polynomial density estimator of Cattaneo, Jansson and Ma
   for densities with a boundary;
+- [density estimates on a bounded support](@ref bounded-page) that are
+  distributions there: reflection, beta and gamma kernels, and transformations;
 - [local polynomial regression](@ref regression-page) of a regression function or
   its derivatives, with conventional, robust bias-corrected and honest intervals,
   covariances between points and uniform bands;

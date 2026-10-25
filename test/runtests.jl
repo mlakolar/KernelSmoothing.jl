@@ -21,6 +21,7 @@ tests = [
   "rddensity",
   "rdhonest",
   "lpdensity",
+  "boundedkde",
   "recipes",
   "building",
   "aqua"

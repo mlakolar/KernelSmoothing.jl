@@ -59,4 +59,16 @@ end
   grid, pdf.(k, grid)
 end
 
+# A density estimate on a bounded support as a curve over its central 99.9%,
+# extended to the finite boundaries
+@recipe function f(k::BoundedKDE; npoints = 401)  # COV_EXCL_LINE
+  lo = isfinite(minimum(k)) ? minimum(k) : quantile(k, 0.0005)
+  hi = isfinite(maximum(k)) ? maximum(k) : quantile(k, 0.9995)
+  grid = range(lo, hi; length = npoints)
+  seriestype --> :path
+  label --> "density"
+  xguide --> "x"
+  grid, pdf.(k, grid)
+end
+
 end

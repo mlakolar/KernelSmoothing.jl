@@ -33,6 +33,7 @@ in the next section.
 | RDHonest, local linear regression | `confint(m; method = Honest(M))` of `LocalPolynomialRegression` | 4 | 1e-10 |
 | R 4.5, `stats::bw.SJ` | `SheatherJones(compat = true)` | 13 samples | 1e-10 to 1e-12 |
 | R 4.5, `stats::glm` with kernel prior weights | `fit(LocalLikelihood, x, y; family, bandwidth)` | 6 | 1e-10 |
+| evmix 2.12, `dbckden` and `pbckden` with `bcmethod = "reflect"`, `"beta1"`, `"beta2"`, `"gamma1"`, `"gamma2"`, `"logtrans"` | `fit(BoundedKDE, x; support, method, kernel, bandwidth)` | 7 | densities to 1e-12 before normalization; after it, and distribution functions, to 1e-9 to 1e-6, the accuracy of R's numerical integration |
 
 Where agreement is not to rounding, the reason is the R package's own numerical
 accuracy, such as a numerical minimization or integration with a coarse tolerance,

@@ -11,7 +11,8 @@ boundary-adaptive density estimator of Cattaneo, Jansson and Ma; and
 [`LocalPolynomialRegression`](@ref), local polynomial estimates of a regression
 function or its derivatives with conventional, robust bias-corrected and
 [`Honest`](@ref) intervals and uniform bands, see [`conf_band`](@ref); and
-[`RegressionDiscontinuity`](@ref), estimates for regression discontinuity designs.
+[`RegressionDiscontinuity`](@ref), estimates for regression discontinuity designs; and
+[`BoundedKDE`](@ref), a density estimate on a bounded support.
 They are fitted
 with `fit` and choose their bandwidths with a [`BandwidthSelector`](@ref).
 Underneath are the smoothing kernels, see [`AbstractKernel`](@ref), samples
@@ -27,6 +28,7 @@ import LinearAlgebra
 import StatsAPI
 import StatsAPI: fit, nobs, stderror, coef, confint, coeftable, predict, fitted, residuals, vcov
 import Random
+import SpecialFunctions
 using Random: AbstractRNG
 using PrecompileTools: @setup_workload, @compile_workload
 
@@ -48,7 +50,8 @@ export
   RegressionDiscontinuity, RDOptimal, RDHonestOptimal, DensityDiscontinuity, RDDensityOptimal,
   coef, confint, coeftable, predict, fitted, residuals, vcov, conf_band,
   local_polynomial, smoother_matrix, PartiallyLinear, LocalLikelihood,
-  kernel_weights, regression_points, bandwidth_grid, grid_minimize, sandwich, supt_critical
+  kernel_weights, regression_points, bandwidth_grid, grid_minimize, sandwich, supt_critical,
+  BoundedKDE, BoundaryMethod, Reflection, BetaKernels, GammaKernels, Transformation
 
 include("polynomials.jl")
 include("kernels.jl")
@@ -71,6 +74,7 @@ include("rdhonest.jl")
 include("semiparametric.jl")
 include("locallik.jl")
 include("rddensity.jl")
+include("bounded.jl")
 include("building.jl")
 include("precompile.jl")
 
