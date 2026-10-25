@@ -81,6 +81,8 @@ end
   @test_throws ArgumentError confint(fit(LocalPolynomialRegression, X, Y; bandwidth = 0.3, points = [0.5]); method = Honest(1; class = :holder))
   @test_throws ArgumentError worstcasebias(fit(LocalPolynomialRegression, X, Y; bandwidth = 0.3, points = [0.5]), (1, 1))
   @test_throws ArgumentError fit(KDE, X; bandwidth = RDHonestOptimal(1))
+  # the rule of thumb for M needs 4 distinct values of x on each side
+  @test_throws ArgumentError KernelSmoothing._mrot([0.1, 0.2, 0.2, 0.3], [1.0, 2.0, 2.5, 3.0], nothing)
 end
 
 end
