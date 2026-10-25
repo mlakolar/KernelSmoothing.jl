@@ -54,7 +54,8 @@ export
   kernel_weights, regression_points, bandwidth_grid, grid_minimize, sandwich, supt_critical,
   MultivariateKDE, marginal, cov, MatrixSelector, NormalScaleMatrix, PlugInMatrix, SCVMatrix, LSCVMatrix,
   BoundedKDE, BoundaryMethod, Reflection, BetaKernels, GammaKernels, Transformed,
-  MultipleCutoffs, CumulativeCutoffs
+  MultipleCutoffs, CumulativeCutoffs,
+  rd_power, rd_samplesize
 
 include("polynomials.jl")
 include("kernels.jl")
@@ -78,6 +79,7 @@ include("semiparametric.jl")
 include("locallik.jl")
 include("rddensity.jl")
 include("rdmulti.jl")
+include("rdpower.jl")
 # (not named *kde.jl or *bandwidths.jl: the Pages of @autodocs match by suffix)
 include("multivariate.jl")
 include("bandwidthmatrices.jl")

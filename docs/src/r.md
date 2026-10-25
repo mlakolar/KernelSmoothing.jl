@@ -29,6 +29,7 @@ in the next section.
 | rdrobust 4.1.1, `rdrobust` | `fit(RegressionDiscontinuity, x, y; compat = true)` | 21, among them sharp and fuzzy kinks (`deriv = 1`) | 1e-10 |
 | rdrobust, `rdbwselect` | `RDOptimal(bwselect)` | 33, among them kinks | 1e-8 |
 | rdmulti 2.0.0, `rdmc` (sharp and fuzzy) and `rdms` (with and without ranges) | `fit(MultipleCutoffs, x, y, c; compat = true)`, `fit(CumulativeCutoffs, x, y; cutoffs, ranges, compat = true)` | 4 | 1e-7: estimates, robust variances, bandwidths, observations in the windows and weights |
+| rdpower 3.0, `rdpower` (`power.rbc`) and `rdsampsi` (`sampsi.tot`) | `rd_power(m; tau, alpha, n)`, `rd_samplesize(m; tau, power, alpha)` | 3 and 2 | power to 1e-8, sample sizes exactly; rdpower's power of the conventional test, which shifts the effect by a multiple of the estimated bias that its documentation does not give, is not reproduced |
 | rddensity 3.0, `rddensity` and `rdbwdensity` | `fit(DensityDiscontinuity, x)` | 19 | 1e-8, binomial tests to 1e-10 |
 | RDHonest 1.0.2, `RDHonest` | `RDHonestOptimal(M)` and `confint(m; method = Honest(M))` | 17, and 24 for the rule of thumb for M | 1e-10 at given bandwidths, 1e-6 for optimized ones |
 | RDHonest, local linear regression | `confint(m; method = Honest(M))` of `LocalPolynomialRegression` | 4 | 1e-10 |
