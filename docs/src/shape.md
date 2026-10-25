@@ -18,14 +18,16 @@ farther from it than ``\hat f``,
 \quad \text{for every } p \ge 1,
 ```
 
-with strict improvement wherever ``\hat f`` is not monotone. The rearrangement is
-with respect to the counting measure on the points, so that for a function on an
-interval the points should be equally spaced. Rearranging the lower and the upper
-ends of a confidence band separately gives a band that covers an increasing
-function whenever the original band does, and is never wider (their
-Proposition 2). `rearrange(m)` works for every fit with points and estimates, and
-`confint` and `conf_band` of the result rearrange the intervals and bands of the
-fit.
+a bound on the distance over all points, not at each point. The rearrangement is
+with respect to the counting measure on the points: over an interval for equally
+spaced points, as the default points of local polynomial regression, and with
+respect to the distribution of the data for the quantiles that are the default
+points of the density fits. Rearranging the lower and the upper ends of a
+confidence band separately gives a band that covers an increasing function at the
+points whenever the original band does (their Proposition 2), and the ``L^p`` norm
+of its width over the points does not increase. `rearrange(m)` works for every fit
+with one estimate per point, and `confint` and `conf_band` of the result rearrange
+the intervals and bands of the fit.
 
 ## Projection onto a cone of shapes
 

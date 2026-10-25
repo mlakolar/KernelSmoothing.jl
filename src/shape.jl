@@ -21,23 +21,27 @@ The increasing rearrangement of Chernozhukov, Fernández-Val and Galichon (2009)
 the estimates of a fit `m` at its points, which must be sorted: the estimates
 sorted in increasing order, or in decreasing order with `decreasing = true`. For a
 monotone function, the rearranged estimate is never farther from it than the
-original one, in any ``L^p`` distance over the points, and it improves the
-estimate wherever that is not monotone. The rearrangement is with respect to the
-points, each counting equally, so that for a rearrangement over an interval the
-points should be equally spaced, as the default points of the fits are.
+original one in the ``L^p`` distance over the points, for every ``p ≥ 1``; the
+bound is on the distance over all points, not at each point. The rearrangement
+counts each point equally: for the equally spaced default points of
+[`LocalPolynomialRegression`](@ref) it is the rearrangement over an interval, and
+for the quantiles that are the default points of the density fits, with respect to
+the distribution of the data.
 
 `confint(r; kwargs...)` and `conf_band(r; kwargs...)` rearrange the lower and upper
-ends of the intervals and bands of `m` separately. A band that covers a monotone
-function still covers it after the rearrangement (Chernozhukov, Fernández-Val and
-Galichon 2009, Proposition 2), and it is never wider; pointwise intervals keep no
-such guarantee. Works for any fit with `points` and `coef`, such as
-[`LocalPolynomialRegression`](@ref), [`PointwiseDensity`](@ref),
-[`LocalPolynomialDensity`](@ref) and [`LocalLikelihood`](@ref).
+ends of the intervals and bands of `m` separately, over the points where neither end
+is `NaN`. A band that covers a monotone function at the points still covers it after
+the rearrangement (Chernozhukov, Fernández-Val and Galichon 2009, Proposition 2),
+and the ``L^p`` norm of its width over the points does not increase; pointwise
+intervals keep no such guarantee. Works for any fit whose `coef` holds one estimate
+per point, such as [`LocalPolynomialRegression`](@ref), [`PointwiseDensity`](@ref),
+[`LocalPolynomialDensity`](@ref) and [`LocalLikelihood`](@ref), for which the
+estimates are those of the linear predictor (which the rearrangement of the mean
+equals, since the link is monotone) and which has no bands.
 """
 function rearrange(m; decreasing::Bool = false)
-  pts = Vector{Float64}(m.points)
+  pts, est = _pointestimates(m)
   issorted(pts) || throw(ArgumentError("rearrangement needs sorted points"))
-  est = Vector{Float64}(coef(m))
   any(isnan, est) && throw(ArgumentError("the fit has unidentified estimates (NaN), which cannot be rearranged"))
   return Rearranged(m, decreasing, pts, sort(est; rev = decreasing))
 end
@@ -49,14 +53,34 @@ end
 
 coef(r::Rearranged) = copy(r.estimate)
 
+# the points and the estimates of a fit, which must hold one estimate per point
+function _pointestimates(m)
+  pts = Vector{Float64}(m.points)
+  est = Vector{Float64}(coef(m))
+  length(est) == length(pts) ||
+    throw(ArgumentError("the fit has $(length(est)) estimates at $(length(pts)) points; shapes apply to fits with one estimate per point"))
+  return pts, est
+end
+
+# the ends of intervals sorted over the points where neither is NaN, the others left in
+# place
+function _rearrangeends(lo, hi, decreasing)
+  lo, hi = copy(lo), copy(hi)
+  ok = findall(i -> !isnan(lo[i]) && !isnan(hi[i]), eachindex(lo))
+  lo[ok] = sort(lo[ok]; rev = decreasing)
+  hi[ok] = sort(hi[ok]; rev = decreasing)
+  return lo, hi
+end
+
 function confint(r::Rearranged; kwargs...)
   c = confint(r.model; kwargs...)
-  return hcat(sort(c[:, 1]; rev = r.decreasing), sort(c[:, 2]; rev = r.decreasing))
+  return hcat(_rearrangeends(c[:, 1], c[:, 2], r.decreasing)...)
 end
 
 function conf_band(r::Rearranged; kwargs...)
   b = conf_band(r.model; kwargs...)
-  return merge(b, (lower = sort(b.lower; rev = r.decreasing), upper = sort(b.upper; rev = r.decreasing)))
+  lo, hi = _rearrangeends(b.lower, b.upper, r.decreasing)
+  return merge(b, (lower = lo, upper = hi))
 end
 
 const _SHAPES = (:increasing, :decreasing, :convex, :concave, :increasing_convex, :increasing_concave,
@@ -77,7 +101,9 @@ differences at the points), or a monotone convex or concave shape such as
 the cone, such as the steps `1{t ≥ tⱼ}` for increasing sequences and the hinges
 `(t - tⱼ)₊` for convex ones, plus a linear part, and the nonnegative coefficients
 of the generators solve a nonnegative least-squares problem by the active-set
-method of Lawson and Hanson (1974). Its cost grows with the number of generators
+method of Lawson and Hanson (1974). The cones do not change under increasing affine
+maps of the points, and the projection is equivariant under the scale of the
+values. Its cost grows with the number of generators
 in the solution: a few milliseconds for a smooth estimate at 1000 points, but for
 values that already have the shape, every generator enters, and the projection
 takes about 0.1 s at 200 points, 1 s at 400 and 15 s at 800.
@@ -95,7 +121,10 @@ function shape_projection(values::AbstractVector{<:Real}, points::AbstractVector
   v = weights === nothing ? ones(m) : Vector{Float64}(weights)
   length(v) == m || throw(DimensionMismatch("$(length(v)) weights for $m values"))
   all(w -> w > 0 && isfinite(w), v) || throw(ArgumentError("weights must be positive and finite"))
-  F, E = _conegenerators(shape, t)
+  # the cones are the same for points mapped onto [0, 1], which keeps the generators
+  # well scaled whatever the units of the points
+  z = m >= 2 ? (t .- t[1]) ./ (t[end] - t[1]) : zeros(m)
+  F, E = _conegenerators(shape, z)
   return _coneproject(Vector{Float64}(values), F, E, v)
 end
 
@@ -133,40 +162,74 @@ function _coneproject(y, F, E, v)
   return F * a .+ E * c
 end
 
-# min ‖A x - b‖ over x ≥ 0 by the active-set method of Lawson and Hanson
-function _nnls(A, b; maxiter = 30 * size(A, 2) + 50)
-  n = size(A, 2)
-  x = zeros(n)
-  passive = falses(n)
-  tol = 10 * eps() * max(1.0, LinearAlgebra.norm(A, Inf)) * max(1.0, LinearAlgebra.norm(b, Inf)) * size(A, 1)
-  w = A' * b
-  iter = 0
-  while iter < maxiter
-    iter += 1
+# min ‖A x - b‖ over x ≥ 0 by the active-set method of Lawson and Hanson (1974,
+# Chapter 23), on the columns of A and on b scaled to unit norm, so that its
+# tolerance does not depend on their units: an index enters the passive set when its
+# gradient is positive, but not if the least-squares solution on the new passive set
+# gives it a nonpositive coefficient, which rounding can cause; an infeasible solution
+# is moved toward until a coefficient reaches zero, and those that do leave.
+function _nnls(A, b; maxiter = 3 * size(A, 2) + 50)
+  m, n = size(A)
+  nb = LinearAlgebra.norm(b)
+  nb > 0 || return zeros(n)
+  s = [LinearAlgebra.norm(view(A, :, j)) for j in 1:n]
+  live = findall(>(0), s)
+  As = A[:, live] ./ s[live]'
+  bs = b ./ nb
+  k = length(live)
+  x = zeros(k)
+  passive = falses(k)
+  rejected = falses(k)   # entering indices refused since x last changed
+  tol = 10 * eps() * max(m, k)
+  w = As' * bs
+  converged = false
+  for _ in 1:maxiter
     j = 0
     best = tol
-    for i in 1:n
-      !passive[i] && w[i] > best && ((j, best) = (i, w[i]))
+    for i in 1:k
+      !passive[i] && !rejected[i] && w[i] > best && ((j, best) = (i, w[i]))
     end
-    j == 0 && break
+    if j == 0
+      converged = true
+      break
+    end
     passive[j] = true
-    while true
-      P = findall(passive)
-      z = zeros(n)
-      z[P] = A[:, P] \ b
-      if all(z[P] .> 0)
+    P = findall(passive)
+    z = zeros(k)
+    z[P] = As[:, P] \ bs
+    if z[j] <= 0
+      passive[j] = false
+      rejected[j] = true
+      continue
+    end
+    for _ in 1:k + 1
+      if all(i -> z[i] > 0, P)
         x = z
         break
       end
-      α = minimum(x[i] / (x[i] - z[i]) for i in P if z[i] <= 0)
-      x .+= α .* (z .- x)
+      # the largest step toward z that keeps x ≥ 0; the indices that block it leave
+      α, blocking = Inf, 0
       for i in P
-        x[i] <= tol && (passive[i] = false; x[i] = 0.0)
+        z[i] <= 0 || continue
+        αi = x[i] / (x[i] - z[i])
+        αi < α && ((α, blocking) = (αi, i))
       end
+      x .+= α .* (z .- x)
+      x[blocking] = 0.0
+      for i in P
+        x[i] <= 0 && (passive[i] = false; x[i] = 0.0)
+      end
+      P = findall(passive)
+      z = zeros(k)
+      isempty(P) || (z[P] = As[:, P] \ bs)
     end
-    w = A' * (b .- A * x)
+    fill!(rejected, false)
+    w = As' * (bs .- As * x)
   end
-  return x
+  converged || @warn "the nonnegative least-squares solver reached its iteration limit; the projection may be inexact"
+  out = zeros(n)
+  out[live] = x .* nb ./ s[live]
+  return out
 end
 
 """
@@ -191,14 +254,30 @@ regression of the smooth estimate, as Mammen (1991) proposed for monotone
 regression. The projection never increases the distance to a function of that
 shape, measured over the points in the weighted norm, and removes the wiggles that
 violate the shape; `weights` (equal by default) weigh the points, and the inverse
-squared standard errors are a natural choice. `coef(c)` returns the constrained
-estimates. For intervals that respect a monotone shape, see [`rearrange`](@ref).
+squared standard errors are a natural choice. Repeated points share one value.
+`coef(c)` returns the constrained estimates. For [`LocalLikelihood`](@ref) these
+are the estimates of the linear predictor, so that a convex shape is convexity of
+the logit or the logarithm of the mean. For intervals that respect a monotone
+shape, see [`rearrange`](@ref).
 """
 function constrain(m, shape::Symbol; weights = nothing)
-  pts = Vector{Float64}(m.points)
-  est = Vector{Float64}(coef(m))
+  pts, est = _pointestimates(m)
   any(isnan, est) && throw(ArgumentError("the fit has unidentified estimates (NaN), which cannot be constrained"))
-  return ShapeConstrained(m, shape, pts, shape_projection(est, pts; shape, weights))
+  v = weights === nothing ? ones(length(pts)) : Vector{Float64}(weights)
+  length(v) == length(pts) || throw(DimensionMismatch("$(length(v)) weights for $(length(pts)) points"))
+  issorted(pts) || throw(ArgumentError("the points of the fit must be sorted"))
+  # repeated points, as quantiles of data with ties: their weighted mean, with their
+  # summed weight, enters the projection, and they share its value
+  u = unique(pts)
+  g = [searchsortedfirst(u, t) for t in pts]
+  vu = zeros(length(u))
+  eu = zeros(length(u))
+  for i in eachindex(pts)
+    vu[g[i]] += v[i]
+    eu[g[i]] += v[i] * est[i]
+  end
+  θ = shape_projection(eu ./ vu, u; shape, weights = vu)
+  return ShapeConstrained(m, shape, pts, θ[g])
 end
 
 function Base.show(io::IO, c::ShapeConstrained)
