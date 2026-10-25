@@ -20,6 +20,7 @@ tests = [
   "rd",
   "rddensity",
   "rdhonest",
+  "rdlocrand",
   "lpdensity",
   "mvkde",
   "recipes",
