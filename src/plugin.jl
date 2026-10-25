@@ -453,4 +453,85 @@ function _coefvar(d, k, f, g, vce, compat::Bool)
   return v
 end
 
-# The minimizer _fmin(f, a, b; tol = eps()^0.25) goes here (see the specification).
+# A minimizer of f on [a, b] by Brent's method (Brent 1973, ch. 5): golden-section
+# search, with steps to the vertex of the parabola through the three best points when
+# that step is short enough and stays inside the bracket. The accuracy at x is
+# √eps |x| + tol / 3. It evaluates f at the same points as R's optimize(f, c(a, b),
+# tol = tol), which the golden comparisons with nprobust, lpdensity and RDHonest need;
+# for that, every comparison below, ties included, is the one of Brent's statement.
+function _fmin(f, a, b; tol = eps()^0.25)
+  isfinite(a) && isfinite(b) && a < b ||
+    throw(ArgumentError("_fmin needs a finite interval [a, b] with a < b, got [$a, $b]"))
+  ρ = (3 - sqrt(5.0)) / 2          # golden-section fraction, 2 - golden ratio
+  rtol = sqrt(eps(Float64))
+  atol = tol / 3
+  lo, hi = Float64(a), Float64(b)  # the bracket
+  # x: best point so far; w: second best; v: the previous w
+  x = lo + ρ * (hi - lo)
+  fx = f(x)
+  w, fw = x, fx
+  v, fv = x, fx
+  d = zero(x)                      # the last step
+  e = zero(x)                      # the step before it
+  while true
+    mid = (lo + hi) / 2
+    tol1 = rtol * abs(x) + atol
+    tol2 = 2 * tol1
+    # the bracket is within tol2 of x on both sides
+    abs(x - mid) <= tol2 - (hi - lo) / 2 && return x
+    # vertex of the parabola through v, w and x, as the ratio p / q with q ≥ 0;
+    # p = q = r = 0 falls through to a golden-section step
+    p = q = r = zero(x)
+    if abs(e) > tol1
+      r = (x - w) * (fx - fv)
+      q = (x - v) * (fx - fw)
+      p = (x - v) * q - (x - w) * r
+      q = 2 * (q - r)
+      if q > 0
+        p = -p
+      else
+        q = -q
+      end
+      r = e                        # r now holds the step before last
+      e = d
+    end
+    if abs(p) >= abs(q * r / 2) || p <= q * (lo - x) || p >= q * (hi - x)
+      # the parabolic step is not under half the step before last, or leaves the
+      # bracket: golden section into the larger part of the bracket
+      e = x < mid ? hi - x : lo - x
+      d = ρ * e
+    else
+      d = p / q
+      u = x + d
+      # too near an end: a step of tol1 toward the middle instead
+      if u - lo < tol2 || hi - u < tol2
+        d = x < mid ? tol1 : -tol1
+      end
+    end
+    # never evaluate within tol1 of x
+    u = abs(d) >= tol1 ? x + d : (d > 0 ? x + tol1 : x - tol1)
+    fu = f(u)
+    if fu <= fx
+      if u < x
+        hi = x
+      else
+        lo = x
+      end
+      v, fv = w, fw
+      w, fw = x, fx
+      x, fx = u, fu
+    else
+      if u < x
+        lo = u
+      else
+        hi = u
+      end
+      if fu <= fw || w == x
+        v, fv = w, fw
+        w, fw = u, fu
+      elseif fu <= fv || v == x || v == w
+        v, fv = u, fu
+      end
+    end
+  end
+end
