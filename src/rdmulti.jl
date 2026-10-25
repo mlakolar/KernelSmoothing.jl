@@ -45,8 +45,12 @@ end
 # the options of fit(RegressionDiscontinuity, ...) that hold one value per observation
 const _RDPEROBS = (:treatment, :covariates, :weights, :cluster)
 
-# the keyword arguments restricted to the observations idx
-function _subsetkwargs(kwargs, idx)
+# the keyword arguments restricted to the observations idx of n
+function _subsetkwargs(kwargs, idx, n)
+  for (k, v) in pairs(kwargs)
+    k in _RDPEROBS && v !== nothing && size(v, 1) != n &&
+      throw(DimensionMismatch("$k has $(size(v, 1)) rows for $n observations"))
+  end
   return (; (k => (k in _RDPEROBS && v !== nothing ? (v isa AbstractMatrix ? v[idx, :] : v[idx]) : v)
               for (k, v) in pairs(kwargs))...)
 end
@@ -70,11 +74,11 @@ function fit(::Type{MultipleCutoffs}, x::AbstractVector, y::AbstractVector, c::A
   n = length(x)
   length(y) == n && length(c) == n || throw(DimensionMismatch("x, y and c must have the same length"))
   _check_values(c, "c")
-  cuts = sort!(unique(Float64.(c)))
+  cuts = sort!(unique(Float64.(c) .+ 0.0))   # (adding zero makes -0.0 into 0.0)
   length(cuts) >= 2 || throw(ArgumentError("a design with several cutoffs needs at least two; use RegressionDiscontinuity"))
   fits = [begin
             idx = findall(==(cc), c)
-            fit(RegressionDiscontinuity, x[idx], y[idx]; cutoff = cc, _subsetkwargs(kwargs, idx)...)
+            fit(RegressionDiscontinuity, x[idx], y[idx]; cutoff = cc, _subsetkwargs(kwargs, idx, n)...)
           end for cc in cuts]
   pooled = fit(RegressionDiscontinuity, Float64.(x) .- Float64.(c), y; cutoff = 0, kwargs...)
   N = [sum(f.nh) for f in fits]
@@ -92,7 +96,8 @@ end
 The estimates at the `cutoffs` of one running variable, see
 [`CumulativeCutoffs`](@ref). `ranges`, one pair `(lo, hi)` per cutoff, restricts the
 fit at each cutoff to the observations with `lo ≤ x ≤ hi`, for example to those
-between the neighbouring cutoffs; by default every fit uses all observations, as
+between the neighbouring cutoffs; it can also be a matrix with one row `lo hi` per
+cutoff, as rdms's `rangemat`. By default every fit uses all observations, as
 `rdms`. The other keywords are those of [`fit`](@ref)`(RegressionDiscontinuity, x, y)`.
 """
 function fit(::Type{CumulativeCutoffs}, x::AbstractVector, y::AbstractVector; cutoffs::AbstractVector{<:Real},
@@ -101,14 +106,21 @@ function fit(::Type{CumulativeCutoffs}, x::AbstractVector, y::AbstractVector; cu
   length(x) == length(y) || throw(DimensionMismatch("x and y must have the same length"))
   cuts = Float64.(cutoffs)
   issorted(cuts) && allunique(cuts) || throw(ArgumentError("the cutoffs must be increasing"))
-  rs = ranges === nothing ? fill((-Inf, Inf), length(cuts)) :
-       [(Float64(r[1]), Float64(r[2])) for r in ranges]
+  rs = if ranges === nothing
+    fill((-Inf, Inf), length(cuts))
+  elseif ranges isa AbstractMatrix
+    size(ranges, 2) == 2 || throw(DimensionMismatch("a matrix of ranges needs two columns, lo and hi"))
+    [(Float64(ranges[k, 1]), Float64(ranges[k, 2])) for k in axes(ranges, 1)]
+  else
+    all(r -> length(r) == 2, ranges) || throw(ArgumentError("each range must be a pair (lo, hi)"))
+    [(Float64(r[1]), Float64(r[2])) for r in ranges]
+  end
   length(rs) == length(cuts) || throw(DimensionMismatch("$(length(rs)) ranges for $(length(cuts)) cutoffs"))
   all(k -> rs[k][1] < cuts[k] < rs[k][2], eachindex(cuts)) ||
     throw(ArgumentError("each range must contain its cutoff in its interior"))
   fits = [begin
             idx = findall(t -> rs[k][1] <= t <= rs[k][2], x)
-            fit(RegressionDiscontinuity, x[idx], y[idx]; cutoff = cuts[k], _subsetkwargs(kwargs, idx)...)
+            fit(RegressionDiscontinuity, x[idx], y[idx]; cutoff = cuts[k], _subsetkwargs(kwargs, idx, length(x))...)
           end for k in eachindex(cuts)]
   return CumulativeCutoffs(cuts, rs, fits)
 end

@@ -35,13 +35,23 @@ total sample size of rdpower's `rdsampsi`.
 function rd_samplesize(m::RegressionDiscontinuity; tau::Real, power::Real = 0.8, alpha::Real = 0.05)
   0 < power < 1 || throw(ArgumentError("power must be between 0 and 1, got $power"))
   0 < alpha < 1 || throw(ArgumentError("alpha must be between 0 and 1, got $alpha"))
-  tau != 0 || throw(ArgumentError("the effect tau must not be zero"))
+  isfinite(tau) && tau != 0 || throw(ArgumentError("the effect tau must be finite and not zero, got $tau"))
   power > alpha || throw(ArgumentError("the power must exceed the level alpha"))
   isfinite(m.se_rbc) || throw(ArgumentError("the fit has no robust standard error"))
-  # the power increases with n; start from the approximation that ignores the far tail
+  # the power is an increasing function of t = |τ|/se, and se = se_rbc √(N/n): find
+  # by bisection the t that reaches the power, then the n that gives it
   N = Distributions.Normal()
-  z = Distributions.quantile(N, 1 - alpha / 2) + Distributions.quantile(N, power)
-  n = max(1, ceil(Int, nobs(m) * (z * m.se_rbc / tau)^2))
+  z = Distributions.quantile(N, 1 - alpha / 2)
+  pw(t) = Distributions.ccdf(N, z - t) + Distributions.cdf(N, -z - t)
+  lo, hi = 0.0, z + 40.0
+  for _ in 1:200
+    mid = (lo + hi) / 2
+    pw(mid) < power ? (lo = mid) : (hi = mid)
+  end
+  nreal = nobs(m) * (hi * m.se_rbc / abs(tau))^2
+  nreal < 2.0^52 || throw(ArgumentError("the sample size for tau = $tau is too large to represent"))
+  # adjust for rounding: the smallest n whose power reaches the target
+  n = max(1, ceil(Int, nreal))
   while n > 1 && rd_power(m; tau, alpha, n = n - 1) >= power
     n -= 1
   end

@@ -56,6 +56,18 @@ end
   fw = fit(RegressionDiscontinuity, X[idx], Y[idx]; cutoff = 33, weights = w[idx], bandwidth = 10.0)
   @test mw.fits[1].estimate ≈ fw.estimate
   @test all(f -> f.h == (10.0, 10.0), mw.fits)
+  # a matrix of covariates and clusters are restricted to the units of each cutoff
+  Z = hcat(sin.(1:length(X)), cos.(1:length(X)))
+  g = mod.(1:length(X), 40)
+  mz = fit(MultipleCutoffs, X, Y, C; covariates = Z, cluster = g, bandwidth = 10.0)
+  fz = fit(RegressionDiscontinuity, X[idx], Y[idx]; cutoff = 33, covariates = Z[idx, :], cluster = g[idx],
+           bandwidth = 10.0)
+  @test mz.fits[1].estimate ≈ fz.estimate && mz.fits[1].se ≈ fz.se
+  @test_throws DimensionMismatch fit(MultipleCutoffs, X, Y, C; weights = w[1:10])
+  # cutoffs of -0.0 and 0.0 are one cutoff
+  c0 = [isodd(i) ? -0.0 : 0.0 for i in eachindex(X)]
+  m0 = fit(MultipleCutoffs, X .- 33, Y, ifelse.(C .== 33, c0, 33.0))
+  @test length(m0.cutoffs) == 2 && m0.fits[1].estimate ≈ m.fits[1].estimate
   # the weighted average and its intervals
   @test coef(m) == [m.estimate] && coef(m; method = RobustBiasCorrected()) == [m.estimate_bc]
   @test stderror(m) == [m.se]
@@ -77,6 +89,11 @@ end
   @test_throws ArgumentError fit(CumulativeCutoffs, X2, Y2; cutoffs = [66, 33])
   @test_throws ArgumentError fit(CumulativeCutoffs, X2, Y2; cutoffs = [33, 66], ranges = [(40, 66), (33, 100)])
   @test_throws DimensionMismatch fit(CumulativeCutoffs, X2, Y2; cutoffs = [33, 66], ranges = [(0, 66)])
+  # ranges as a matrix with one row per cutoff, as rdms's rangemat
+  sm = fit(CumulativeCutoffs, X2, Y2; cutoffs = [33, 66], ranges = [0 66; 33 100])
+  @test sm.ranges == [(0.0, 66.0), (33.0, 100.0)]
+  @test_throws DimensionMismatch fit(CumulativeCutoffs, X2, Y2; cutoffs = [33, 66], ranges = [0 33 66; 33 66 100])
+  @test_throws ArgumentError fit(CumulativeCutoffs, X2, Y2; cutoffs = [33, 66], ranges = [(0,), (33, 100)])
   @test_throws ArgumentError confint(m; method = Honest(1.0))
 end
 

@@ -16,6 +16,9 @@ include(joinpath(@__DIR__, "data", "rdpower_golden.jl"))
   # rdsampsi's sample size
   @test rd_samplesize(m; tau = 0.3) == SAMPSI[1]
   @test rd_samplesize(m; tau = 0.2, power = 0.9, alpha = 0.1) == SAMPSI[2]
+  @test rd_samplesize(m; tau = 0.25, power = 0.7) == SAMPSI2[1]
+  @test rd_samplesize(m; tau = 0.4, power = 0.95, alpha = 0.01) == SAMPSI2[2]
+  @test rd_samplesize(m; tau = -0.15) == SAMPSI2[3]
   # the power is the level at no effect, symmetric in the sign of the effect, and
   # reaches the target at the sample size, but not one observation earlier
   @test rd_power(m; tau = 0) ≈ 0.05
@@ -27,6 +30,11 @@ include(joinpath(@__DIR__, "data", "rdpower_golden.jl"))
   @test_throws ArgumentError rd_power(m; tau = 0.3, alpha = 1.5)
   @test_throws ArgumentError rd_power(m; tau = 0.3, n = 0)
   @test_throws ArgumentError rd_samplesize(m; tau = 0)
+  @test_throws ArgumentError rd_samplesize(m; tau = NaN)
+  @test_throws ArgumentError rd_samplesize(m; tau = 1e-12)
+  # a power just above the level: the search does not step through the sample sizes
+  n = rd_samplesize(m; tau = 1e-3, power = 0.051)
+  @test rd_power(m; tau = 1e-3, n) >= 0.051 > rd_power(m; tau = 1e-3, n = n - 1)
   @test_throws ArgumentError rd_samplesize(m; tau = 0.3, power = 0.01)
 end
 

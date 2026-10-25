@@ -13,8 +13,9 @@ the window, with the number treated fixed. Fitted with
 [`fit`](@ref)`(LocalRandomization, x, y; window)`.
 
 `m.statistic` names the statistics, `m.observed` holds their values, `m.pvalue` the
-randomization p-values and `m.asymptotic` the p-values of their large-sample
-approximations; `coeftable(m)` reports them.
+randomization p-values and `m.asymptotic` the asymptotic p-values (for the
+Kolmogorov–Smirnov statistic in small samples, its exact p-value); `coeftable(m)`
+reports them.
 """
 struct LocalRandomization
   cutoff::Float64
@@ -61,6 +62,10 @@ function fit(::Type{LocalRandomization}, x::AbstractVector, y::AbstractVector; w
   _check_values(x, "x")
   _check_values(y, "y")
   c = Float64(cutoff)
+  isfinite(c) || throw(ArgumentError("the cutoff must be finite, got $cutoff"))
+  isfinite(nulltau) || throw(ArgumentError("nulltau must be finite, got $nulltau"))
+  window isa Real || length(window) == 2 ||
+    throw(ArgumentError("the window must be a number or a pair (wl, wr), got $(repr(window))"))
   wl, wr = window isa Real ? (c - window, c + window) : (Float64(window[1]), Float64(window[2]))
   wl < c <= wr || throw(ArgumentError("the window must contain the cutoff, got ($wl, $wr) for the cutoff $c"))
   statistic in (:diffmeans, :ksmirnov, :ranksum, :all) ||
@@ -73,15 +78,16 @@ function fit(::Type{LocalRandomization}, x::AbstractVector, y::AbstractVector; w
   n1, n0 = count(treated), count(!, treated)
   n1 >= 2 && n0 >= 2 || throw(ArgumentError("the window needs at least two observations on each side"))
   stats = statistic === :all ? [:diffmeans, :ksmirnov, :ranksum] : [statistic]
-  observed = [_lrstatistic(s, yy, treated) for s in stats]
-  asymptotic = [_lrasymptotic(s, yy, treated, t) for (s, t) in zip(stats, observed)]
+  pre = _lrprep(yy)
+  observed = [_lrstatistic(s, pre, treated) for s in stats]
+  asymptotic = [_lrasymptotic(s, pre, treated, t) for (s, t) in zip(stats, observed)]
   # the permutation distribution, with the number treated fixed
   exceed = zeros(Int, length(stats))
   perm = copy(treated)
   for _ in 1:reps
     Random.shuffle!(rng, perm)
     for (k, s) in enumerate(stats)
-      abs(_lrstatistic(s, yy, perm)) >= abs(observed[k]) * (1 - 1e-12) && (exceed[k] += 1)
+      abs(_lrstatistic(s, pre, perm)) >= abs(observed[k]) * (1 - 1e-12) && (exceed[k] += 1)
     end
   end
   y0 = [Float64(y[i]) for i in idx if x[i] < c]
@@ -90,68 +96,61 @@ function fit(::Type{LocalRandomization}, x::AbstractVector, y::AbstractVector; w
                             (std(y0), std(y1)), stats, observed, exceed ./ reps, asymptotic)
 end
 
-function _lrstatistic(s::Symbol, y, treated)
-  if s === :diffmeans
-    s1 = s0 = 0.0
-    n1 = 0
-    for i in eachindex(y)
-      treated[i] ? (s1 += y[i]; n1 += 1) : (s0 += y[i])
-    end
-    return s1 / n1 - s0 / (length(y) - n1)
-  elseif s === :ksmirnov
-    return _ksstatistic(y[treated], y[.!treated])
-  else
-    return _ranksum(y, treated)
-  end
-end
-
-# the standardized rank sum of the controls, with midranks for ties
-function _ranksum(y, treated)
-  n = length(y)
-  n1 = count(treated)
-  n0 = n - n1
-  r = _midranks(y)
-  W0 = sum(r[i] for i in eachindex(y) if !treated[i])
-  return (W0 - n0 * (n + 1) / 2) / sqrt(n0 * n1 * (n + 1) / 12)
-end
-
-function _midranks(y)
+# The outcomes, their order, their midranks and the ends of the runs of tied values
+# in that order, computed once so that each statistic of a labelling takes one pass
+# without allocations
+function _lrprep(y)
   o = sortperm(y)
-  r = zeros(length(y))
+  n = length(y)
+  r = zeros(n)
+  ends = falses(n)
   i = 1
-  while i <= length(y)
+  while i <= n
     j = i
-    while j < length(y) && y[o[j + 1]] == y[o[i]]
+    while j < n && y[o[j + 1]] == y[o[i]]
       j += 1
     end
     for k in i:j
       r[o[k]] = (i + j) / 2
     end
+    ends[j] = true
     i = j + 1
   end
-  return r
+  return (y = y, order = o, ranks = r, ends = ends)
 end
 
-# sup |F₁ - F₀| over the pooled values
-function _ksstatistic(a, b)
-  sa, sb = sort(a), sort(b)
-  na, nb = length(sa), length(sb)
-  i = j = 0
-  d = 0.0
-  while i < na || j < nb
-    v = i < na && (j >= nb || sa[i + 1] <= sb[j + 1]) ? sa[i + 1] : sb[j + 1]
-    while i < na && sa[i + 1] == v
-      i += 1
+function _lrstatistic(s::Symbol, pre, treated)
+  y = pre.y
+  n = length(y)
+  n1 = count(treated)
+  n0 = n - n1
+  if s === :diffmeans
+    s1 = s0 = 0.0
+    for i in eachindex(y)
+      treated[i] ? (s1 += y[i]) : (s0 += y[i])
     end
-    while j < nb && sb[j + 1] == v
-      j += 1
+    return s1 / n1 - s0 / n0
+  elseif s === :ksmirnov
+    # sup |F₁ - F₀|, evaluated where the runs of tied values end
+    i = j = 0
+    D = 0.0
+    for k in 1:n
+      treated[pre.order[k]] ? (i += 1) : (j += 1)
+      pre.ends[k] && (D = max(D, abs(i / n1 - j / n0)))
     end
-    d = max(d, abs(i / na - j / nb))
+    return D
+  else
+    # the standardized rank sum of the controls, with midranks for ties
+    W0 = 0.0
+    for i in eachindex(y)
+      treated[i] || (W0 += pre.ranks[i])
+    end
+    return (W0 - n0 * (n + 1) / 2) / sqrt(n0 * n1 * (n + 1) / 12)
   end
-  return d
 end
 
-function _lrasymptotic(s::Symbol, y, treated, t)
+function _lrasymptotic(s::Symbol, pre, treated, t)
+  y = pre.y
   N = Distributions.Normal()
   if s === :diffmeans
     a, b = y[treated], y[.!treated]
@@ -162,24 +161,27 @@ function _lrasymptotic(s::Symbol, y, treated, t)
     return 2 * Distributions.ccdf(N, abs(t))
   else
     n1, n0 = count(treated), count(!, treated)
-    return n1 * n0 < 10_000 ? _ksexact(sort(y), n1, t) : _kslimit(sqrt(n1 * n0 / (n1 + n0)) * t)
+    return n1 * n0 < 10_000 ? _ksexact(y[pre.order], n1, t) : _kslimit(sqrt(n1 * n0 / (n1 + n0)) * t)
   end
 end
 
 # P(D ≥ d) for the two-sample Kolmogorov–Smirnov statistic when n₁ of the sorted
-# pooled values v are treated at random: one minus the probability that the path of
-# the labels in the order of v keeps |i/n₁ - j/n₀| < d, with i treated and j controls
-# among the first i + j values, at the ends of the runs of tied values, where the
-# empirical distribution functions are evaluated (Schröer and Trenkler 1995)
+# pooled values v are treated at random: the probability that the path of the labels
+# in the order of v reaches |i/n₁ - j/n₀| ≥ d, with i treated and j controls among the
+# first i + j values, at the end of a run of tied values, where the empirical
+# distribution functions are evaluated (Schröer and Trenkler 1995). The mass of the
+# paths is moved forward step by step, and the mass that reaches the boundary is
+# summed, so that small p-values keep their relative accuracy.
 function _ksexact(v, n1, d)
   n = length(v)
   n0 = n - n1
-  # p[i + 1] is the probability of i treated among the first k, staying inside
-  p = zeros(n1 + 1)
+  # p[i + 1] is the probability of i treated among the first k, without an exit
+  p, q = zeros(n1 + 1), zeros(n1 + 1)
   p[1] = 1.0
   tol = d * (1 - 1e-12)
+  exit = 0.0
   for k in 1:n
-    q = zeros(n1 + 1)
+    fill!(q, 0.0)
     for i in max(0, k - 1 - n0):min(k - 1, n1)
       j = k - 1 - i
       i < n1 && (q[i + 2] += p[i + 1] * (n1 - i) / (n - k + 1))
@@ -187,22 +189,32 @@ function _ksexact(v, n1, d)
     end
     if k == n || v[k + 1] != v[k]
       for i in max(0, k - n0):min(k, n1)
-        abs(i / n1 - (k - i) / n0) >= tol && (q[i + 1] = 0.0)
+        if abs(i / n1 - (k - i) / n0) >= tol
+          exit += q[i + 1]
+          q[i + 1] = 0.0
+        end
       end
     end
-    p = q
+    p, q = q, p
   end
-  return clamp(1 - p[n1 + 1], 0.0, 1.0)
+  return min(exit, 1.0)
 end
 
-# the limiting distribution of √(n₁n₀/n) D: P(K ≥ t) = 2 ∑ₖ (-1)^(k-1) exp(-2k²t²)
+# P(K ≥ t) for the Kolmogorov distribution, the limit of √(n₁n₀/n) D: from
+# 1 - (√(2π)/t) ∑ₖ exp(-(2k-1)²π²/(8t²)) for t < 1, and from the alternating series
+# 2 ∑ₖ (-1)^(k-1) exp(-2k²t²) for t ≥ 1, each of which converges in a few terms there
 function _kslimit(t)
   t <= 0 && return 1.0
+  if t < 1
+    s = 0.0
+    for k in 1:10
+      s += exp(-(2k - 1)^2 * π^2 / (8 * t^2))
+    end
+    return clamp(1 - sqrt(2π) / t * s, 0.0, 1.0)
+  end
   s = 0.0
-  for k in 1:100
-    term = 2 * (-1)^(k - 1) * exp(-2 * k^2 * t^2)
-    s += term
-    abs(term) < 1e-17 && break
+  for k in 1:20
+    s += 2 * (-1)^(k - 1) * exp(-2 * k^2 * t^2)
   end
   return clamp(s, 0.0, 1.0)
 end

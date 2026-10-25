@@ -100,10 +100,10 @@ since the derivative converges at a slower rate.
 
 ```julia
 x = 2 .* rand(4000) .- 1
-t = 0.5 .* x .- 0.4 .* max.(x, 0)                 # the slope of the treatment changes at 0
+t = 0.5 .* x .- 0.4 .* max.(x, 0) .+ 0.1 .* randn(4000)   # the slope of E(t | x) changes at 0
 y = 1 .+ 1.5 .* t .+ 0.2 .* x .^ 2 .+ 0.3 .* randn(4000)
-fit(RegressionDiscontinuity, x, y; derivative = 1)               # sharp kink: 1.5 × (-0.4)
-fit(RegressionDiscontinuity, x, y; derivative = 1, treatment = t) # fuzzy kink: 1.5
+fit(RegressionDiscontinuity, x, y; derivative = 1)               # the kink in y: 1.5 × (-0.4)
+fit(RegressionDiscontinuity, x, y; derivative = 1, treatment = t) # fuzzy kink: the effect 1.5
 ```
 
 ## Bandwidths

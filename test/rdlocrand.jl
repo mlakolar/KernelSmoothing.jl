@@ -38,15 +38,32 @@ end
     n = length(y)
     labels = [digits(b; base = 2, pad = n) .== 1 for b in 0:2^n-1]
     labels = filter(l -> count(l) == n1, labels)
-    D = [KernelSmoothing._ksstatistic(y[l], y[.!l]) for l in labels]
+    pre = KernelSmoothing._lrprep(y)
+    D = [KernelSmoothing._lrstatistic(:ksmirnov, pre, l) for l in labels]
     for d in unique(D)
       @test KernelSmoothing._ksexact(y, n1, d) ≈ count(>=(d - 1e-12), D) / length(D)
     end
   end
+  # small p-values keep their relative accuracy: separated samples of 50
+  @test KernelSmoothing._ksexact(1.0:100, 50, 1.0) ≈ 2 / binomial(big(100), 50) rtol = 1e-8
+  x = vcat(-(50:-1:1) ./ 100, (0:49) ./ 100)
+  @test fit(LocalRandomization, x, x; window = 0.6, statistic = :ksmirnov).asymptotic[1] ≈
+        2 / binomial(big(100), 50) rtol = 1e-8
+  # the limiting distribution on both sides of t = 1
   @test KernelSmoothing._kslimit(0.0) == 1
+  @test KernelSmoothing._kslimit(0.01) == 1
+  @test KernelSmoothing._kslimit(0.5) ≈ 0.9639452436648751 rtol = 1e-10
+  @test KernelSmoothing._kslimit(1.0) ≈ 0.26999967167735456 rtol = 1e-10
+  @test KernelSmoothing._kslimit(prevfloat(1.0)) ≈ KernelSmoothing._kslimit(1.0) rtol = 1e-10
   @test KernelSmoothing._kslimit(3.0) ≈ 2 * exp(-18) rtol = 1e-6
+  # a tiny statistic in a large sample has a p-value of one
+  x = vcat(-(1:120) ./ 1000, (0:120) ./ 1000)
+  y = ones(241)
+  y[1] = y[121] = 0
+  @test fit(LocalRandomization, x, y; window = 0.2, statistic = :ksmirnov).asymptotic[1] ≈ 1
   # ties in the statistic: the empirical distribution functions jump together
-  @test KernelSmoothing._ksstatistic([1.0, 2.0, 2.0], [2.0, 3.0]) ≈ 1 / 2
+  pre = KernelSmoothing._lrprep([1.0, 2.0, 2.0, 2.0, 3.0])
+  @test KernelSmoothing._lrstatistic(:ksmirnov, pre, [true, true, true, false, false]) ≈ 1 / 2
 end
 
 @testset "checks" begin
@@ -55,6 +72,9 @@ end
   @test_throws ArgumentError fit(LocalRandomization, X, Y; window = 0.2, statistic = :ttest)
   @test_throws ArgumentError fit(LocalRandomization, X, Y; window = 0.2, reps = 0)
   @test_throws ArgumentError fit(LocalRandomization, [-0.1, 0.1, 0.2], [1.0, 2.0, 3.0]; window = 0.5)
+  @test_throws ArgumentError fit(LocalRandomization, X, Y; window = 0.2, nulltau = NaN)
+  @test_throws ArgumentError fit(LocalRandomization, X, Y; window = [0.1])
+  @test_throws ArgumentError fit(LocalRandomization, X, Y; window = (-0.1, 0.1, 0.2))
 end
 
 end
