@@ -117,19 +117,7 @@ function _rdmrot(sides, c, fuzzy)
   return fuzzy ? (M(1), M(2)) : M(1)
 end
 
-function _mrot(x, y, w)
-  nunique(SmoothingData(x)) >= 4 || throw(ArgumentError("the rule of thumb for M needs 4 distinct values of x on each side; pass M"))
-  sw = w === nothing ? ones(length(x)) : sqrt.(w)
-  r = (LinearAlgebra.qr(sw .* [xi^j for xi in x, j in 0:4]) \ (sw .* y))::Vector{Float64}
-  f2(t) = abs(2r[3] + 6t * r[4] + 12t^2 * r[5])
-  M = max(f2(x[1]), f2(x[end]))
-  # the extremum of the second derivative, where it lies inside the support
-  if abs(r[5]) > 1e-10
-    e = -r[4] / (4r[5])
-    x[1] < e < x[end] && (M = max(M, f2(e)))
-  end
-  return M
-end
+# _mrot goes here (see the specification).
 
 
 ## The bandwidth of RDHonest
@@ -180,23 +168,7 @@ end
 # the jump in column col of D: the right estimate minus the left one
 _rdhjump(ws, sides, col) = sum(ws[2].ℓ .* sides[2].D[ws[2].r, col]) - sum(ws[1].ℓ .* sides[1].D[ws[1].r, col])
 
-# RDHonest's modified golden-section search over the sorted support points xs, for
-# the piecewise constant criterion of the uniform kernel
-function _rdhgss(f, xs)
-  gr = (sqrt(5) + 1) / 2
-  a, b = 1, length(xs)
-  c, d = round(Int, b - (b - a) / gr), round(Int, a + (b - a) / gr)
-  while b - a > 100
-    if f(xs[c]) < f(xs[d])
-      b = d
-    else
-      a = c
-    end
-    c, d = round(Int, b - (b - a) / gr), round(Int, a + (b - a) / gr)
-  end
-  supp = xs[a:b]
-  return supp[argmin(f.(supp))]
-end
+# _rdhgss goes here (see the specification).
 
 # RDHonest's PrelimVar: the variances on the two sides, the means of the squared
 # residuals (and their products, for the outcome and the treatment of a fuzzy design)
@@ -228,40 +200,4 @@ function _rdhminbw(sides, c)
   return max(ur[min(3, end)], ul[min(3, end)], sort(tr)[min(4, end)], sort(tl)[min(4, end)])
 end
 
-# RDHonest's IKBW: the bandwidth of Imbens and Kalyanaraman (2012, Section 6.2) for the
-# outcome, with the constant of the triangular kernel, (ν₀ / μ₂²)^(1/5) = 480^(1/5)
-function _rdikbw(sides, c, hmin)
-  tl, tr = sides[1].data.x .- c, sides[2].data.x .- c
-  yl, yr = sides[1].D[:, 1], sides[2].D[:, 1]
-  wl, wr = sides[1].data.w, sides[2].data.w
-  Nm, Np = length(tl), length(tr)
-  N = Nm + Np
-  X, Y = vcat(tl, tr), vcat(yl, yr)
-  sdX = _sd(X)
-  # the variances on the two sides from local constant fits with the uniform kernel
-  h1 = max(1.84 * sdX / N^(1 / 5), hmin)
-  function localvar(t, y, w)
-    ix = findall(v -> abs(v) <= h1, t)
-    ww = w === nothing ? ones(length(ix)) : w[ix]
-    m = sum(ww .* y[ix]) / sum(ww)
-    return sum(abs2, y[ix] .- m) / (length(ix) - 1)
-  end
-  varm, varp = localvar(tl, yl, wl), localvar(tr, yr, wr)
-  h0 = 1.84 * sdX / N^(1 / 5)
-  f0 = count(v -> abs(v) <= h0, X) / (2N * h0)
-  # the third derivative from a global cubic with a jump
-  Z = [ones(N) (X .>= 0) X X .^ 2 X .^ 3]
-  m3 = 6 * (LinearAlgebra.qr(Z) \ Y)[5]
-  h2m = 7200^(1 / 7) * (varm / (f0 * m3^2))^(1 / 7) * Nm^(-1 / 7)
-  h2p = 7200^(1 / 7) * (varp / (f0 * m3^2))^(1 / 7) * Np^(-1 / 7)
-  function curvature(t, y, inside)
-    ix = findall(inside, t)
-    Q = [ones(length(ix)) t[ix] t[ix] .^ 2]
-    return 2 * (LinearAlgebra.qr(Q) \ y[ix])[3], length(ix)
-  end
-  m2m, nm = curvature(tl, yl, v -> -h2m <= v < 0)
-  m2p, np = curvature(tr, yr, v -> 0 <= v <= h2p)
-  rm = 2160 * varm / (nm * h2m^4)
-  rp = 2160 * varp / (np * h2p^4)
-  return 480^(1 / 5) * ((varp + varm) / (f0 * N * ((m2p - m2m)^2 + rm + rp)))^(1 / 5)
-end
+# _rdikbw goes here (see the specification).
