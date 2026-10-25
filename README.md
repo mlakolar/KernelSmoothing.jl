@@ -75,3 +75,36 @@ GitHub:
 using Pkg
 Pkg.add(url = "https://github.com/mlakolar/KernelSmoothing.jl")
 ```
+
+## Acknowledgements
+
+KernelSmoothing.jl is an independent implementation. We wrote its procedures from
+the papers that proposed them, and we validated them against the R packages below,
+whose authors made these methods available to applied researchers. With
+`compat = true`, the results agree with these packages on the configurations in
+the test suite; the defaults depart from them where the documentation says so. If
+you use the package, please cite the papers of the methods you use.
+
+- [nprobust](https://nppackages.github.io/nprobust/) (Calonico, Cattaneo and
+  Farrell): local polynomial regression and kernel density estimation with robust
+  bias-corrected inference. Calonico, Cattaneo and Farrell (2018), *Journal of the
+  American Statistical Association* 113(522); (2019), *Journal of Statistical
+  Software* 91(8); (2022), *Bernoulli* 28(4).
+- [rdrobust](https://rdpackages.github.io/rdrobust/) (Calonico, Cattaneo, Farrell
+  and Titiunik): regression discontinuity designs. Calonico, Cattaneo and Titiunik
+  (2014), *Econometrica* 82(6); Calonico, Cattaneo, Farrell and Titiunik (2017),
+  *Stata Journal* 17(2); (2019), *Review of Economics and Statistics* 101(3).
+- [rddensity](https://rdpackages.github.io/rddensity/) (Cattaneo, Jansson and Ma):
+  manipulation tests. Cattaneo, Jansson and Ma (2018), *Stata Journal* 18(1);
+  (2020), *Journal of the American Statistical Association* 115(531).
+- [lpdensity](https://nppackages.github.io/lpdensity/) (Cattaneo, Jansson and Ma):
+  local polynomial density estimation. Cattaneo, Jansson and Ma (2020), *Journal of
+  the American Statistical Association* 115(531); (2022), *Journal of Statistical
+  Software* 101(2).
+- [RDHonest](https://github.com/kolesarm/RDHonest) (Kolesár): honest confidence
+  intervals. Armstrong and Kolesár (2018), *Econometrica* 86(2); (2020),
+  *Quantitative Economics* 11(1); Kolesár and Rothe (2018), *American Economic
+  Review* 108(8).
+- R's `stats` package (R Core Team): `bw.SJ`, the bandwidth of Sheather and Jones
+  (1991), *Journal of the Royal Statistical Society, Series B* 53(3), and `glm`,
+  against which the local likelihood fits are checked.
