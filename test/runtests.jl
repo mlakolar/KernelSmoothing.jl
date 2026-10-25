@@ -22,6 +22,7 @@ tests = [
   "rdhonest",
   "rdmulti",
   "rdpower",
+  "rdlocrand",
   "lpdensity",
   "mvkde",
   "boundedkde",
