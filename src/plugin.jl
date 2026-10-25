@@ -222,23 +222,20 @@ function selectbandwidth(rule::IMSEOptimal, d::SmoothingData, k::AbstractKernel;
   pilots = compat ? nothing : _regressionpilots(d, k, p)
   r = _msedpis(d, k, grid, p, ν, rule, vce, minobs, pilots)
   N, R = nobs(d), d.x[end] - d.x[1]
-  Vh, Bh = sum(s.Vh for s in r) / length(r), sum(s.Bh for s in r) / length(r)
-  if isodd(p - ν) || rule.interior
-    h = (Vh / (N * Bh))^(1 / (2p + 3))
-    # where the bias nearly vanishes, as for a linear regression function, h has no
-    # bound in nprobust; the adaptive rule caps it at the range, as MSEOptimal does
-    compat || (h = min(h, R))
-  else
-    h = _fmin(H -> abs(H^(2p + 2 - 2ν) * Bh + Vh / (N * H^(1 + 2ν))), eps(), R)
-  end
+  twoterms = iseven(p - ν) && !rule.interior
+  # the minimizer of the integrated mean squared error of a fit of order o for the
+  # derivative nu, from the averages V̄ and B̄² of its constants over the grid
+  imsebandwidth(V̄, B̄², o, nu) = twoterms ?
+    _fmin(H -> abs(H^(2o + 2 - 2nu) * B̄² + V̄ / (N * H^(1 + 2nu))), eps(), R) : (V̄ / (N * B̄²))^(1 / (2o + 3))
+  average(f) = sum(f(s) for s in r) / length(r)
+  h = imsebandwidth(average(s -> s.forh.V), average(s -> s.forh.B²), p, ν)
+  # where the bias nearly vanishes, as for a linear regression function, the closed
+  # form has no bound in nprobust; the adaptive rule caps it at the range, as
+  # MSEOptimal does
+  compat || twoterms || (h = min(h, R))
   compat || return BandwidthSelection(h, rule, (b = Float64(pilots.b1), grid = grid,
                                                 crossvalidation = pilots.crossvalidation))
-  Vb, Bb = sum(s.Vb for s in r) / length(r), sum(s.Bb for s in r) / length(r)
-  if isodd(p - ν) || rule.interior
-    b = (Vb / (N * Bb))^(1 / (2q + 3))
-  else
-    b = _fmin(H -> abs(H^(2q + 2 - 2(p + 1)) * Bb + Vb / (N * H^(1 + 2(p + 1)))), eps(), R)
-  end
+  b = imsebandwidth(average(s -> s.forb.V), average(s -> s.forb.B²), q, p + 1)
   return BandwidthSelection(h, rule, (b = Float64(b), grid = grid, crossvalidation = NaN))
 end
 
@@ -276,71 +273,87 @@ function _regressionpilots(d, k, p)
 end
 
 # _msedpi at the points cs, in tasks; a function barrier, so that the closure captures
-# pilots of one type, which Julia 1.10 needs to infer the results
-_msedpis(d, k, cs, p, ν, rule, vce, minobs, pilots) =
-  _pointwise(c -> _msedpi(d, k, c, p, ν, rule.regularization, rule.interior, vce, minobs, pilots), cs)
+# pilots of one type, which Julia 1.10 needs to infer the results. The preliminary
+# bandwidth does not depend on the point.
+function _msedpis(d, k, cs, p, ν, rule, vce, minobs, pilots)
+  hσ = _variancepilot(d, k, pilots === nothing)
+  return _pointwise(c -> _msedpi(d, k, c, p, ν, rule.regularization, rule.interior, vce, minobs, hσ, pilots), cs)
+end
 
-# The stages of nprobust's lpbwselect.mse.dpi at the point c, for a fit of order p
-# of the derivative ν, or only its last stage with the adaptive pilot bandwidths;
-# returns h, b and the variance and squared-bias constants that IMSEOptimal averages.
-function _msedpi(d, k, c, p, ν, regul, interior, vce, minobs, pilots = nothing)
-  q = p + 1
-  even = iseven(p - ν)
+# The preliminary bandwidth at which the variance constants are estimated: a
+# normal-reference rule with the unweighted spread of x, as in nprobust; the adaptive
+# rule takes the standard deviation where more than half of the data are tied and
+# the interquartile range vanishes, which without a floor made the bandwidth zero
+function _variancepilot(d, k, compat)
   xs, N = d.x, nobs(d)
-  R = xs[end] - xs[1]
-  bwmax = max(abs(c - xs[1]), abs(c - xs[end]))
-  compat = pilots === nothing
-  # the preliminary bandwidth for the variances: a normal-reference rule with the
-  # unweighted spread of x, as in nprobust; the adaptive rule takes the standard
-  # deviation where more than half of the data are tied and the interquartile range
-  # vanishes, which without a floor made the bandwidth zero
   sd = N > 1 ? sqrt(sum(abs2, xs .- _sortedmean(xs)) / (N - 1)) : 0.0
   iqr = _unweightedquantile(xs, 0.75) - _unweightedquantile(xs, 0.25)
   spread = compat ? min(sd, iqr / 1.349) : _robustscale(sd, iqr / 1.349)
-  cbw = min(_nrconstant(k) * spread * N^(-1 / 5), bwmax)
-  bwmin = minobs > 0 ? knn_distance(d, c, min(minobs, N)) : 0.0
-  cbw = max(cbw, bwmin)
-  clamp_bw(h) = max(min(h, bwmax), bwmin)
+  return _nrconstant(k) * spread * N^(-1 / 5)
+end
+
+# The direct plug-in bandwidth h that minimizes the estimated mean squared error of
+# the estimate of the derivative ν by a fit of order p at the point c, and its pilot
+# bandwidth b (Calonico, Cattaneo and Farrell 2018, 2019). The bias of the fit
+# involves the derivative of order p + 1 and, for even p - ν at boundary points, the
+# one of order p + 2, which fits of orders p + 1 and p + 2 estimate with the pilot
+# bandwidths b and b′. These are given (the adaptive pilots), or, with
+# pilots === nothing, selected by the same plug-in in turn, which reproduces
+# nprobust: b′ and b″ for the derivatives of orders p + 2 and p + 3, with their bias
+# estimated over the whole range of the data, then b from b′ and b″, and h from b
+# and b′. Every bandwidth is capped at the distance to the farther end of the data
+# and floored at the distance of the minobs-th nearest observation, and so is the
+# preliminary bandwidth hσ₀ at which the variance constants are estimated.
+# Returns h, b and the variance and squared-bias constants of both, which
+# IMSEOptimal averages.
+function _msedpi(d, k, c, p, ν, λ, interior, vce, minobs, hσ₀, pilots)
+  compat = pilots === nothing
+  q = p + 1
+  xs, N = d.x, nobs(d)
+  R = xs[end] - xs[1]
+  hmax = max(abs(c - xs[1]), abs(c - xs[end]))
+  hmin = minobs > 0 ? knn_distance(d, c, min(minobs, N)) : 0.0
+  bounded(H) = max(min(H, hmax), hmin)
+  hσ = bounded(hσ₀)
   # the second bias term enters only for even p - ν at boundary points, in every stage
-  needB2 = even && !interior
-  # nprobust's squared bias for even p - ν, (B₁ + H B₂ + λR)², adds R, which has the
-  # units of B₁², to B₁, so that the bandwidth depends on the units of y, and vanishes
-  # where the estimated terms cancel; the adaptive rule bounds it by
-  # (|B₁| + H |B₂|)² + λR instead, as for lpdensity
-  sqbias(C, H, scale) = compat ? (C.B1 + H * C.B2 + scale * C.R)^2 :
-                                 (abs(C.B1) + H * abs(C.B2))^2 + scale * C.R
-  # the bandwidth that minimizes the mean squared error from the constants of a stage
-  function optimal(C, o, nu, scale)
-    isfinite(C.V) || return NaN
-    needB2 || return C.bw
-    return _fmin(H -> abs(H^(2o + 2 - 2nu) * sqbias(C, H, scale) + C.V / (N * H^(1 + 2nu))), eps(), R)
+  twoterms = iseven(p - ν) && !interior
+  # With two terms, nprobust's squared bias (B₁ + H B₂ + λℛ)² adds ℛ, which has the
+  # units of B₁², to B₁, so that the bandwidth depends on the units of y, and
+  # vanishes where the estimated terms cancel; the adaptive rule bounds it by
+  # (|B₁| + H |B₂|)² + λℛ instead, as for lpdensity
+  sqbias(M, H, λ) = compat ? (M.B₁ + H * M.B₂ + λ * M.ℛ)^2 : (abs(M.B₁) + H * abs(M.B₂))^2 + λ * M.ℛ
+  # A stage: the constants M of the fit of order o for the derivative nu, whose bias
+  # terms use the pilots b₁ and b₂, and the bandwidth that minimizes the estimated
+  # mean squared error H^(2(o+1-nu)) (bias)² + V / (N H^(2nu+1)), in closed form
+  # with one bias term and numerically with two
+  function stage(o, nu, b₁, b₂, λ)
+    M = _mseconstants(d, k, c, o, nu, hσ, b₁, b₂, λ, vce, twoterms, compat)
+    isfinite(M.V) || return bounded(NaN), M
+    twoterms || return bounded(((2nu + 1) * M.V / (N * (2(o + 1 - nu)) * (M.B₁^2 + λ * M.ℛ)))^(1 / (2o + 3))), M
+    return bounded(_fmin(H -> abs(H^(2o + 2 - 2nu) * sqbias(M, H, λ) + M.V / (N * H^(1 + 2nu))), eps(), R)), M
   end
-  if pilots === nothing
-    d1 = _lpbw(d, k, c, q + 1, q + 1, q + 2, cbw, R, R, 0.0, vce, needB2, true)
-    d2 = _lpbw(d, k, c, q + 2, q + 2, q + 3, cbw, R, R, 0.0, vce, needB2, true)
-    bw2 = clamp_bw(optimal(d1, q + 1, q + 1, 0.0))
-    bw3 = clamp_bw(optimal(d2, q + 2, q + 2, 0.0))
-    cb = _lpbw(d, k, c, q, p + 1, q + 1, cbw, bw2, bw3, regul, vce, needB2, true)
-    b = clamp_bw(optimal(cb, q, p + 1, regul))
+  if compat
+    b′, _ = stage(q + 1, q + 1, R, R, 0.0)
+    b″, _ = stage(q + 2, q + 2, R, R, 0.0)
+    b, Mb = stage(q, p + 1, b′, b″, λ)
   else
-    b, bw2 = clamp_bw(pilots.b1), clamp_bw(pilots.b2)
+    b, b′ = bounded(pilots.b1), bounded(pilots.b2)
   end
-  ch = _lpbw(d, k, c, p, ν, q, cbw, b, bw2, regul, vce, needB2, compat)
-  h = clamp_bw(optimal(ch, p, ν, regul))
+  h, Mh = stage(p, ν, b, b′, λ)
   isfinite(h) || throw(ArgumentError("the plug-in bandwidth at x = $c is not defined, since a " *
     "local fit of its stages has fewer distinct values of x with positive weight than " *
     "coefficients" * (d.cluster === nothing ? "" : ", or fewer than two clusters") * "; pass a bandwidth"))
-  # the constants that IMSEOptimal averages; nprobust leaves out the regularization,
-  # which the adaptive rule keeps, as MSEOptimal does
-  Vh, Bh = if !needB2
-    (ch.rV * ch.V, ch.rB * (compat ? ch.B1^2 : ch.B1^2 + regul * ch.R))
-  else
-    (ch.V, compat ? (ch.B1 + h * ch.B2)^2 : sqbias(ch, h, regul))
+  # The constants of a stage at its bandwidth H that IMSEOptimal averages, with one
+  # bias term weighted by the exponents of the closed form; nprobust leaves out the
+  # regularization, which the adaptive rule keeps, as MSEOptimal does
+  function averaged(M, o, nu, H)
+    twoterms && return (V = M.V, B² = compat ? (M.B₁ + H * M.B₂)^2 : sqbias(M, H, λ))
+    return (V = (2nu + 1) * M.V, B² = 2(o + 1 - nu) * (compat ? M.B₁^2 : M.B₁^2 + λ * M.ℛ))
   end
   # one shape for both pilots, so that the callers infer
-  compat || return (h = h, b = b, Vh = Vh, Bh = Bh, Vb = NaN, Bb = NaN)
-  Vb, Bb = !even || interior ? (cb.rV * cb.V, cb.rB * cb.B1^2) : (cb.V, (cb.B1 + b * cb.B2)^2)
-  return (h = h, b = b, Vh = Vh, Bh = Bh, Vb = Vb, Bb = Bb)
+  forh = averaged(Mh, p, ν, h)
+  forb = compat ? averaged(Mb, q, p + 1, b) : (V = NaN, B² = NaN)
+  return (h = h, b = b, forh = forh, forb = forb)
 end
 
 # nprobust's normal-reference constants for its kernels, and the exact ones otherwise
@@ -360,41 +373,48 @@ function _unweightedquantile(xs, p)
   return n == 1 ? xs[1] : xs[i] + (t - i) * (xs[i + 1] - xs[i])
 end
 
-# nprobust's lprobust.bw: the variance constant V of the derivative ν of a fit of
-# order o at c with bandwidth hV and its bias constants B1, B2, the leading
-# derivatives estimated by fits of orders oB and oB + 1 with bandwidths hB1, hB2,
-# the regularization R, and the bandwidth that minimizes the mean squared error.
-# The fits use the scaled variable u = (x - c) / h; raw coefficients of (x - c)^j
-# are the scaled ones divided by h^j. In the adaptive rule a fit that is not
-# identified widens its window, and neighbours at distances that differ by rounding
-# are tied; under compat, as in nprobust, neither.
-function _lpbw(d, k, c, o, ν, oB, hV, hB1, hB2, scale, vce, needB2::Bool, compat::Bool)
+# The constants of the mean squared error of the estimate of the derivative ν by a
+# fit of order o at c, MSE(H) ≈ H^(2(o+1-ν)) (B₁ + H B₂)² + V / (N H^(2ν+1))
+# (Calonico, Cattaneo and Titiunik 2014; Calonico, Cattaneo and Farrell 2018). With
+# Γ the Gram matrix of the fit with the preliminary bandwidth hσ and
+# Λⱼ = ∑ wᵢ k(uᵢ) uᵢ^(o+j) r(uᵢ) its moments of order o + j, the bias
+# constants are Bⱼ = e_ν'Γ⁻¹Λⱼ μ⁽ᵒ⁺ʲ⁾/(o+j)!, j = 1, 2, with the derivative from a
+# fit of order o + j with the pilot bandwidth bⱼ, B₂ only with two terms; the
+# variance constant is V = N hσ^(2ν+1) V̂, with V̂ the variance of the coefficient of
+# order ν of the fit with hσ; and ℛ = 3 (e_ν'Γ⁻¹Λ₁)² V̂₁, with V̂₁ the variance of the
+# coefficient of order o + 1 of the fit with b₁, is the term that regularizes B₁²
+# (Imbens and Kalyanaraman 2012), needed only where λ > 0. The constants are NaN
+# where a fit is not identified. The fits use the scaled variable u = (x - c) / h,
+# whose coefficients of order j are those of (x - c)^j times h^j. In the adaptive
+# rule a fit that is not identified widens its window, and neighbours at distances
+# that differ by rounding are tied; under compat, as in nprobust, neither.
+function _mseconstants(d, k, c, o, ν, hσ, b₁, b₂, λ, vce, twoterms::Bool, compat::Bool)
   widen = !compat
-  N = nobs(d)
-  rB, rV = 2(o + 1 - ν), 2ν + 1
-  fV = _lfit(d, k, c, hV, o, 2, widen)
-  fB1 = _lfit(d, k, c, hB1, oB, 0, widen)
-  # the fit for the second bias term only where it is used
-  fB2 = needB2 ? _lfit(d, k, c, hB2, oB + 1, 0, widen) : nothing
-  fV.ok && fB1.ok && (fB2 === nothing || fB2.ok) ||
-    return (V = NaN, B1 = NaN, B2 = NaN, R = NaN, rB = rB, rV = rV, bw = NaN)
-  # the bandwidths of the fits, which a fit that is not identified raises
-  hV, hB1, hB2 = fV.h, fB1.h, fB2 === nothing ? hB2 : fB2.h
-  g = fV.C \ [j == ν ? 1.0 : 0.0 for j in 0:o]
-  VV = _coefvar(d, k, fV, g, vce, compat) / hV^(2ν)
-  BConst1 = sum(g[j + 1] * fV.s[o + j + 2] for j in 0:o)   # e_ν' Γ⁻¹ ∑ wk(u) u^(o+1) r(u)
-  BConst2 = sum(g[j + 1] * fV.s[o + j + 3] for j in 0:o)
-  Rreg = 0.0
-  if scale > 0
-    gB = fB1.C \ [j == o + 1 ? 1.0 : 0.0 for j in 0:oB]
-    Rreg = 3 * BConst1^2 * _coefvar(d, k, fB1, gB, vce, compat) / hB1^(2(o + 1))
+  fσ = _lfit(d, k, c, hσ, o, 2, widen)   # with the moments up to order 2o + 2
+  f₁ = _lfit(d, k, c, b₁, o + 1, 0, widen)
+  f₂ = twoterms ? _lfit(d, k, c, b₂, o + 2, 0, widen) : nothing
+  fσ.ok && f₁.ok && (f₂ === nothing || f₂.ok) || return (V = NaN, B₁ = NaN, B₂ = NaN, ℛ = NaN)
+  # the bandwidths are those of the fits, which a fit that is not identified widens
+  eΓ = fσ.C \ [j == ν ? 1.0 : 0.0 for j in 0:o]   # Γ⁻¹ e_ν
+  V = nobs(d) * fσ.h^(2ν + 1) * (_coefvar(d, k, fσ, eΓ, vce, compat) / fσ.h^(2ν))
+  L₁ = _biasfactor(eΓ, fσ.s, o + 1)
+  B₁ = _biasconstant(L₁, f₁, o + 1)
+  B₂ = f₂ === nothing ? NaN : _biasconstant(_biasfactor(eΓ, fσ.s, o + 2), f₂, o + 2)
+  ℛ = 0.0
+  if λ > 0
+    e₁ = f₁.C \ [j == o + 1 ? 1.0 : 0.0 for j in 0:o + 1]
+    ℛ = 3 * L₁^2 * _coefvar(d, k, f₁, e₁, vce, compat) / f₁.h^(2(o + 1))
   end
-  B1 = BConst1 * fB1.β[o + 2] / hB1^(o + 1)
-  B2 = fB2 === nothing ? NaN : BConst2 * fB2.β[o + 3] / hB2^(o + 2)
-  V = N * hV^(2ν + 1) * VV
-  bw = (rV * V / (N * rB * (B1^2 + scale * Rreg)))^(1 / (2o + 3))
-  return (V = V, B1 = B1, B2 = B2, R = Rreg, rB = rB, rV = rV, bw = bw)
+  return (V = V, B₁ = B₁, B₂ = B₂, ℛ = ℛ)
 end
+
+# e_ν'Γ⁻¹Λ for the moments Λ of order m of a fit, from eΓ = Γ⁻¹e_ν and the power
+# sums s[j + 1] = ∑ wᵢ k(uᵢ) uᵢ^j
+_biasfactor(eΓ, s, m) = sum(eΓ[j + 1] * s[m + j + 1] for j in 0:length(eΓ) - 1)
+
+# the bias constant L μ⁽ᵐ⁾/m! in the units of x, from the factor L and the
+# coefficient of order m of the fit f in its scaled variable
+_biasconstant(L, f, m) = L * f.β[m + 1] / f.h^m
 
 # A weighted fit of order o at c with bandwidth h over the observations with positive
 # weight a:e, and whether the fit is identified; s holds the power sums ∑ wk(u) u^j up
