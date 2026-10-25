@@ -14,5 +14,7 @@
     confint(fit(LocalPolynomialRegression, x, y; points = [0.0]))
     confint(fit(PointwiseDensity, x; points = [-1.0, 0.0, 1.0]))
     confint(fit(LocalPolynomialDensity, x .- minimum(x); points = [0.0, 1.0, 2.0]))
+    k = fit(MultivariateKDE, [x[1:60]'; y[1:60]'])
+    pdf(k, [0.0, 0.0]); pdf(k, [x[1:3]'; y[1:3]'])
   end
 end

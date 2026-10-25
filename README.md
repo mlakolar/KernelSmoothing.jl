@@ -17,6 +17,9 @@ development.
   `kdrobust`.
 - `fit(LocalPolynomialDensity, x)`: the density estimator of Cattaneo, Jansson and
   Ma (2020), which keeps its rate at a boundary, as R's lpdensity.
+- `fit(MultivariateKDE, x)`: a kernel density estimate in several dimensions with
+  a bandwidth matrix, a distribution of Distributions.jl, with the normal scale,
+  plug-in, smoothed and least-squares cross-validation matrices of R's ks.
 - `fit(LocalPolynomialRegression, x, y)`: local polynomial estimates of a
   regression function or its derivatives, as nprobust's `lprobust`, with
   conventional, robust bias-corrected and honest intervals (Armstrong and Kolesár),
