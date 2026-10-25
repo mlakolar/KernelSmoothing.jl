@@ -58,7 +58,7 @@ uses it: the bandwidth for the Gaussian kernel, from R's binned pair counts, rou
 constants and root search, divided by `√μ₂(k)` for other kernels, so that the kernel
 has the standard deviation of R's bandwidth. Like `bw.SJ`, it takes no weights and
 throws where `bw.SJ` stops. For data far from zero relative to their range, beyond
-about `2 × 10¹²` times the range, R 4.5's integer bins overflow and put every pair
+about `2 × 10⁶` times the range (2³¹ bins of 1.01/1000 of it), R 4.5's integer bins overflow and put every pair
 at distance zero; this rule bins from the minimum, as R's development sources do.
 """
 struct SheatherJones <: BandwidthSelector
