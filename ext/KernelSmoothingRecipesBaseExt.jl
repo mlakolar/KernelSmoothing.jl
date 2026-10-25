@@ -59,6 +59,20 @@ end
   grid, pdf.(k, grid)
 end
 
+# A density estimate in two dimensions as contours over the region of the data
+# widened by three standard deviations of the kernel
+@recipe function f(k::MultivariateKDE; npoints = 101)  # COV_EXCL_LINE
+  length(k) == 2 || throw(ArgumentError("the plot recipe shows estimates in two dimensions, got $(length(k))"))
+  X, H = k.data.x, bandwidth(k)
+  g1, g2 = (range(minimum(view(X, a, :)) - 3 * sqrt(H[a, a]), maximum(view(X, a, :)) + 3 * sqrt(H[a, a]);
+                  length = npoints) for a in 1:2)
+  seriestype --> :contour
+  xguide --> "x₁"
+  yguide --> "x₂"
+  # contour wants the values of the second coordinate along the rows
+  g1, g2, permutedims(pdf(k, (g1, g2)))
+end
+
 # A density estimate on a bounded support as a curve over its central 99.9%,
 # extended to the finite boundaries
 @recipe function f(k::BoundedKDE; npoints = 401)  # COV_EXCL_LINE

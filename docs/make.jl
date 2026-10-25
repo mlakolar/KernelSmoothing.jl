@@ -8,6 +8,7 @@ makedocs(;
   pages = [
     "Home" => "index.md",
     "Density estimation" => "density.md",
+    "Multivariate density estimation" => "multivariate.md",
     "Densities on a bounded support" => "bounded.md",
     "Local polynomial regression" => "regression.md",
     "Regression discontinuity" => "rd.md",
