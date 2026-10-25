@@ -193,6 +193,18 @@ end
   end
 end
 
+@testset "pointwise density accepts a global bandwidth selector" begin
+  data = SmoothingData(X)
+  kernel = GaussianKernel()
+  rule = NormalReference()
+  selected = select_bandwidth(rule, data, kernel)
+  automatic = fit(PointwiseDensity, data; kernel, bandwidth=rule, points=[-0.5, 0.0, 0.5], minobs=0)
+  supplied = fit(PointwiseDensity, data; kernel, bandwidth=selected.h, points=[-0.5, 0.0, 0.5], minobs=0)
+  @test bandwidth(automatic) == bandwidth(supplied)
+  @test coef(automatic) == coef(supplied)
+  @test stderror(automatic) == stderror(supplied)
+end
+
 @testset "argument checks of density fits" begin
   m = fit(PointwiseDensity, X; points = [-1.0, 0.0])
   @test_throws "regression" stderror(m; method = Honest(1.0))
