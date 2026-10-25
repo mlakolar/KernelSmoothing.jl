@@ -380,7 +380,7 @@ function _lpdscale(d::SmoothingData, robust::Bool)
   return x̄, sqrt(sum(abs2, d.x .- x̄) / (nobs(d) - 1))
 end
 
-# The terms of lpdensity's rules of thumb (bw_ROT and bw_IROT) at x0, for the data
+# The terms of lpdensity's rules of thumb (bwselect = "mse-rot" and "imse-rot") at x0, for the data
 # standardized by _lpdscale and a normal density with their weighted mean and
 # standard deviation, or with `robust` the standard normal: B₁, B₂, B₃ and σ² of
 # the asymptotic mean squared error a^(2p+2-2ν) (B₁ + a B₂ + a² B₃)² + σ²/a^(2ν-1),
@@ -422,7 +422,7 @@ end
 # the asymptotic mean squared error at the standardized bandwidth a
 _lpdmse(a, p, v, t) = a^(2p + 2 - 2v) * (t.B1 + a * t.B2 + a^2 * t.B3)^2 + t.V / a^(2v - 1)
 
-# lpdensity's bw_ROT: the bandwidth that minimizes the asymptotic mean squared
+# lpdensity's rule "mse-rot": the bandwidth that minimizes the asymptotic mean squared
 # error at each point when the data are normal
 function _lpdensity_rot(rule, d::SmoothingData, k, pts, p, v, minobs; robust::Bool = false, guard::Bool = false)
   _check_spread(d, rule)
@@ -436,7 +436,7 @@ function _lpdensity_rot(rule, d::SmoothingData, k, pts, p, v, minobs; robust::Bo
   return BandwidthSelection(h, rule, (points = pts,))
 end
 
-# lpdensity's bw_IROT: one bandwidth that minimizes the sum of the asymptotic mean
+# lpdensity's rule "imse-rot": one bandwidth that minimizes the sum of the asymptotic mean
 # squared errors at the points of grid when the data are normal, with the floor and
 # the cap of the points `at` where it is used
 function _lpdensity_irot(d::SmoothingData, k, grid, p, v, minobs; at = grid, robust::Bool = false,
@@ -455,7 +455,7 @@ end
 _lpdpilot(d, g, z0, minobs) =
   min(max(g, _lpdfloor(d, z0, minobs)), max(abs(d.values[end] - z0), abs(d.values[1] - z0)))
 
-# lpdensity's bw_MSE and bw_IMSE. On the standardized data, fits of orders p + 2 and
+# lpdensity's rules "mse-dpi" and "imse-dpi". On the standardized data, fits of orders p + 2 and
 # p + 3 at rule-of-thumb pilot bandwidths estimate F⁽ᵖ⁺¹⁾/(p + 1)! and
 # F⁽ᵖ⁺²⁾/(p + 2)!, the moments of the data at a third such bandwidth h₁ give the
 # constants of the bias, and the standard error of the fit of order p at h₁ gives

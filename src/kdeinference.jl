@@ -355,11 +355,11 @@ end
 ## Plug-in bandwidths for densities
 
 # For data without responses, MSEOptimal and IMSEOptimal give
-#   h(x) = (R(k) f(x) / (4 n (B(x)² + regularization · Rreg(x))))^(1/5),   B(x) = μ₂(k)/2 f''(x),
+#   h(x) = (R(k) f(x) / (4 n (B(x)² + regularization · ℛ(x))))^(1/5),   B(x) = μ₂(k)/2 f''(x),
 # with the pilot f'' estimated with the kernel D at the bandwidth b. By default b is
 # the normal-reference ratio of the bandwidths for f'' and for f applied to the
 # Sheather–Jones bandwidth, so that it adapts to the roughness of the density, and
-# f is estimated at the Sheather–Jones bandwidth; Rreg = 3 (μ₂/2)² Var(f̂'') keeps h
+# f is estimated at the Sheather–Jones bandwidth; ℛ = 3 (μ₂/2)² Var(f̂'') keeps h
 # finite where f'' vanishes. With compat = true, the rule-of-thumb pilots of
 # nprobust's kdbwselect are used instead.
 # (imse, integrated or pointwise, comes as a Val, so that each selection infers)
@@ -387,14 +387,14 @@ function _densityplugin(rule, d, k, points, minobs, compat, ::Val{imse}) where i
     Sb, Sh = _pilotsums(d, k, b, c, 2), _pilotsums(d, k, hsj, c, 0)
     return map(eachindex(c)) do j
       f, fpp = Sh[1, j] / (d.sumw * hsj), (c0 * Sb[1, j] + c2 * Sb[3, j]) / (d.sumw * b^3)
-      (V = R * f, B2 = (μ2 / 2 * fpp)^2, Rreg = 3 * (μ2 / 2)^2 * RD * max(f, 0.0) / (N * b^5))
+      (V = R * f, B2 = (μ2 / 2 * fpp)^2, ℛ = 3 * (μ2 / 2)^2 * RD * max(f, 0.0) / (N * b^5))
     end
   end
   hopt(V, B2, Rr) = (V / (4N * (B2 + regul * Rr)))^(1 / 5)
   if imse
     grid = _densitygrid(rule, d, points)
     cs = constants(grid)
-    h = hopt(sum(c.V for c in cs), sum(c.B2 for c in cs), sum(c.Rreg for c in cs))
+    h = hopt(sum(c.V for c in cs), sum(c.B2 for c in cs), sum(c.ℛ for c in cs))
     # where the pilot estimates vanish on the whole grid, the Sheather–Jones bandwidth
     h > 0 && isfinite(h) || (h = hsj)
     return BandwidthSelection(h, rule, (b = b, grid = grid, sheatherjones = hsj))
@@ -406,7 +406,7 @@ function _densityplugin(rule, d, k, points, minobs, compat, ::Val{imse}) where i
     cs = all_cs[j]
     floor = minobs > 0 ? knn_distance(d, c, min(minobs, nobs(d))) : 0.0
     cap = max(abs(c - xs[1]), abs(c - xs[end]))
-    h[j], bs[j] = _clampdensity(hopt(cs.V, cs.B2, cs.Rreg), floor, cap), max(b, floor)
+    h[j], bs[j] = _clampdensity(hopt(cs.V, cs.B2, cs.ℛ), floor, cap), max(b, floor)
   end
   return BandwidthSelection(h, rule, (b = bs, points = pts, sheatherjones = hsj))
 end
