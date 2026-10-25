@@ -119,7 +119,8 @@ end
   yb = Float64.(y .> x .^ 2)                      # the sign of the noise
   ll = fit(LocalLikelihood, x, yb; bandwidth = 0.2, points = 0.1:0.1:0.9)
   @test coef(constrain(ll, :increasing)) ≈ shape_projection(coef(ll), ll.points)
-  @test sort(predict(ll)) ≈ KernelSmoothing._lllinkinv.(:logit, coef(rearrange(ll)))
+  # the link is increasing, so that rearranging the linear predictor rearranges the mean
+  @test coef(rearrange(ll)) == sort(coef(ll)) && sortperm(predict(ll)) == sortperm(coef(ll))
   # a fit whose coefficients are not estimates at its points
   pl = fit(PartiallyLinear, x, reshape(sin.(1:length(x)), :, 1), y; bandwidth = 0.1)
   @test_throws ArgumentError rearrange(pl)
