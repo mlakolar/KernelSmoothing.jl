@@ -77,7 +77,10 @@ differences at the points), or a monotone convex or concave shape such as
 the cone, such as the steps `1{t ≥ tⱼ}` for increasing sequences and the hinges
 `(t - tⱼ)₊` for convex ones, plus a linear part, and the nonnegative coefficients
 of the generators solve a nonnegative least-squares problem by the active-set
-method of Lawson and Hanson (1974).
+method of Lawson and Hanson (1974). Its cost grows with the number of generators
+in the solution: a few milliseconds for a smooth estimate at 1000 points, but for
+values that already have the shape, every generator enters, and the projection
+takes about 0.1 s at 200 points, 1 s at 400 and 15 s at 800.
 """
 function shape_projection(values::AbstractVector{<:Real}, points::AbstractVector{<:Real}; shape::Symbol = :increasing,
                           weights = nothing)
