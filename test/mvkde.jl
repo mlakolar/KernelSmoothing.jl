@@ -265,6 +265,12 @@ end
     @test converged
     @test Hmin ≈ Hns rtol = 1e-5
   end
+  # a trial matrix that does not factorize is rejected, and the search restarts from
+  # the gradient before it stops
+  fgbad(H) = H[1, 1] > 2.5 ? throw(LinearAlgebra.PosDefException(1)) : ((H[1, 1] - 3)^2, fill(2 * (H[1, 1] - 3), 1, 1))
+  Hb, _, _, convb = _minimizematrix(fgbad, fill(1.0, 1, 1), true)
+  @test convb && 2.4 < Hb[1, 1] <= 2.5
+  @test_throws DomainError _minimizematrix(H -> throw(DomainError(H)), fill(1.0, 1, 1), true)
 end
 
 end
