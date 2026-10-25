@@ -20,6 +20,8 @@ It provides:
   covariances between points and uniform bands;
 - [regression discontinuity](@ref rd-page) estimates for sharp, fuzzy and kink
   designs, with covariates, and the manipulation test of the density at the cutoff;
+  designs with several cutoffs, power calculations and randomization inference
+  under local randomization;
 - [bandwidth selectors](@ref bandwidths-page): rules of thumb, Sheather and Jones,
   cross-validation and plug-in bandwidths.
 
@@ -159,6 +161,13 @@ you use the package, please cite the papers of the methods you use.
   local polynomial density estimation. Cattaneo, Jansson and Ma (2020), *Journal of
   the American Statistical Association* 115(531); (2022), *Journal of Statistical
   Software* 101(2).
+- [rdmulti](https://rdpackages.github.io/rdmulti/), [rdpower](https://rdpackages.github.io/rdpower/)
+  and [rdlocrand](https://rdpackages.github.io/rdlocrand/) (Cattaneo, Titiunik and
+  Vazquez-Bare): several cutoffs, power calculations and local randomization.
+  Cattaneo, Keele, Titiunik and Vazquez-Bare (2016), *Journal of Politics* 78(4);
+  Cattaneo, Titiunik and Vazquez-Bare (2020), *Stata Journal* 20(4); (2019), *Stata
+  Journal* 19(1); Cattaneo, Frandsen and Titiunik (2015), *Journal of Causal
+  Inference* 3(1); Cattaneo, Titiunik and Vazquez-Bare (2016), *Stata Journal* 16(2).
 - [RDHonest](https://github.com/kolesarm/RDHonest) (Kolesár): honest confidence
   intervals. Armstrong and Kolesár (2018), *Econometrica* 86(2); (2020),
   *Quantitative Economics* 11(1); Kolesár and Rothe (2018), *American Economic

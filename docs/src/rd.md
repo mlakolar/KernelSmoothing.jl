@@ -8,6 +8,8 @@ adjustment for covariates, and selects its bandwidths by the plug-in rules of
 rdrobust. The estimates, standard errors and bandwidths agree with rdrobust to
 rounding. Honest intervals and their bandwidths are those of RDHonest, and
 `fit(DensityDiscontinuity, x; cutoff)` gives the manipulation test of rddensity.
+Designs with several cutoffs, power calculations and inference under local
+randomization follow rdmulti, rdpower and rdlocrand.
 
 ```julia
 using KernelSmoothing
@@ -164,6 +166,31 @@ rd_power(m; tau = 0.3)                  # the power against an effect of 0.3
 rd_samplesize(m; tau = 0.3, power = 0.8) # the observations needed for 80%
 ```
 
+## Local randomization
+
+Under local randomization (Cattaneo, Frandsen and Titiunik 2015), the treatment is
+taken to be assigned as if at random in a small window ``[w_l, w_r]`` around the
+cutoff, so that the units above and below the cutoff are comparable without a model
+for the regression function. `fit(LocalRandomization, x, y; window)` tests the sharp
+null hypothesis that the treatment changes every outcome in the window by ``\tau_0``
+(`nulltau`, by default zero) by randomization inference: the treatment labels are
+permuted within the window, with the number treated fixed, and the p-value is the
+fraction of permutations whose statistic is at least as large in absolute value as
+the observed one. The statistics are the difference in means, the Kolmogorov–Smirnov
+statistic and the standardized rank sum, and each also has an asymptotic p-value:
+from the normal distribution for the first and the last, and for the
+Kolmogorov–Smirnov statistic the exact one given the ties when ``n_0 n_1 < 10000``.
+The statistics and the asymptotic p-values agree with rdlocrand's `rdrandinf` to
+rounding, and the randomization p-values within their Monte Carlo error. The window
+is given; its choice by balance tests on covariates, as `rdwinselect`, is not
+implemented.
+
+```julia
+m = fit(LocalRandomization, x, y; window = 0.2, statistic = :all, reps = 10_000)
+coeftable(m)                             # the statistics and their p-values
+fit(LocalRandomization, x, y; window = (-0.1, 0.3), nulltau = 0.5)
+```
+
 ## Honest intervals
 
 Robust bias correction estimates the bias and removes it, while honest intervals
@@ -232,5 +259,5 @@ agree with rddensity to rounding.
 
 ```@autodocs
 Modules = [KernelSmoothing]
-Pages = ["rd.jl", "rdbandwidth.jl", "rdhonest.jl", "rddensity.jl", "rdmulti.jl", "rdpower.jl"]
+Pages = ["rd.jl", "rdbandwidth.jl", "rdhonest.jl", "rddensity.jl", "rdmulti.jl", "rdpower.jl", "rdlocrand.jl"]
 ```

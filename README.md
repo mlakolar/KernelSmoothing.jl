@@ -32,7 +32,10 @@ development.
   discontinuity designs, with covariates and rdrobust's bandwidth selectors, as
   rdrobust (Calonico, Cattaneo and Titiunik 2014), with the honest intervals and
   bandwidths of RDHonest, and `fit(DensityDiscontinuity, x; cutoff)`, the
-  manipulation test of rddensity (Cattaneo, Jansson and Ma 2020).
+  manipulation test of rddensity (Cattaneo, Jansson and Ma 2020); designs with
+  several cutoffs (`MultipleCutoffs`, `CumulativeCutoffs`) as rdmulti, power
+  calculations (`rd_power`, `rd_samplesize`) as rdpower, and randomization
+  inference in a window around the cutoff (`LocalRandomization`) as rdlocrand.
 - `fit(PartiallyLinear, u, X, y)`: partially linear models (Robinson's double
   residuals), with sandwich standard errors and cross-validated bandwidths.
   Varying-coefficient models are in HighDimensionalModels.jl, on the kernels of this
@@ -126,6 +129,13 @@ you use the package, please cite the papers of the methods you use.
   local polynomial density estimation. Cattaneo, Jansson and Ma (2020), *Journal of
   the American Statistical Association* 115(531); (2022), *Journal of Statistical
   Software* 101(2).
+- [rdmulti](https://rdpackages.github.io/rdmulti/), [rdpower](https://rdpackages.github.io/rdpower/)
+  and [rdlocrand](https://rdpackages.github.io/rdlocrand/) (Cattaneo, Titiunik and
+  Vazquez-Bare): several cutoffs, power calculations and local randomization.
+  Cattaneo, Keele, Titiunik and Vazquez-Bare (2016), *Journal of Politics* 78(4);
+  Cattaneo, Titiunik and Vazquez-Bare (2020), *Stata Journal* 20(4); (2019), *Stata
+  Journal* 19(1); Cattaneo, Frandsen and Titiunik (2015), *Journal of Causal
+  Inference* 3(1); Cattaneo, Titiunik and Vazquez-Bare (2016), *Stata Journal* 16(2).
 - [RDHonest](https://github.com/kolesarm/RDHonest) (Kolesár): honest confidence
   intervals. Armstrong and Kolesár (2018), *Econometrica* 86(2); (2020),
   *Quantitative Economics* 11(1); Kolesár and Rothe (2018), *American Economic
