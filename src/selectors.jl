@@ -58,8 +58,8 @@ uses it: the bandwidth for the Gaussian kernel, from R's binned pair counts, rou
 constants and root search, divided by `√μ₂(k)` for other kernels, so that the kernel
 has the standard deviation of R's bandwidth. Like `bw.SJ`, it takes no weights and
 throws where `bw.SJ` stops. For data far from zero relative to their range, beyond
-about `2 × 10¹²` times the range, R 4.5's integer bins overflow and put every pair
-at distance zero; the port bins from the minimum, as R's development sources do.
+about `2 × 10⁶` times the range (2³¹ bins of 1.01/1000 of it), R 4.5's integer bins overflow and put every pair
+at distance zero; this rule bins from the minimum, as R's development sources do.
 """
 struct SheatherJones <: BandwidthSelector
   method::Symbol
@@ -99,7 +99,7 @@ end
 function selectbandwidth(rule::SheatherJones, d::SmoothingData, k::AbstractKernel)
   nobs(d) >= 2 || throw(ArgumentError("SheatherJones needs at least two observations"))
   _check_mass(k, rule)
-  rule.compat && return _bwsj(rule, d, k)
+  rule.compat && return _sjcompat(rule, d, k)
   sd, iqr = _sdiqr(d)
   σ = _robustscale(sd, iqr / 1.349)
   _check_scale(σ, rule)
@@ -176,134 +176,264 @@ function selectbandwidth(rule::SheatherJones, d::SmoothingData, k::AbstractKerne
   return BandwidthSelection(σ * t, rule, details(; pilot = g, alpha2 = α2, psi4 = ψ(4, g), psi6 = -TD, iterations))
 end
 
-# R's stats::bw.SJ (R 4.5), exactly: the pairs of observations counted by their
-# distance in nb = 1000 bins of 1.01 times the range over nb, from the observations
-# binned once n > 500 (bw_pair_cnts, bw_den, bw_den_binned); ψ̂₄ and ψ̂₆ from these
-# counts with the Gaussian kernel cut where δ² ≥ 1000 (bw_phi4, bw_phi6); the
-# constants 1.357 and 2.394; for :ste, the bracket [0.1 hmax, hmax] widened by 1.2,
-# alternately above and below, and uniroot (R_zeroin2) with the tolerance 0.1 lower,
-# which R evaluates after the widening. The bandwidth, for the Gaussian kernel, is
-# divided by √μ₂(k), as density() scales its kernels to the standard deviation bw.
-function _bwsj(rule, d, k)
-  d.w === nothing || throw(ArgumentError("R's bw.SJ takes no weights, so SheatherJones(compat = true) has no " *
-                                         "counterpart for weighted data"))
-  x, n, nb = d.x, nobs(d), 1000
-  cnt, dd, binned = _bwpaircounts(x, nb, n > nb ÷ 2)
-  scale = min(_std(d), (_unweightedquantile(x, 0.75) - _unweightedquantile(x, 0.25)) / 1.349)
-  a, b = 1.24 * scale * n^(-1 / 7), 1.23 * scale * n^(-1 / 9)
-  c1 = 1 / (2 * sqrt(π) * n)
-  TD = -_bwphi(cnt, dd, n, b, 6)
-  isfinite(TD) && TD > 0 || throw(ArgumentError("sample is too sparse to find TD (R's bw.SJ)"))
-  r = _mediangap(d)
+## SheatherJones(compat = true), which reproduces R's bw.SJ (R 4.5)
+
+# The pair counts use a grid of this many bins over 1.01 times the range of the data.
+# Up to `_SJR_PAIRWISE` observations each pair is placed on the grid by the bins of its
+# two observations; above it the observations are binned first (see `_sjpaircounts`).
+const _SJR_NBINS = 1000
+const _SJR_PAIRWISE = 500
+
+# The selector of Sheather and Jones (1991) with the Gaussian kernel as both the kernel
+# and the pilot kernel, computed as R's bw.SJ computes it for `density(x, bw = "SJ")`:
+# the density functionals ψ₄ = ∫ f⁽⁴⁾ f and ψ₆ = ∫ f⁽⁶⁾ f are estimated from the
+# numbers of pairs of observations at each distance on a coarse grid, with the
+# normal-scale pilot bandwidths and the constants of Sheather and Jones rounded to
+# three or four digits, and the equation of the solve-the-equation rule is solved only
+# to a tenth of the lower end of its bracket. The bandwidth h of the Gaussian kernel is
+# divided by √μ₂(k), so that the kernel k has the standard deviation h, as in density().
+function _sjcompat(rule::SheatherJones, d::SmoothingData, k::AbstractKernel)
+  d.w === nothing || throw(ArgumentError(
+    "SheatherJones(compat = true) follows R's bw.SJ, which takes no weights; use compat = false with weights"))
+  x, n = d.x, nobs(d)
+  x[end] > x[1] || throw(ArgumentError("SheatherJones(compat = true) needs data with at least two distinct values"))
+  sdk = sqrt(_mu2centred(k))
+  # the normal scale: the smaller of the standard deviation and IQR / 1.349, the
+  # interquartile range of the standard normal distribution
+  σ = min(_std(d), (_unweightedquantile(x, 0.75) - _unweightedquantile(x, 0.25)) / 1.349)
+  Δ = 1.01 * (x[end] - x[1]) / _SJR_NBINS
+  pairwise = n <= _SJR_PAIRWISE
+  counts = _sjpaircounts(x, Δ, pairwise)
+  ψ4(g) = _sjpsi(counts, n, Δ, g, Val(4))
+  ψ6(g) = _sjpsi(counts, n, Δ, g, Val(6))
+  # the normal-scale pilot bandwidths for ψ₄ and ψ₆ (Sheather and Jones 1991, sec. 3)
+  a = 1.24 * σ * n^(-1 / 7)
+  b = 1.23 * σ * n^(-1 / 9)
+  T = -ψ6(b)   # estimates ∫ (f''')² > 0
+  isfinite(T) && T > 0 || throw(ArgumentError(
+    "SheatherJones(compat = true): the estimate of ψ₆ is not negative, the sample is too sparse"))
+  Rn = 1 / (2 * sqrt(π) * n)   # the roughness of the Gaussian kernel over n
   if rule.method == :dpi
-    g = (2.394 / (n * TD))^(1 / 7)
-    ψ4 = _bwphi(cnt, dd, n, g, 4)
-    h = (c1 / ψ4)^(1 / 5)
-    return BandwidthSelection(h / sqrt(_mu2centred(k)), rule,
-      _sjdetails(; scale, pilots = (a, b), pilot = g, psi4 = ψ4, psi6 = -TD, exact = !binned, resolution = r))
+    # the pilot bandwidth that is optimal for ψ̂₄ when ψ₆ = -T, (2 φ⁽⁴⁾(0) / (n T))^(1/7)
+    # (Wand and Jones 1995, sec. 3.6), with 2 φ⁽⁴⁾(0) = 6 / √(2π) rounded to 2.394
+    g = (2.394 / (n * T))^(1 / 7)
+    S = ψ4(g)
+    return BandwidthSelection(_fifthroot(Rn / S) / sdk, rule,
+                              _sjdetails(; scale = σ, pilots = (a, b), pilot = g, psi4 = S, psi6 = -T,
+                                         exact = pairwise, resolution = _mediangap(d)))
   end
-  hmax = 1.144 * scale * n^(-1 / 5)
-  lower, upper = 0.1 * hmax, hmax
-  α2 = 1.357 * (_bwphi(cnt, dd, n, a, 4) / TD)^(1 / 7)
-  isfinite(α2) || throw(ArgumentError("sample is too sparse to find alph2 (R's bw.SJ)"))
-  fSD(h) = (c1 / _bwphi(cnt, dd, n, α2 * h^(5 / 7), 4))^(1 / 5) - h
-  itry = 1
-  while fSD(lower) * fSD(upper) > 0
-    itry > 99 && throw(ArgumentError("no solution in the specified range of bandwidths (R's bw.SJ)"))
-    isodd(itry) ? (upper *= 1.2) : (lower /= 1.2)
-    itry += 1
+  # Solve the equation h = (R(φ) / (n ψ̂₄(g(h))))^(1/5) with the pilot bandwidth
+  # g(h) = α₂ h^(5/7) (Sheather and Jones 1991, eq. 8 and sec. 3), where
+  # α₂ = (2 φ⁽⁴⁾(0) / R(φ))^(1/7) (ψ₄ / -ψ₆)^(1/7), its constant 1.35733 rounded to 1.357
+  # and ψ₄ estimated at the pilot bandwidth a
+  ratio = ψ4(a) / T
+  α2 = ratio >= 0 ? 1.357 * ratio^(1 / 7) : NaN
+  isfinite(α2) || throw(ArgumentError(
+    "SheatherJones(compat = true): the pilot constant α₂ is not finite, the sample is too sparse"))
+  F(h) = _fifthroot(Rn / ψ4(α2 * h^(5 / 7))) - h
+  # a bracket of a tenth of the oversmoothed bandwidth of the Gaussian kernel up to it,
+  # widened alternately upward and downward by factors of 1.2 until F changes sign
+  hmax = 1.144 * σ * n^(-1 / 5)
+  lo, hi = 0.1 * hmax, hmax
+  flo, fhi = F(lo), F(hi)
+  widenings = 0
+  while flo * fhi > 0
+    widenings < 99 || throw(ArgumentError(
+      "SheatherJones(compat = true): the equation has no solution within 99 widenings of its bracket"))
+    widenings += 1
+    if isodd(widenings)
+      hi *= 1.2
+      fhi = F(hi)
+    else
+      lo /= 1.2
+      flo = F(lo)
+    end
   end
-  h, iterations = _zeroin(fSD, lower, upper, fSD(lower), fSD(upper), 0.1 * lower)
+  h, iterations = _brentzero(F, lo, hi, flo, fhi, 0.1 * lo)
   g = α2 * h^(5 / 7)
-  return BandwidthSelection(h / sqrt(_mu2centred(k)), rule,
-    _sjdetails(; scale, pilots = (a, b), pilot = g, alpha2 = α2, psi4 = _bwphi(cnt, dd, n, g, 4), psi6 = -TD,
-               exact = !binned, iterations, resolution = r))
+  return BandwidthSelection(h / sdk, rule,
+                            _sjdetails(; scale = σ, pilots = (a, b), pilot = g, alpha2 = α2, psi4 = ψ4(g),
+                                       psi6 = -T, exact = pairwise, iterations, resolution = _mediangap(d)))
 end
 
-# R's pair counts of bw.SJ: cnt[m + 1] pairs at a distance of m bins of width dd
-function _bwpaircounts(x, nb, binned)
+# the fifth root, NaN for negative numbers, as floating-point powers give it
+_fifthroot(t) = t >= 0 ? t^(1 / 5) : NaN
+
+# The numbers c[ℓ + 1] of the pairs of distinct observations whose bins on a grid of
+# width Δ are ℓ apart, ℓ = 0, …, _SJR_NBINS - 1, from the sorted x; the bins truncate
+# toward zero, so that the bin around zero is twice as wide as the others.
+# - Pairwise: observation i is in bin trunc((xᵢ - o) / Δ), with o = 0 unless the bins of
+#   x₁ or xₙ would be outside the range of 32-bit integers, and o = x₁ then.
+# - Binned (`pairwise = false`): observation i is in bin trunc(xᵢ / Δ), counted from the
+#   bin of x₁, and the observations beyond the last bin of the grid are left out.
+# The bins of the sorted observations do not decrease, so that they form runs of equal
+# bins, and the pairs within a run of m observations number m (m - 1) / 2, those between
+# two runs the product of their lengths: summed over pairs of runs for the pairwise bins,
+# of which there are at most 500, and as lagged products of the dense occupancies of the
+# grid for the binned ones. Neither loop over pairs divides.
+function _sjpaircounts(x::Vector{Float64}, Δ::Float64, pairwise::Bool)
+  N, n = _SJR_NBINS, length(x)
+  c = zeros(Int, N)
+  if pairwise
+    o = x[1] / Δ < -2.0^31 || x[end] / Δ > 2.0^31 - 1 ? x[1] : 0.0
+    # the bins of the runs, counted from the first, in runs[1:K] and their lengths in
+    # runs[n+1:n+K]; with n ≤ _SJR_PAIRWISE both are below 2^16
+    runs = Vector{UInt16}(undef, 2n)
+    K = _sjruns!(runs, n, x, Δ, o, N)
+    @inbounds for r in 1:K
+      j, m = Int(runs[r]), Int(runs[n + r])
+      c[1] += (m * (m - 1)) >> 1
+      for s in r+1:K
+        c[Int(runs[s]) - j + 1] += m * Int(runs[n + s])
+      end
+    end
+  else
+    # the occupancies of the bins, in 32 bits when they suffice
+    h = n < typemax(Int32) ? zeros(Int32, N) : zeros(Int, N)
+    _sjbinlags!(c, h, x, Δ)
+  end
+  return c
+end
+
+# c from the occupancies h of the bins: c[ℓ + 1] = ∑ⱼ h[j] h[j + ℓ] for ℓ ≥ 1, a dense loop
+# over the occupied stretch of the grid that vectorizes
+function _sjbinlags!(c::Vector{Int}, h::Vector{<:Integer}, x, Δ)
+  N = length(c)
+  K = _sjruns!(h, 0, x, Δ, 0.0, N; dense = true)   # bins 0 and K - 1 are the first and last occupied
+  @inbounds for j in 1:K
+    m = Int(h[j])
+    c[1] += (m * (m - 1)) >> 1
+  end
+  @inbounds for l in 1:K-1
+    t = 0
+    @simd for j in 1:K-l
+      t += Int(h[j]) * Int(h[j + l])
+    end  # COV_EXCL_LINE, coverage counts the end of a @simd loop as never run
+    c[l + 1] = t
+  end
+  return c
+end
+
+# Finds the runs of equal bins trunc((xᵢ - o) / Δ) of the sorted x, up to the first bin
+# that is N or more from the bin of x₁. With `dense`, the length of the run in bin j
+# (counted from the first) is stored in v[j + 1] and the result is the last bin plus one;
+# otherwise the bin of run r is stored in v[r] and its length in v[off + r], and the
+# result is the number of runs. As the bins do not decrease, the end of a run is found by
+# doubling a step and then halving it, so that a run of m observations costs about
+# 2 log₂ m divisions rather than m.
+function _sjruns!(v, off, x, Δ, o, N; dense::Bool = false)
   n = length(x)
-  xmin, xmax = x[1], x[end]   # sorted
-  if binned   # bw_pair_cnts: trunc(|x| / d) sign(x), shifted to start at 1, tabulated
-    dd = (xmax - xmin) * 1.01 / nb
-    xx = [trunc(abs(v) / dd) * sign(v) for v in x]
-    lo = minimum(xx)
-    tab = zeros(Int, nb)
-    for v in xx
-      j = Int(v - lo + 1)
-      1 <= j <= nb && (tab[j] += 1)   # tabulate ignores the others
-    end
-    cnt = zeros(nb)
-    for ii in 1:nb   # bw_den_binned
-      w = Float64(tab[ii])
-      cnt[1] += w * (w - 1)
-      for jj in 1:ii-1
-        cnt[ii - jj + 1] += w * tab[jj]
+  bin(i) = @inbounds trunc((x[i] - o) / Δ)
+  bin1 = bin(1)
+  i, b = 1, bin1
+  count = 0
+  while true
+    j = b - bin1
+    j < N || break   # also for a NaN bin, from Δ = 0
+    # bin(lo) = b, and hi is n + 1 or the first index found with bin(hi) > b
+    lo, hi, bhi, step = i, n + 1, NaN, 1
+    while lo + step <= n
+      bp = bin(lo + step)
+      if bp != b
+        hi, bhi = lo + step, bp
+        break
       end
+      lo += step
+      step *= 2
     end
-    cnt[1] *= 0.5
-    return cnt, dd, true
-  end
-  rang = (xmax - xmin) * 1.01   # bw_den
-  rang == 0 && throw(ArgumentError("data are constant in bandwidth calculation (R's bw.SJ)"))
-  de = rang / nb
-  # the bins of R's development sources, from the minimum for data far from zero
-  origin = xmin / de < typemin(Int32) || xmax / de > typemax(Int32) ? xmin : 0.0
-  bins = [trunc(Int, (v - origin) / de) for v in x]
-  cnt = zeros(nb)
-  for i in 2:n, j in 1:i-1
-    cnt[abs(bins[i] - bins[j]) + 1] += 1.0
-  end
-  return cnt, de, false
-end
-
-# R's bw_phi4 (r = 4) and bw_phi6 (r = 6), with the diagonal added
-function _bwphi(cnt, dd, n, h, r)
-  s = 0.0
-  for i in 0:length(cnt)-1
-    δ = i * dd / h
-    δ *= δ
-    δ >= 1000 && break
-    term = r == 4 ? exp(-δ / 2) * (δ * δ - 6 * δ + 3) : exp(-δ / 2) * (δ * δ * δ - 15 * δ * δ + 45 * δ - 15)
-    s += term * cnt[i + 1]
-  end
-  s = r == 4 ? 2 * s + n * 3 : 2 * s - 15 * n
-  return s / (Float64(n) * (n - 1) * h^Float64(r + 1)) * 0.3989422804014327   # M_1_SQRT_2PI
-end
-
-# R's R_zeroin2 (Brent's zeroin), as uniroot calls it with f(a) and f(b) known: the
-# root and the number of evaluations
-function _zeroin(f, ax, bx, fa, fb, tol; maxit = 1000)
-  a, b, c, fc = ax, bx, ax, fa
-  fa == 0 && return a, 0
-  fb == 0 && return b, 0
-  for it in 1:maxit+1
-    prev_step = b - a
-    if abs(fc) < abs(fb)
-      a, b, c = b, c, b
-      fa, fb, fc = fb, fc, fb
-    end
-    tol_act = 2 * eps() * abs(b) + tol / 2
-    new_step = (c - b) / 2
-    (abs(new_step) <= tol_act || fb == 0) && return b, it - 1
-    if abs(prev_step) >= tol_act && abs(fa) > abs(fb)
-      cb = c - b
-      if a == c
-        t1 = fb / fa
-        p, q = cb * t1, 1.0 - t1
+    while hi - lo > 1
+      mid = (lo + hi) >>> 1
+      bm = bin(mid)
+      if bm == b
+        lo = mid
       else
-        q, t1, t2 = fa / fc, fb / fc, fb / fa
-        p = t2 * (cb * q * (q - t1) - (b - a) * (t1 - 1.0))
-        q = (q - 1.0) * (t1 - 1.0) * (t2 - 1.0)
-      end
-      p > 0 ? (q = -q) : (p = -p)
-      if p < 0.75 * cb * q - abs(tol_act * q) / 2 && p < abs(prev_step * q / 2)
-        new_step = p / q
+        hi, bhi = mid, bm
       end
     end
-    abs(new_step) < tol_act && (new_step = new_step > 0 ? tol_act : -tol_act)
+    if dense
+      v[Int(j) + 1] = hi - i
+      count = Int(j) + 1
+    else
+      count += 1
+      v[count], v[off + count] = Int(j), hi - i
+    end
+    hi > n && break
+    i, b = hi, bhi
+  end
+  return count
+end
+
+# The estimates of Sheather and Jones (1991, sec. 2) for r = 4, 6, with the diagonal,
+#   ψ̂ᵣ(g) = ∑ᵢ ∑ⱼ φ_g⁽ʳ⁾(xᵢ - xⱼ) / (n (n - 1)),   φ_g⁽ʳ⁾(u) = Heᵣ(u / g) φ(u / g) / g^(r+1),
+# with the distances of the pairs taken from their bins, ℓΔ for the c[ℓ + 1] pairs ℓ bins
+# apart (Wand and Jones 1995, sec. 3.6), and Heᵣ the probabilists' Hermite polynomials:
+#   ψ̂ᵣ(g) = [n Heᵣ(0) + 2 ∑ₗ c[ℓ + 1] Heᵣ(zₗ) exp(-zₗ² / 2)] / (√(2π) n (n - 1) g^(r+1)),   zₗ = ℓΔ / g.
+# The sum stops at the first ℓ with zₗ² ≥ 1000, where exp(-zₗ² / 2) ≤ e⁻⁵⁰⁰.
+function _sjpsi(c::Vector{Int}, n::Int, Δ::Float64, g::Float64, r::Val{R}) where {R}
+  s = 0.0
+  @inbounds for i in eachindex(c)
+    z = (i - 1) * Δ / g
+    z2 = z * z
+    z2 >= 1000 && break
+    ci = c[i]
+    ci == 0 || (s += ci * (_hermite(r, z2) * exp(-z2 / 2)))
+  end
+  return (n * _hermite(r, 0.0) + 2 * s) / (n * (n - 1) * g^(R + 1)) * INV_SQRT_2PI
+end
+
+# He₄ and He₆ as functions of z²
+_hermite(::Val{4}, z2) = z2 * z2 - 6 * z2 + 3
+_hermite(::Val{6}, z2) = z2 * z2 * z2 - 15 * z2 * z2 + 45 * z2 - 15
+
+# Brent's zero finder (Brent 1973, ch. 4) for f on [lo, hi], given flo = f(lo) and
+# fhi = f(hi) of opposite signs or one of them zero, to the absolute tolerance tol. It
+# returns the zero and the number of iterations, or -1 for them if maxit iterations did
+# not converge. This is the variant that R's bw.SJ uses, whose iterates matter there since
+# its coarse tolerance stops the search early: it tests whether to interpolate with the
+# most recent step, where Brent's algorithm uses the step before it.
+function _brentzero(f, lo, hi, flo, fhi, tol; maxit::Integer = 1000)
+  flo == 0 && return lo, 0
+  fhi == 0 && return hi, 0
+  # b is the estimate, of the smallest |f| so far; f(b) and f(c) have opposite signs, so
+  # that the zero is between b and c; a is the previous estimate
+  a, fa = lo, flo
+  b, fb = hi, fhi
+  c, fc = lo, flo
+  for k in 1:maxit+1
+    laststep = b - a
+    if abs(fc) < abs(fb)
+      a, fa = b, fb
+      b, fb = c, fc
+      c, fc = a, fa
+    end
+    τ = 2 * eps(Float64) * abs(b) + tol / 2
+    halfway = (c - b) / 2
+    (abs(halfway) <= τ || fb == 0) && return b, k - 1
+    step = halfway   # bisection, unless an interpolation is accepted
+    if abs(laststep) >= τ && abs(fa) > abs(fb)
+      cb = c - b
+      if a == c   # through two points: the secant
+        t = fb / fa
+        p, q = cb * t, 1 - t
+      else        # through three: inverse quadratic interpolation
+        u, t1, t2 = fa / fc, fb / fc, fb / fa
+        p = t2 * (cb * u * (u - t1) - (b - a) * (t1 - 1))
+        q = (u - 1) * (t1 - 1) * (t2 - 1)
+      end
+      if p > 0
+        q = -q
+      else
+        p = -p
+      end
+      # the step p / q must stay within three quarters of the way to c and be shorter
+      # than half the last step
+      if p < 0.75 * cb * q - abs(τ * q) / 2 && p < abs(laststep * q / 2)
+        step = p / q
+      end
+    end
+    abs(step) < τ && (step = step > 0 ? τ : -τ)
     a, fa = b, fb
-    b += new_step
+    b += step
     fb = f(b)
     if (fb > 0 && fc > 0) || (fb < 0 && fc < 0)
       c, fc = a, fa

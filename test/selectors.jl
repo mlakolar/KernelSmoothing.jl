@@ -103,12 +103,13 @@ end
   # data that are not rounded are not affected: the bound is far below the bandwidth
   sy = selectbandwidth(SheatherJones(), SmoothingData(y), g)
   @test sy.details.resolution < 1e-2 && !sy.details.fallback
-  # R's zeroin
-  r, it = KernelSmoothing._zeroin(x -> x^2 - 2, 0.0, 2.0, -2.0, 2.0, 1e-12)
+  # the zero finder of the compatible rule
+  r, it = KernelSmoothing._brentzero(x -> x^2 - 2, 0.0, 2.0, -2.0, 2.0, 1e-12)
   @test r ≈ sqrt(2) atol = 1e-11
   @test it > 0
-  @test KernelSmoothing._zeroin(x -> x^2 - 2, 0.0, 2.0, -2.0, 2.0, 1e-12; maxit = 2)[2] == -1   # not converged
-  @test KernelSmoothing._zeroin(x -> x - 1, 1.0, 2.0, 0.0, 1.0, 1e-12) == (1.0, 0)            # a root at an end
+  @test KernelSmoothing._brentzero(x -> x^2 - 2, 0.0, 2.0, -2.0, 2.0, 1e-12; maxit = 2)[2] == -1   # not converged
+  @test KernelSmoothing._brentzero(x -> x - 1, 1.0, 2.0, 0.0, 1.0, 1e-12) == (1.0, 0)            # a root at an end
+  @test KernelSmoothing._brentzero(x -> x - 2, 1.0, 2.0, -1.0, 0.0, 1e-12) == (2.0, 0)            # at the other end
 end
 
 @testset "R's bw.SJ binning threshold, reflection, translation and failures" begin
