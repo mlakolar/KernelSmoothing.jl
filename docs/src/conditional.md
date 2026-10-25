@@ -101,5 +101,6 @@ ConditionalCV
 LocalQuantileRegression
 fit(::Type{LocalQuantileRegression}, ::AbstractVector, ::AbstractVector)
 stderror(::LocalQuantileRegression)
+confint(::LocalQuantileRegression)
 YuJones
 ```

@@ -39,11 +39,16 @@ check(z, y, β, τ, w) = sum(w[i] * (y[i] - z[i, :]' * β) * (τ - (y[i] < z[i, 
   @test all(isnan, _rqsimplex(hcat(ones(3), [1.0, 1.0, 1.0]), [1.0, 2.0, 3.0], ones(3), 0.5)[1])
   @test all(isnan, _rqsimplex(hcat(ones(3), [1.0, 2.0, 3.0]), [1.0, 2.0, 3.0], [1.0, 0.0, 0.0], 0.5)[1])
   # equivariance: in the scale and location of the responses and the scale of the
-  # weights, also for weights far below one
+  # weights, also for weights far below one (w again for all observations, since the
+  # loop above reassigned it)
+  w = 1.0 .+ mod.(1:150, 4)
   β, _ = _rqsimplex(Z, Y, w, 0.3)
   γ = [3.0, -1.0, 0.5]
   @test _rqsimplex(Z, 2.5 .* Y .+ Z * γ, 1e-30 .* w, 0.3)[1] ≈ 2.5 .* β .+ γ rtol = 1e-10
   @test _rqsimplex(Z, Y .+ 1e8, w, 0.3)[1] ≈ β .+ [1e8, 0, 0] rtol = 1e-12
+  # Bland's rule from the first pivot reaches the same optimum; the iteration limit warns
+  @test _rqsimplex(Z, Y, w, 0.5; bland = -1)[1] ≈ RQ_50 rtol = 1e-10
+  @test all(isnan, (@test_logs (:warn, r"iteration limit") _rqsimplex(Z, Y, w, 0.5; maxiter = 1))[1])
   # tied covariates and degenerate problems against the best line through two
   # observations with distinct covariates
   for _ in 1:30
@@ -75,6 +80,7 @@ end
   @test s.h > bandwidth(YuJones(), d, EpanechnikovKernel(); tau = 0.5)
   m = fit(LocalQuantileRegression, X, Y; tau = 0.25)
   @test bandwidth(m) == s.h && m.selection.rule == YuJones()
+  @test nobs(m) == length(X)
   # weights: integer weights act as repeated observations
   w = 1 .+ mod.(1:150, 3)
   mw = fit(LocalQuantileRegression, X, Y; weights = w, tau = 0.5, bandwidth = 0.5, points = [-1.0, 0.0, 1.0])
@@ -116,6 +122,7 @@ end
     @test [pdf(m, EY[k], EX[k]) for k in 1:4] ≈ ref rtol = 1e-12
   end
   m = fit(ConditionalDensity, X, Y; bandwidth = (0.4, 0.3))
+  @test nobs(m) == length(X) && bandwidth(m) == (0.4, 0.3)
   # a density in y, whose distribution is a weighted KDE
   for x0 in (-1.0, 0.0, 1.5)
     @test quadgk(t -> pdf(m, t, x0), -Inf, Inf)[1] ≈ 1 rtol = 1e-8

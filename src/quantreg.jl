@@ -13,8 +13,10 @@
 # Z has one row per observation; the observations with wᵢ = 0 are left out, and the
 # weights and responses are scaled to a largest value of one, so that the tolerances
 # do not depend on their units. Returns β̂ and the indices of the interpolated
-# observations; NaN where the design does not identify β.
-function _rqsimplex(Z::AbstractMatrix{Float64}, y::AbstractVector{Float64}, w::AbstractVector{Float64}, τ::Float64)
+# observations; NaN where the design does not identify β. Bland's rule takes over after
+# `bland` degenerate pivots in a row.
+function _rqsimplex(Z::AbstractMatrix{Float64}, y::AbstractVector{Float64}, w::AbstractVector{Float64}, τ::Float64;
+                    maxiter::Union{Nothing,Int} = nothing, bland::Int = 30)
   keep = findall(>(0), w)
   n, m = length(keep), size(Z, 2)
   n >= m || return fill(NaN, m), Int[]
@@ -69,7 +71,7 @@ function _rqsimplex(Z::AbstractMatrix{Float64}, y::AbstractVector{Float64}, w::A
   π = zeros(m)
   F = LinearAlgebra.lu(A[:, basis]; check = false)
   changed = true
-  for _ in 1:50*(n+m)
+  for _ in 1:(maxiter === nothing ? 50 * (n + m) : maxiter)
     if changed   # a new basis: factorize it, and its multipliers
       B = A[:, basis]
       F = LinearAlgebra.lu(B; check = false)
@@ -85,7 +87,7 @@ function _rqsimplex(Z::AbstractMatrix{Float64}, y::AbstractVector{Float64}, w::A
       dj = c[j] - LinearAlgebra.dot(view(A, :, j), π)
       sj = a[j] == 0 ? (dj > tol ? 1 : 0) : (dj < -tol ? -1 : 0)
       sj == 0 && continue
-      if degenerate > 30
+      if degenerate > bland
         enter, s = j, sj
         break
       elseif abs(dj) > best
@@ -101,7 +103,7 @@ function _rqsimplex(Z::AbstractMatrix{Float64}, y::AbstractVector{Float64}, w::A
       δ = -s * u[k]
       j = basis[k]
       tk = δ > tolu ? (1 - a[j]) / δ : δ < -tolu ? a[j] / -δ : Inf
-      if tk < t || (degenerate > 30 && tk == t && leave > 0 && j < basis[leave])
+      if tk < t || (degenerate > bland && tk == t && leave > 0 && j < basis[leave])
         t, leave = tk, k
       end
     end
