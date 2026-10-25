@@ -174,128 +174,11 @@ function _rddecdf(X, ties)
   return Y
 end
 
-# rddensity_fV: the fit of order p of Y on X within [-hl, hr] (both sorted, X centred at
-# the cutoff), with separate polynomials in X/hl on the left and X/hr on the right,
-# or with restricted = true a common intercept and common coefficients of order two
-# and higher. Returns the estimates of the densities on the left and on the right,
-# their difference and sum, the same for the coefficients of order s, and the
-# variances by the jackknife or the plug-in formula (NaN where negative).
-function _rddfit(X, Y, N, Nl, hl, hr, p, s, k, restricted, vce, ties)
-  Nh = length(X)
-  W = [i <= Nl ? k(X[i] / hl) / hl : k(X[i] / hr) / hr for i in 1:Nh]
-  P = restricted ? p + 2 : 2p + 2
-  Xp = zeros(Nh, P)
-  if restricted
-    for i in 1:Nh
-      left = i <= Nl
-      u = left ? X[i] / hl : X[i] / hr
-      Xp[i, 1] = 1
-      Xp[i, left ? 2 : 3] = u
-      for j in 4:P
-        Xp[i, j] = u^(j - 2)
-      end
-    end
-    Hp = [hl^v for v in (p > 1 ? [0; 1; 1; 2:p] : [0, 1, 1])]
-  else
-    for i in 1:Nh
-      left = i <= Nl
-      u = left ? X[i] / hl : X[i] / hr
-      for j in 0:p
-        Xp[i, 2j + (left ? 1 : 2)] = u^j
-      end
-    end
-    Hp = [isodd(j) ? hl^((j - 1) ÷ 2) : hr^((j - 2) ÷ 2) for j in 1:P]
-  end
-  XpW = Xp .* W
-  F = LinearAlgebra.lu(XpW' * Xp; check = false)
-  nan = (est = (left = NaN, right = NaN, diff = NaN, sum = NaN), coef = (left = NaN, right = NaN, diff = NaN, sum = NaN),
-         var = (left = NaN, right = NaN, diff = NaN, sum = NaN))
-  LinearAlgebra.issuccess(F) || return nan
-  Sinv = inv(F)
-  b = (Sinv * (XpW' * Y)) ./ Hp
-  if restricted
-    est = (left = b[2], right = b[3], diff = b[3] - b[2], sum = b[3] + b[2])
-    cs = b[s + 2]
-    coef = (left = cs, right = cs, diff = 0.0, sum = 2cs)
-    il, ir = 2, 3
-  else
-    est = (left = b[3], right = b[4], diff = b[4] - b[3], sum = b[4] + b[3])
-    coef = (left = b[2s + 1], right = b[2s + 2], diff = b[2s + 2] - b[2s + 1], sum = b[2s + 2] + b[2s + 1])
-    il, ir = 3, 4
-  end
-  if vce === :jackknife
-    # L[i, j] = ∑_{l > i} (XpW)[l, j] / (N - 1), with tied observations sharing the
-    # value of the first of them
-    L = zeros(Nh, P)
-    for j in 1:P
-      acc = 0.0
-      for i in Nh:-1:1
-        L[i, j] = acc / (N - 1)
-        acc += XpW[i, j]
-      end
-    end
-    if ties
-      i = 1
-      while i <= Nh
-        e = i
-        while e < Nh && X[e + 1] == X[i]
-          e += 1
-        end
-        for r in i+1:e, j in 1:P
-          L[r, j] = L[i, j]
-        end
-        i = e + 1
-      end
-    end
-    V = (Sinv * (L' * L) * Sinv) ./ (Hp * Hp')
-    var = (left = V[il, il], right = V[ir, ir], diff = V[il, il] + V[ir, ir] - 2V[il, ir],
-           sum = V[il, il] + V[ir, ir] + 2V[il, ir])
-  else
-    var = _rddplugin(est, N, hl, hr, p, k, restricted)
-  end
-  var = map(v -> v < 0 ? NaN : v, var)
-  return (est = est, coef = coef, var = var)
-end
-
-# The plug-in variances of rddensity, from the kernel moments on [0, 1]
-function _rddplugin(est, N, hl, hr, p, k, restricted)
-  S, G = _rddS(k, p, 0.0, 1.0), _cjmG(k, p, 0.0, 1.0)
-  if !restricted
-    V = (S \ G) / S
-    vl, vr = est.left * V[2, 2] / (N * hl), est.right * V[2, 2] / (N * hr)
-    return (left = vl, right = vr, diff = vl + vr, sum = vl + vr)
-  end
-  Sp, Gp, Ψ = _rddplus(S, p), _rddplus(G, p), _rddpsi(p)
-  Sm, Gm = Ψ * Sp * Ψ, Ψ * Gp * Ψ
-  A = est.left .* Sm .+ est.right .* Sp
-  V = (A \ (est.left^3 .* Gm .+ est.right^3 .* Gp)) / A
-  return (left = V[2, 2] / (N * hl), right = V[3, 3] / (N * hl), diff = (V[2, 2] + V[3, 3] - 2V[2, 3]) / (N * hl),
-          sum = (V[2, 2] + V[3, 3] + 2V[2, 3]) / (N * hl))
-end
+# _rddfit(X, Y, N, Nl, hl, hr, p, s, k, restricted, vce, ties) goes here (see the specification).
 
 # S[i, j] = ∫_a^b x^(i+j-2) k(x) dx and C[i] = ∫_a^b x^(i+m-1) k(x) dx, i, j = 1, …, p + 1
 _rddS(k, p, a, b) = [_kintegral(k, x -> x^(i + j - 2) * k(x), a, b) for i in 1:p+1, j in 1:p+1]
 _rddC(k, m, p, a, b) = [_kintegral(k, x -> x^(i + m - 1) * k(x), a, b) for i in 1:p+1]
-
-# the matrices of the right side in the coordinates of the restricted model
-# (intercept, left slope, right slope, common higher orders), and the reflection Ψ that
-# maps them to the left side
-function _rddplus(S::AbstractMatrix, p)
-  T = zeros(p + 2, p + 2)
-  idx = [1; 3:p+2]
-  T[idx, idx] = S
-  return T
-end
-function _rddplus(C::AbstractVector, p)
-  T = zeros(p + 2)
-  T[[1; 3:p+2]] = C
-  return T
-end
-function _rddpsi(p)
-  Ψ = LinearAlgebra.diagm(p > 1 ? [1.0; 0.0; 0.0; [(-1.0)^j for j in 2:p]] : [1.0, 0.0, 0.0])
-  Ψ[2, 3] = Ψ[3, 2] = -1
-  return Ψ
-end
 
 # probabilists' Hermite polynomials
 _hermite(x, p) = p == 0 ? 1.0 : p == 1 ? x : x * _hermite(x, p - 1) - (p - 1) * _hermite(x, p - 2)
@@ -306,65 +189,7 @@ const _RDD_CB = (25884.444444494150957, 3430865.4551236177795, 845007948.0426260
 const _RDD_CC = (4.8000000000000246914, 548.57142857155463389, 100800.00000020420703, 29558225.458100609481,
                  12896196859.612621307, 7890871468221.609375, 6467911284037581)
 
-# rdbwdensity: the bandwidths for the densities on the left and on the right, their
-# difference and their sum, with the variance and squared bias constants
-function _rddbandwidths(X, Y, N, Nl, p, k, restricted, vce, ties, regularize, minobs, minunique)
-  Nr = N - Nl
-  μ = sum(X) / N
-  sd = _sd(X)
-  U = unique(X)
-  Ul, Ur = count(<(0), U), count(>=(0), U)
-  z = μ / sd
-  φ = exp(-z^2 / 2) / sqrt(2π)
-  bn = ((2p + 1) / 4 * _RDD_CB[p] / (_hermite(z, p + 2)^2 * φ) / N)^(1 / (2p + 5)) * sd
-  cn = (1 / (2p) * _RDD_CC[p] / (_hermite(z, p)^2 * φ) / N)^(1 / (2p + 1)) * sd
-  # the m-th nearest observation (or distinct value, of the sorted V) on each side
-  nearl(V, m, nl) = -V[nl - min(m, nl) + 1]
-  nearr(V, m, nl) = V[nl + min(m, length(V) - nl)]
-  if regularize
-    r = maximum(abs, U)
-    bn, cn = min(bn, r), min(cn, r)
-    if minobs > 0
-      bn = max(bn, nearl(X, p + 23, Nl), nearr(X, p + 23, Nl))
-      cn = max(cn, nearl(X, p + 21, Nl), nearr(X, p + 21, Nl))
-    end
-    if minunique > 0
-      bn = max(bn, nearl(U, p + 23, Ul), nearr(U, p + 23, Ul))
-      cn = max(cn, nearl(U, p + 21, Ul), nearr(U, p + 21, Ul))
-    end
-  end
-  wb = findall(t -> abs(t) <= bn, X)
-  wc = findall(t -> abs(t) <= cn, X)
-  fb = _rddfit(X[wb], Y[wb], N, count(<(0), X[wb]), bn, bn, p + 2, p + 1, k, restricted, vce, ties)
-  fc = _rddfit(X[wc], Y[wc], N, count(<(0), X[wc]), cn, cn, p, 1, k, restricted, vce, ties)
-  V = map(v -> N * cn * v, fc.var)
-  if !restricted
-    a = (_rddS(k, p, 0.0, 1.0) \ _rddC(k, p + 1, p, 0.0, 1.0))[2]
-    Bl, Br = fb.coef.left * a * (-1)^p, fb.coef.right * a
-  else
-    Sp, Cp, Ψ = _rddplus(_rddS(k, p, 0.0, 1.0), p), _rddplus(_rddC(k, p + 1, p, 0.0, 1.0), p), _rddpsi(p)
-    t = (fc.est.right .* Sp .+ fc.est.left .* (Ψ * Sp * Ψ)) \
-        (fb.coef.left .* (fc.est.right .* Cp .+ (-1)^(p + 1) * fc.est.left .* (Ψ * Cp)))
-    Bl, Br = t[2], t[3]
-  end
-  B2 = (left = Bl^2, right = Br^2, diff = (Br - Bl)^2, sum = (Br + Bl)^2)
-  h = map((v, b) -> isnan(v) ? 0.0 : (v < 0 ? 0.0 : (1 / (2p) * v / b / N)^(1 / (2p + 1))), V, B2)
-  h = map(v -> isnan(v) ? 0.0 : v, h)
-  if regularize
-    hl, hr, hd, hs = min(h.left, -U[1]), min(h.right, U[end]), min(h.diff, max(-U[1], U[end])), min(h.sum, max(-U[1], U[end]))
-    if minobs > 0
-      ml, mr = nearl(X, minobs, Nl), nearr(X, minobs, Nl)
-      hl, hr, hd, hs = max(hl, ml), max(hr, mr), max(hd, ml, mr), max(hs, ml, mr)
-    end
-    if minunique > 0
-      ml, mr = nearl(U, minunique, Ul), nearr(U, minunique, Ul)
-      hl, hr, hd, hs = max(hl, ml), max(hr, mr), max(hd, ml, mr), max(hs, ml, mr)
-    end
-    h = (left = hl, right = hr, diff = hd, sum = hs)
-  end
-  return (left = h.left, right = h.right, diff = h.diff, sum = h.sum, variance = V, biassq = B2,
-          pilots = (bn, cn))
-end
+# _rddbandwidths(X, Y, N, Nl, p, k, restricted, vce, ties, regularize, minobs, minunique) goes here.
 
 # rddensity's binomial tests: the numbers of observations on the two sides in windows
 # around the cutoff that hold at least n observations on each side and grow in nw
@@ -383,22 +208,7 @@ function _rddbinomial(X, N, Nl, hl, hr, n, nw)
   return (left = wl, right = wr, nleft = nl, nright = nr, pvalue = [_binomtest(a, a + b) for (a, b) in zip(nl, nr)])
 end
 
-# R's binom.test(x, n, 0.5)$p.value: the probability of outcomes no more likely than x
-function _binomtest(x, n)
-  n == 0 && return 1.0
-  B = Distributions.Binomial(n, 0.5)
-  d = Distributions.pdf(B, x)
-  m = n / 2
-  x == m && return 1.0
-  rel = 1 + 1e-7
-  if x < m
-    y = count(i -> Distributions.pdf(B, i) <= d * rel, ceil(Int, m):n)
-    return min(1.0, Distributions.cdf(B, x) + Distributions.ccdf(B, n - y))
-  else
-    y = count(i -> Distributions.pdf(B, i) <= d * rel, 0:floor(Int, m))
-    return min(1.0, Distributions.cdf(B, y - 1) + Distributions.ccdf(B, x - 1))
-  end
-end
+# _binomtest(x, n) goes here.
 
 
 ## Interface
