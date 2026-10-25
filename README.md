@@ -36,6 +36,10 @@ development.
   weights at given points and bandwidths, without inference, for smoothing many
   curves and for building other estimators, also for two covariates (covariance
   surfaces), with leave-one-out or leave-group-out cross-validation.
+- `kernelweights`, `regressionpoints`, `bandwidthgrid`, `gridminimize`,
+  `sandwich` and `supt_critical`: the building blocks of the estimators (kernel
+  weights, default points and bandwidth grids, the search over a grid, robust
+  variances of local fits and the critical value of bands), for other packages.
 - Bandwidth selectors: Sheather and Jones (the default for densities), rules of
   thumb, least-squares and leave-one-out cross-validation, the plug-in bandwidths
   of nprobust and lpdensity, coverage-error-optimal rescalings and the bandwidths

@@ -14,6 +14,7 @@ makedocs(;
     "Kernels" => "kernels.md",
     "Prepared data" => "data.md",
     "Kernel sums" => "sums.md",
+    "Building blocks" => "building.md",
   ],
 )
 

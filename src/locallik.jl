@@ -132,12 +132,9 @@ end
 # observations.
 function _llselect(rule, d, k, p, family)
   nunique(d) > p + 1 || throw(ArgumentError("cross-validation needs more than $(p + 1) distinct values of x"))
-  m = min(22, nobs(d))
-  hmin = maximum(i -> max(knn_distance(d, d.x[i], m), knn_distance(d, d.x[i], p + 2; distinct = true)), 1:nobs(d)) * 1.01
-  hmax = d.x[end] - d.x[1]
-  hmin < hmax || (hmin = hmax / 2)
+  grid = bandwidthgrid(d; minobs = 22, mindistinct = p + 2, gridsize = rule.gridsize)
   crit(h) = _llcriterion(d, k, h, p, family)
-  h, details = _gridminimize(crit, exp.(range(log(hmin), log(hmax); length = rule.gridsize)); largest = false, rtol = 1e-3)
+  h, details = _gridminimize(crit, grid; largest = false, rtol = 1e-3)
   return BandwidthSelection(h, rule, (grid = details.grid, criterion = details.criterion))
 end
 
