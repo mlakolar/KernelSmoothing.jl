@@ -71,6 +71,39 @@ to ``10^{-8}``, and the same holds for singular blocks of clusters. Second,
 [`ClusterVariance`](@ref)`(3)` has the factor ``(G - 1)/G``, as in nprobust, which
 rdrobust leaves out.
 
+## Kink designs
+
+In a regression kink design (Card, Lee, Pei and Weber 2015), the treatment is a
+continuous function of the running variable whose slope changes at the cutoff, as a
+benefit that is a fixed fraction of earnings up to a maximum. The regression
+function is then continuous at the cutoff, and the effect of the treatment shows up
+as a change in its slope: with `derivative = 1`, the estimate is the jump in the
+first derivative, ``\hat\beta_{+,1} - \hat\beta_{-,1}``, from local polynomials of
+order `degree = 2` by default (order ``p = \nu + 1``, as for derivatives in local
+polynomial regression), and the bias correction uses fits of order 3. In a fuzzy
+kink design, the treatment received is not a deterministic function of the running
+variable, and the estimate is the ratio of the jumps in the slopes of the outcome
+and of the treatment,
+
+```math
+\hat\tau = \frac{\hat\beta^Y_{+,1} - \hat\beta^Y_{-,1}}{\hat\beta^T_{+,1} - \hat\beta^T_{-,1}},
+```
+
+the effect of the treatment for the units at the cutoff, under the conditions of
+Card, Lee, Pei and Weber (2015). The standard errors and the bandwidth selectors are
+those of the jump, applied to the derivative: [`RDOptimal`](@ref) chooses bandwidths
+that are optimal for the estimate of the jump in the slope, with the constants of
+the derivative of order one. Kink estimates need many more observations than jumps,
+since the derivative converges at a slower rate.
+
+```julia
+x = 2 .* rand(4000) .- 1
+t = 0.5 .* x .- 0.4 .* max.(x, 0)                 # the slope of the treatment changes at 0
+y = 1 .+ 1.5 .* t .+ 0.2 .* x .^ 2 .+ 0.3 .* randn(4000)
+fit(RegressionDiscontinuity, x, y; derivative = 1)               # sharp kink: 1.5 × (-0.4)
+fit(RegressionDiscontinuity, x, y; derivative = 1, treatment = t) # fuzzy kink: 1.5
+```
+
 ## Bandwidths
 
 By default the bandwidths come from [`RDOptimal`](@ref)`(:mserd)`, the bandwidth
