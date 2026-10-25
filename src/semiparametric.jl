@@ -57,14 +57,14 @@ function fit(::Type{PartiallyLinear}, u::AbstractVector, X::AbstractVecOrMat, y:
   d, Xs = _semidata(u, X, y, weights)
   pts = points === nothing ? _regressionpoints(d, false) : _checkpoints(points)
   sel = if bandwidth isa CrossValidation
-    selectbandwidth(bandwidth, d, kernel; degree = p)
+    select_bandwidth(bandwidth, d, kernel; degree = p)
   elseif bandwidth isa Real
     BandwidthSelection(_bandwidths(bandwidth, 1), nothing, NamedTuple())
   else
     throw(ArgumentError("bandwidth must be a positive number or CrossValidation(), got $(repr(bandwidth))"))
   end
   h = sel.h isa Float64 ? sel.h : sel.h[1]
-  smooth(v) = localpolynomial(_withy(d, v), d.x; bandwidth = h, degree = p, kernel)
+  smooth(v) = local_polynomial(_withy(d, v), d.x; bandwidth = h, degree = p, kernel)
   ỹ = d.y .- smooth(d.y)
   X̃ = hcat([Xs[:, j] .- smooth(Xs[:, j]) for j in axes(Xs, 2)]...)
   all(isfinite, ỹ) && all(isfinite, X̃) || throw(ArgumentError("a smooth in u is not identified at some observation; use a larger bandwidth"))
@@ -81,7 +81,7 @@ function fit(::Type{PartiallyLinear}, u::AbstractVector, X::AbstractVecOrMat, y:
   n, q = nobs(d), size(X̃, 2)
   vce.type == 1 && (meat .*= n / (n - q))
   V = G \ (G \ meat)'
-  g = localpolynomial(_withy(d, d.y .- Xs * β), pts; bandwidth = h, degree = p, kernel)
+  g = local_polynomial(_withy(d, d.y .- Xs * β), pts; bandwidth = h, degree = p, kernel)
   return PartiallyLinear(kernel, p, vce, _anyselection(sel), n, h, β, (V + V') / 2, pts, g)
 end
 

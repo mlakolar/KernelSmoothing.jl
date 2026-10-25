@@ -59,7 +59,7 @@ function _surfacepoints(points)
 end
 
 """
-    localpolynomial((x1, x2), y, points; bandwidth, degree = 1, kernel = EpanechnikovKernel(),
+    local_polynomial((x1, x2), y, points; bandwidth, degree = 1, kernel = EpanechnikovKernel(),
                     weights = nothing)
 
 Bivariate local polynomial estimates of a regression function of two covariates:
@@ -73,10 +73,10 @@ both, and `β̂₀` estimates the regression function there. `points` is a pair 
 grids `(g1, g2)`, which gives a matrix of estimates, or the points as a matrix with
 two columns or a vector of pairs, which gives a vector. Estimates whose window
 does not identify the fit are `NaN`. This is the smoother of covariance surfaces in
-functional data analysis; [`selectbandwidth`](@ref) with [`CrossValidation`](@ref)
+functional data analysis; [`select_bandwidth`](@ref) with [`CrossValidation`](@ref)
 chooses its bandwidth.
 """
-function localpolynomial(x::Tuple{AbstractVector,AbstractVector}, y::AbstractVector, points; bandwidth,
+function local_polynomial(x::Tuple{AbstractVector,AbstractVector}, y::AbstractVector, points; bandwidth,
                          degree::Integer = 1, kernel::AbstractKernel = EpanechnikovKernel(), weights = nothing)
   degree in (0, 1) || throw(ArgumentError("bivariate fits have degree 0 or 1, got $degree"))
   b = _bivariate(x, y, weights, nothing)
@@ -87,15 +87,15 @@ function localpolynomial(x::Tuple{AbstractVector,AbstractVector}, y::AbstractVec
 end
 
 """
-    smoothermatrix((x1, x2), points; bandwidth, degree = 1, kernel = EpanechnikovKernel(),
+    smoother_matrix((x1, x2), points; bandwidth, degree = 1, kernel = EpanechnikovKernel(),
                    weights = nothing)
 
-The weights of the bivariate estimates of [`localpolynomial`](@ref): row `j` holds
+The weights of the bivariate estimates of [`local_polynomial`](@ref): row `j` holds
 the weights of the estimate at point `j` (for a pair of grids, the points in the
 column-major order of the matrix of estimates), with the columns in the input order
 of the observations.
 """
-function smoothermatrix(x::Tuple{AbstractVector,AbstractVector}, points; bandwidth, degree::Integer = 1,
+function smoother_matrix(x::Tuple{AbstractVector,AbstractVector}, points; bandwidth, degree::Integer = 1,
                         kernel::AbstractKernel = EpanechnikovKernel(), weights = nothing)
   degree in (0, 1) || throw(ArgumentError("bivariate fits have degree 0 or 1, got $degree"))
   b = _bivariate(x, nothing, weights, nothing)
@@ -167,7 +167,7 @@ function _surfacefit(b, k, s, t, h, p, skip; weights::Bool = false, self::Int = 
 end
 
 """
-    selectbandwidth(rule::CrossValidation, (x1, x2), y; degree = 1, kernel = EpanechnikovKernel(),
+    select_bandwidth(rule::CrossValidation, (x1, x2), y; degree = 1, kernel = EpanechnikovKernel(),
                     weights = nothing, groups = nothing, aspect = 1, bandwidths = nothing)
 
 The bandwidths `(h, aspect h)` of a bivariate local polynomial fit that minimize the
@@ -182,7 +182,7 @@ with `r` the larger of the range of `x1` and the range of `x2` divided by
 are not identified make the criterion infinite. The details record the candidate
 bandwidths and the criterion.
 """
-function selectbandwidth(rule::CrossValidation, x::Tuple{AbstractVector,AbstractVector}, y::AbstractVector;
+function select_bandwidth(rule::CrossValidation, x::Tuple{AbstractVector,AbstractVector}, y::AbstractVector;
                          degree::Integer = 1, kernel::AbstractKernel = EpanechnikovKernel(), weights = nothing,
                          groups = nothing, aspect::Real = 1, bandwidths = nothing)
   degree in (0, 1) || throw(ArgumentError("bivariate fits have degree 0 or 1, got $degree"))

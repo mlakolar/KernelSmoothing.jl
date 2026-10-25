@@ -22,7 +22,7 @@ const NPKERNELS = Dict("epa" => EpanechnikovKernel(), "tri" => TriangularKernel(
     base = c.bwselect == "imse-dpi" ? IMSEOptimal(regularization = c.regul, interior = c.interior) :
            MSEOptimal(regularization = c.regul, interior = c.interior)
     rule = c.bwselect == "ce-rot" ? CoverageOptimal(base) : base
-    s = selectbandwidth(rule, d, NPKERNELS[c.kernel]; degree = c.p, derivative = c.deriv, points = EVAL, vce,
+    s = select_bandwidth(rule, d, NPKERNELS[c.kernel]; degree = c.p, derivative = c.deriv, points = EVAL, vce,
                         compat = true)
     # R's optimize stops at an absolute tolerance, which the even cases inherit
     @test [s.h;] ≈ c.h rtol = 1e-7   # IMSEOptimal gives one bandwidth
@@ -45,7 +45,7 @@ end
   @test ms.b ≈ LPBWSELECT[1].b rtol = 1e-10
   @test_throws ArgumentError fit(LocalPolynomialRegression, d; bandwidth = 0.1, pilot = :selected)
   # averaged over the evaluation points instead of nprobust's grid
-  s = selectbandwidth(IMSEOptimal(grid = :points), d, EpanechnikovKernel(); points = EVAL, compat = true)
+  s = select_bandwidth(IMSEOptimal(grid = :points), d, EpanechnikovKernel(); points = EVAL, compat = true)
   @test s.details.grid == EVAL && s.h != LPBWSELECT[8].h[1]
   @test_throws ArgumentError IMSEOptimal(grid = :all)
   @test_throws ArgumentError IMSEOptimal(grid = 0)
@@ -62,23 +62,23 @@ end
   d = SmoothingData(xs, ys)
   k = EpanechnikovKernel()
   hstar = (0.045 * 0.6 / (4n * 0.01 * 64^2))^(1 / 5)   # the optimal bandwidth at 0.5
-  s = selectbandwidth(MSEOptimal(), d, k; points = [0.5])
-  sc = selectbandwidth(MSEOptimal(), d, k; points = [0.5], compat = true)
+  s = select_bandwidth(MSEOptimal(), d, k; points = [0.5])
+  sc = select_bandwidth(MSEOptimal(), d, k; points = [0.5], compat = true)
   @test abs(s.h[1] / hstar - 1) < 0.25
   @test sc.h[1] / hstar > 1.5
   @test sc.details.b[1] == max(0.5 - minimum(xs), maximum(xs) - 0.5)   # the cap: the farther end of the data
-  hcv = selectbandwidth(CrossValidation(), d, k).h
+  hcv = select_bandwidth(CrossValidation(), d, k).h
   @test s.details.crossvalidation == hcv
-  ρ = selectbandwidth(RuleOfThumb(), d, k; degree = 2, derivative = 2).h / selectbandwidth(RuleOfThumb(), d, k).h
+  ρ = select_bandwidth(RuleOfThumb(), d, k; degree = 2, derivative = 2).h / select_bandwidth(RuleOfThumb(), d, k).h
   @test s.details.b[1] ≈ hcv * ρ
   # the integrated rule uses the same pilot for all points
-  si = selectbandwidth(IMSEOptimal(), d, k)
+  si = select_bandwidth(IMSEOptimal(), d, k)
   @test si.details.b ≈ hcv * ρ && si.details.crossvalidation == hcv
   @test fit(LocalPolynomialRegression, d; points = [0.25, 0.5]).h ≈ fill(si.h, 2)
   # even p - ν: the bias needs the derivative of order p + 2, with its own pilot
-  s0 = selectbandwidth(MSEOptimal(), d, k; degree = 0, points = [0.3, 0.5])
+  s0 = select_bandwidth(MSEOptimal(), d, k; degree = 0, points = [0.3, 0.5])
   @test all(isfinite, s0.h) && all(s0.h .> 0)
-  @test selectbandwidth(MSEOptimal(), d, k; degree = 2, derivative = 1, points = [0.3]).h[1] > 0
+  @test select_bandwidth(MSEOptimal(), d, k; degree = 2, derivative = 1, points = [0.3]).h[1] > 0
 end
 
 @testset "even p - ν and the integrated rule" begin
@@ -89,7 +89,7 @@ end
   # nprobust's squared bias for even p - ν adds the regularization term, which has the
   # units of B₁², to B₁; the adaptive rule's bandwidth does not depend on the units of y
   for (deg, ν) in ((0, 0), (2, 1))
-    h = [selectbandwidth(MSEOptimal(), SmoothingData(xs, s .* ys), k; degree = deg, derivative = ν,
+    h = [select_bandwidth(MSEOptimal(), SmoothingData(xs, s .* ys), k; degree = deg, derivative = ν,
                          points = [0.0, 0.5]).h for s in (1.0, 10.0, 0.1)]
     @test h[2] ≈ h[1] rtol = 1e-8
     @test h[3] ≈ h[1] rtol = 1e-8
@@ -97,7 +97,7 @@ end
   hi = [bandwidth(IMSEOptimal(), SmoothingData(xs, s .* ys), k; degree = 0) for s in (1.0, 0.1)]
   @test hi[2] ≈ hi[1] rtol = 1e-8
   # without regularization, nprobust's form finds the zero of the squared bias
-  h0 = selectbandwidth(MSEOptimal(regularization = 0), SmoothingData(xs, ys), k; degree = 0, points = [0.0]).h[1]
+  h0 = select_bandwidth(MSEOptimal(regularization = 0), SmoothingData(xs, ys), k; degree = 0, points = [0.0]).h[1]
   @test h0 < 0.2
   # the integrated rule keeps the regularization of MSEOptimal and the cap at the range
   xl = collect(range(0, 1; length = 500))
@@ -111,16 +111,16 @@ end
 @testset "coverage-error-optimal bandwidths" begin
   d = SmoothingData(X, Y)
   n = 400
-  mse = selectbandwidth(MSEOptimal(), d, EpanechnikovKernel(); points = EVAL)
-  ce = selectbandwidth(CoverageOptimal(convention = :nprobust), d, EpanechnikovKernel(); points = EVAL)
+  mse = select_bandwidth(MSEOptimal(), d, EpanechnikovKernel(); points = EVAL)
+  ce = select_bandwidth(CoverageOptimal(convention = :nprobust), d, EpanechnikovKernel(); points = EVAL)
   @test ce.h ≈ mse.h .* n^(-1 / 20)                 # p = 1: n^(-p/((2p+3)(p+3)))
   @test ce.details.mse == mse.h
   # the interior convention leaves local linear bandwidths unchanged
-  ci = selectbandwidth(CoverageOptimal(convention = :interior), d, EpanechnikovKernel(); points = EVAL)
+  ci = select_bandwidth(CoverageOptimal(convention = :interior), d, EpanechnikovKernel(); points = EVAL)
   @test ci.h ≈ mse.h
   @test ci.details.b ≈ ce.details.b
-  c3 = selectbandwidth(CoverageOptimal(convention = :interior), d, EpanechnikovKernel(); degree = 3, points = [0.5])
-  m3 = selectbandwidth(MSEOptimal(), d, EpanechnikovKernel(); degree = 3, points = [0.5])
+  c3 = select_bandwidth(CoverageOptimal(convention = :interior), d, EpanechnikovKernel(); degree = 3, points = [0.5])
+  m3 = select_bandwidth(MSEOptimal(), d, EpanechnikovKernel(); degree = 3, points = [0.5])
   @test c3.h ≈ m3.h .* n^(-2 / (9 * 7))           # p = 3: n^(-(p-1)/((2p+3)(p+4)))
   @test_throws ArgumentError CoverageOptimal(convention = :boundary)
 end
@@ -134,8 +134,8 @@ end
   d = SmoothingData(xs, Y)
   d2 = SmoothingData(3 .+ 2 .* xs, Y)
   for (p, ν) in ((1, 0), (2, 1))
-    s = selectbandwidth(MSEOptimal(), d, EpanechnikovKernel(); degree = p, derivative = ν, points = [0.3, 0.7])
-    s2 = selectbandwidth(MSEOptimal(), d2, EpanechnikovKernel(); degree = p, derivative = ν, points = [3.6, 4.4])
+    s = select_bandwidth(MSEOptimal(), d, EpanechnikovKernel(); degree = p, derivative = ν, points = [0.3, 0.7])
+    s2 = select_bandwidth(MSEOptimal(), d2, EpanechnikovKernel(); degree = p, derivative = ν, points = [3.6, 4.4])
     @test s2.h ≈ 2 .* s.h rtol = 1e-9
     @test s2.details.b ≈ 2 .* s.details.b rtol = 1e-9
   end
@@ -144,7 +144,7 @@ end
 @testset "other kernels" begin
   # kernels outside nprobust get the exact normal-reference constant for the variances
   d = SmoothingData(X, Y)
-  s = selectbandwidth(MSEOptimal(), d, BiweightKernel(); points = [0.3, 0.6])
+  s = select_bandwidth(MSEOptimal(), d, BiweightKernel(); points = [0.3, 0.6])
   @test all(isfinite, s.h) && all(s.h .> 0)
   @test KernelSmoothing._nrconstant(BiweightKernel()) ≈ (8 * sqrt(π) * (5 / 7) / (3 / 49))^(1 / 5)
   @test KernelSmoothing._nrconstant(GaussianKernel()) == 1.06
@@ -166,8 +166,8 @@ end
   xd = repeat(collect(range(1.0, 2.0; length = 6)), inner = 50)
   yd = log.(xd) .+ 0.2 .* sin.(7.3 .* (1:300))
   @test all(isfinite, bandwidth(MSEOptimal(), SmoothingData(xd, yd), EpanechnikovKernel(); points = [1.5]))
-  @test_throws ArgumentError selectbandwidth(MSEOptimal(), SmoothingData(fill(1.0, 30), rand(30)), EpanechnikovKernel())
-  @test_throws ArgumentError selectbandwidth(IMSEOptimal(), SmoothingData(fill(1.0, 30), rand(30)), EpanechnikovKernel())
+  @test_throws ArgumentError select_bandwidth(MSEOptimal(), SmoothingData(fill(1.0, 30), rand(30)), EpanechnikovKernel())
+  @test_throws ArgumentError select_bandwidth(IMSEOptimal(), SmoothingData(fill(1.0, 30), rand(30)), EpanechnikovKernel())
 end
 
 # a user kernel, without moments of its square
@@ -210,12 +210,12 @@ end
   d = SmoothingData(x, sin.(x) .+ 0.1 .* cos.(17 .* (1:400)))
   k = EpanechnikovKernel()
   # misspelled keywords are errors, not ignored
-  @test_throws MethodError selectbandwidth(CrossValidation(), d, k; degre = 2)
-  @test_throws MethodError selectbandwidth(RuleOfThumb(), d, k; degre = 2)
-  @test_throws MethodError selectbandwidth(FLCIOptimal(1.0), d, k; degre = 2)
+  @test_throws MethodError select_bandwidth(CrossValidation(), d, k; degre = 2)
+  @test_throws MethodError select_bandwidth(RuleOfThumb(), d, k; degre = 2)
+  @test_throws MethodError select_bandwidth(FLCIOptimal(1.0), d, k; degre = 2)
   # the derivative must not exceed the degree
   for rule in (RuleOfThumb(), MSEOptimal(), IMSEOptimal(), CoverageOptimal(), FLCIOptimal(1.0), CrossValidation())
-    @test_throws ArgumentError selectbandwidth(rule, d, k; degree = 1, derivative = 2, points = [0.0])
+    @test_throws ArgumentError select_bandwidth(rule, d, k; degree = 1, derivative = 2, points = [0.0])
   end
   @test_throws ArgumentError MSEOptimal(regularization = -1)
   @test_throws ArgumentError MSEOptimal(-1.0, false)
@@ -223,16 +223,16 @@ end
   @test_throws ArgumentError fit(LocalPolynomialRegression, d; bandwidth = 0.3, rho = Inf)
   # the selections and the default fits infer, whatever the pilots
   for compat in (false, true), rule in (MSEOptimal(), IMSEOptimal(), CoverageOptimal())
-    @inferred selectbandwidth(rule, d, k; points = [0.0, 0.5], compat)
+    @inferred select_bandwidth(rule, d, k; points = [0.0, 0.5], compat)
   end
-  @inferred selectbandwidth(CrossValidation(), d, k)
+  @inferred select_bandwidth(CrossValidation(), d, k)
   @inferred fit(LocalPolynomialRegression, d)
   @inferred fit(LocalPolynomialRegression, d; points = [0.0])
   dx = SmoothingData(x)
   @inferred fit(PointwiseDensity, dx)
   @inferred fit(PointwiseDensity, dx; points = [0.0])
   for compat in (false, true), rule in (MSEOptimal(), IMSEOptimal())
-    @inferred selectbandwidth(rule, dx, k; points = [0.0, 0.5], compat)
+    @inferred select_bandwidth(rule, dx, k; points = [0.0, 0.5], compat)
   end
 end
 
@@ -259,14 +259,14 @@ end
   m = fit(LocalPolynomialRegression, d)
   @test m.points ≈ collect(range(KernelSmoothing._quantile(d, 0.025), KernelSmoothing._quantile(d, 0.975); length = 30))
   @test fit(LocalPolynomialRegression, d; compat = true, bandwidth = 0.5).points ≈ collect(range(-300.0, maximum(xo); length = 30))
-  s = selectbandwidth(IMSEOptimal(), d, EpanechnikovKernel())
+  s = select_bandwidth(IMSEOptimal(), d, EpanechnikovKernel())
   @test s.details.grid ≈ [KernelSmoothing._quantile(d, q) for q in range(0.05, 0.95; length = 30)]
-  @test length(selectbandwidth(IMSEOptimal(grid = 10), d, EpanechnikovKernel()).details.grid) == 10
+  @test length(select_bandwidth(IMSEOptimal(grid = 10), d, EpanechnikovKernel()).details.grid) == 10
   # over the quantiles the bandwidth stays near the one without the far observation
   d0 = SmoothingData(xo[1:399], yo[1:399])
   @test s.h ≈ bandwidth(IMSEOptimal(), d0, EpanechnikovKernel()) rtol = 0.1
   # nprobust's grid under compat
-  sc = selectbandwidth(IMSEOptimal(), SmoothingData(X, Y), EpanechnikovKernel(); compat = true)
+  sc = select_bandwidth(IMSEOptimal(), SmoothingData(X, Y), EpanechnikovKernel(); compat = true)
   @test sc.details.grid ≈ collect(range(minimum(X), maximum(X); length = 30))
 end
 

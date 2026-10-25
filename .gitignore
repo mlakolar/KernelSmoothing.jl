@@ -6,3 +6,9 @@
 /docs/build/
 .vscode/
 /docs/Manifest*.toml
+
+# Generated master dependency test environments
+.master-test-env/
+
+# Local Julia-minor environments are regenerated from master checkouts
+/Manifest-v*.toml

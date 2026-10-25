@@ -40,11 +40,11 @@ function Base.show(io::IO, r::RDHonestOptimal)
   print(io, ")")
 end
 
-selectbandwidth(rule::RDHonestOptimal, d::SmoothingData, k::AbstractKernel; kwargs...) =
+select_bandwidth(rule::RDHonestOptimal, d::SmoothingData, k::AbstractKernel; kwargs...) =
   throw(ArgumentError("$rule chooses bandwidths for regression discontinuity; fit a RegressionDiscontinuity"))
 
 """
-    worstcasebias(m::RegressionDiscontinuity, M; class = :holder)
+    worst_case_bias(m::RegressionDiscontinuity, M; class = :holder)
 
 The worst-case bias of the estimate of a [`RegressionDiscontinuity`](@ref) fit, as
 in [`Honest`](@ref): over the Hölder class of functions whose second derivative is
@@ -55,7 +55,7 @@ bounds the outcome and the treatment, and the bias is that of `(M_Y + M_T |τ̂|
 for the estimate `τ̂` and the jump `f̂` in the treatment. `M = :rot` takes the rule of
 thumb of RDHonest.
 """
-function worstcasebias(m::RegressionDiscontinuity, M; class::Symbol = :holder)
+function worst_case_bias(m::RegressionDiscontinuity, M; class::Symbol = :holder)
   Honest(M; class)   # checks M and class
   m.ncovariates == 0 || throw(ArgumentError("honest intervals are not implemented with covariates"))
   m.derivative == 0 || throw(ArgumentError("honest intervals are implemented for the jump, derivative = 0"))
@@ -74,9 +74,9 @@ function worstcasebias(m::RegressionDiscontinuity, M; class::Symbol = :holder)
 end
 
 function _rdhonestconfint(m::RegressionDiscontinuity, level, method::Honest)
-  method.biascorrected && throw(ArgumentError("honest intervals for regression discontinuity use the estimate itself"))
+  method.bias_corrected && throw(ArgumentError("honest intervals for regression discontinuity use the estimate itself"))
   class = method.class === :default ? :holder : method.class
-  B = worstcasebias(m, method.M; class)
+  B = worst_case_bias(m, method.M; class)
   se = m.se
   half = se == 0 ? B : _cvb(B / se, level) * se
   return [m.estimate - half m.estimate + half]

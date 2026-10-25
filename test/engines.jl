@@ -44,9 +44,9 @@ end
 # the exact engines against DirectSums: WindowSums adds the same terms in the same
 # order, and FastSums agrees to rounding
 function check_exact(d, k, h, points, kmax; z = nothing)
-  D = kernelsums(d, k, h, points; kmax, z, engine = DirectSums())
-  W = kernelsums(d, k, h, points; kmax, z, engine = WindowSums())
-  F = kernelsums(d, k, h, points; kmax, z, engine = FastSums())
+  D = kernel_sums(d, k, h, points; kmax, z, engine = DirectSums())
+  W = kernel_sums(d, k, h, points; kmax, z, engine = WindowSums())
+  F = kernel_sums(d, k, h, points; kmax, z, engine = FastSums())
   M = localscale(d, k, h, points, kmax; z)
   return W == D && all(abs.(F .- D) .<= 1e-13 .* M .+ 1e-300)
 end
@@ -76,8 +76,8 @@ end
   end
   # a bandwidth below the resolution of the data falls back to windowed sums
   t = SmoothingData([1e6, 1e6 + 1.0])
-  @test kernelsums(t, EpanechnikovKernel(), 1e-12, [1e6]; engine = FastSums()) ==
-        kernelsums(t, EpanechnikovKernel(), 1e-12, [1e6]; engine = DirectSums())
+  @test kernel_sums(t, EpanechnikovKernel(), 1e-12, [1e6]; engine = FastSums()) ==
+        kernel_sums(t, EpanechnikovKernel(), 1e-12, [1e6]; engine = DirectSums())
 end
 
 @testset "FastSums for high powers" begin
@@ -90,8 +90,8 @@ end
   tw = TriweightKernel()
   for (k, kmax) in ((EpanechnikovKernel(), 6), (tw, 2), (tw, 6), (convolve(tw, tw), 0), (convolve(tw, tw), 6),
                     (convolve(BiweightKernel(), BiweightKernel()), 2))
-    F = kernelsums(d, k, h, pts; kmax, engine = FastSums())
-    D = kernelsums(d, k, h, pts; kmax, engine = DirectSums())
+    F = kernel_sums(d, k, h, pts; kmax, engine = FastSums())
+    D = kernel_sums(d, k, h, pts; kmax, engine = DirectSums())
     scale = [sum(abs(k((xi - p) / h)) for xi in x) for p in pts]
     @test maximum(abs.(F .- D) ./ scale') < 1e-13
   end
@@ -101,19 +101,19 @@ end
 
 @testset "Gaussian kernels" begin
   d = SmoothingData(XR; weights = WR)
-  @test_throws ArgumentError kernelsums(d, GaussianKernel(), 0.3, POINTS; engine = WindowSums())
-  @test_throws ArgumentError kernelsums(d, GaussianKernel(), 0.3, POINTS; engine = FastSums())
+  @test_throws ArgumentError kernel_sums(d, GaussianKernel(), 0.3, POINTS; engine = WindowSums())
+  @test_throws ArgumentError kernel_sums(d, GaussianKernel(), 0.3, POINTS; engine = FastSums())
   for k in (GaussianKernel(), derivative(GaussianKernel(), 4))
-    D = kernelsums(d, k, 0.3, POINTS; kmax = 2)   # DirectSums by default
-    @test D == kernelsums(d, k, 0.3, POINTS; kmax = 2, engine = DirectSums())
-    @test relerr(kernelsums(d, k, 0.3, POINTS; kmax = 2, engine = BinnedSums()), D) < 1e-3
+    D = kernel_sums(d, k, 0.3, POINTS; kmax = 2)   # DirectSums by default
+    @test D == kernel_sums(d, k, 0.3, POINTS; kmax = 2, engine = DirectSums())
+    @test relerr(kernel_sums(d, k, 0.3, POINTS; kmax = 2, engine = BinnedSums()), D) < 1e-3
   end
 end
 
 @testset "BinnedSums" begin
   d = SmoothingData(XR)
-  errors(k, h) = [relerr(kernelsums(d, k, h, POINTS; engine = BinnedSums(; binsperh = m)),
-                         kernelsums(d, k, h, POINTS; engine = DirectSums())) for m in (25, 50, 100)]
+  errors(k, h) = [relerr(kernel_sums(d, k, h, POINTS; engine = BinnedSums(; binsperh = m)),
+                         kernel_sums(d, k, h, POINTS; engine = DirectSums())) for m in (25, 50, 100)]
   # second order for continuous kernels (1/16 over two doublings of binsperh), much
   # slower for kernels that jump
   for k in (TriweightKernel(), EpanechnikovKernel(), GaussianKernel())
@@ -136,19 +136,19 @@ end
   jumpy = [isodd(j) ? 0.05 : 2.0 for j in eachindex(POINTS)]   # boundaries move both ways
   for hs in (smooth, jumpy), k in (EpanechnikovKernel(), TriangularKernel(),
                                    convolve(EpanechnikovKernel(), EpanechnikovKernel()))
-    D = kernelsums(d, k, hs, POINTS; kmax = 2, z = d.y, engine = DirectSums())
+    D = kernel_sums(d, k, hs, POINTS; kmax = 2, z = d.y, engine = DirectSums())
     # each column is the sum with that point's bandwidth alone
-    @test D == reduce(hcat, [kernelsums(d, k, hs[j], [POINTS[j]]; kmax = 2, z = d.y,
+    @test D == reduce(hcat, [kernel_sums(d, k, hs[j], [POINTS[j]]; kmax = 2, z = d.y,
                                         engine = DirectSums()) for j in eachindex(POINTS)])
     @test check_exact(d, k, hs, POINTS, 2; z = d.y)
     @test check_exact(d, k, reverse(hs), reverse(POINTS), 2)
   end
   g = GaussianKernel()
-  @test relerr(kernelsums(d, g, smooth, POINTS; engine = BinnedSums()),
-               kernelsums(d, g, smooth, POINTS)) < 1e-3
-  @test_throws DimensionMismatch kernelsums(d, EpanechnikovKernel(), smooth[1:10], POINTS)
-  @test_throws ArgumentError kernelsums(d, EpanechnikovKernel(), [-1.0; smooth[2:end]], POINTS)
-  @test_throws ArgumentError kernelsums(d, EpanechnikovKernel(), [Inf; smooth[2:end]], POINTS)
+  @test relerr(kernel_sums(d, g, smooth, POINTS; engine = BinnedSums()),
+               kernel_sums(d, g, smooth, POINTS)) < 1e-3
+  @test_throws DimensionMismatch kernel_sums(d, EpanechnikovKernel(), smooth[1:10], POINTS)
+  @test_throws ArgumentError kernel_sums(d, EpanechnikovKernel(), [-1.0; smooth[2:end]], POINTS)
+  @test_throws ArgumentError kernel_sums(d, EpanechnikovKernel(), [Inf; smooth[2:end]], POINTS)
 end
 
 @testset "engine choice" begin
@@ -172,16 +172,16 @@ end
   @test _choose_engine(GaussianKernel(), d.x, 0.01, POINTS, 0) isa KernelSmoothing._ZeroWindowSums
   dy = SmoothingData(XR, YR; weights = WR)
   for k in (GaussianKernel(), derivative(GaussianKernel(), 3)), h in (0.005, 0.05, 0.5)
-    @test kernelsums(dy, k, h, POINTS; kmax = 2, z = dy.y) ==
-          kernelsums(dy, k, h, POINTS; kmax = 2, z = dy.y, engine = DirectSums())
+    @test kernel_sums(dy, k, h, POINTS; kmax = 2, z = dy.y) ==
+          kernel_sums(dy, k, h, POINTS; kmax = 2, z = dy.y, engine = DirectSums())
   end
   g = fit(KDE, dy; kernel = GaussianKernel(), bandwidth = 0.01)
-  @test [pdf(g, t) for t in POINTS] == vec(kernelsums(dy, GaussianKernel(), 0.01, POINTS; engine = DirectSums())) ./
+  @test [pdf(g, t) for t in POINTS] == vec(kernel_sums(dy, GaussianKernel(), 0.01, POINTS; engine = DirectSums())) ./
                                        (0.01 * dy.sumw)
   for (h, points) in ((0.01, POINTS[1:5]), (0.5, d.x))
     @test check_exact(d, EpanechnikovKernel(), h, points, 2)
-    @test kernelsums(d, EpanechnikovKernel(), h, points; kmax = 2) ==
-          kernelsums(d, EpanechnikovKernel(), h, points; kmax = 2,
+    @test kernel_sums(d, EpanechnikovKernel(), h, points; kmax = 2) ==
+          kernel_sums(d, EpanechnikovKernel(), h, points; kmax = 2,
                      engine = _choose_engine(EpanechnikovKernel(), d.x, h, points, 2))
   end
 end
@@ -192,12 +192,12 @@ end
   for (k, e, kmax) in ((EpanechnikovKernel(), FastSums(), 2), (TriangularKernel(), WindowSums(), 1),
                        (GaussianKernel(), BinnedSums(), 0), (BiweightKernel(), FastSums(), 4),
                        (EpanechnikovKernel(), DirectSums(), 3))
-    @test kernelsums(d, k, 0.3, POINTS; kmax, z = d.y, engine = e, workspace = ws) ==
-          kernelsums(d, k, 0.3, POINTS; kmax, z = d.y, engine = e)
+    @test kernel_sums(d, k, 0.3, POINTS; kmax, z = d.y, engine = e, workspace = ws) ==
+          kernel_sums(d, k, 0.3, POINTS; kmax, z = d.y, engine = e)
   end
   out = zeros(3, nobs(d))
   sumsinto(ws) =
-    kernelsums!(out, d, EpanechnikovKernel(), 0.3, d.x; engine = FastSums(), workspace = ws)
+    kernel_sums!(out, d, EpanechnikovKernel(), 0.3, d.x; engine = FastSums(), workspace = ws)
   sumsinto(ws); sumsinto(SumsWorkspace())
   @test @allocated(sumsinto(ws)) < @allocated(sumsinto(SumsWorkspace())) / 2
   @test sprint(show, ws) == "SumsWorkspace()"
@@ -209,7 +209,7 @@ end
   for k in (EpanechnikovKernel(), GaussianKernel())
     h = 0.4
     grid = range(minimum(XR) - 6h, maximum(XR) + 6h; length = 4001)
-    f = vec(kernelsums(d, k, h, grid)) ./ (h * d.sumw)
+    f = vec(kernel_sums(d, k, h, grid)) ./ (h * d.sumw)
     @test sum(f) * step(grid) ≈ 1 atol = 1e-4
   end
 end
@@ -222,29 +222,29 @@ KernelSmoothing.support(::FailingKernel) = (-1.0, 1.0)
 @testset "interface" begin
   d = SmoothingData(XS, YS)
   k = EpanechnikovKernel()
-  @test kernelsums(d, k, 0.3) == kernelsums(d, k, 0.3, d.x)
-  @test size(kernelsums(d, k, 0.3, POINTS; kmax = 4)) == (5, 81)
-  @test kernelsums(d, k, 0.3, reverse(POINTS)) == reverse(kernelsums(d, k, 0.3, POINTS); dims = 2)
+  @test kernel_sums(d, k, 0.3) == kernel_sums(d, k, 0.3, d.x)
+  @test size(kernel_sums(d, k, 0.3, POINTS; kmax = 4)) == (5, 81)
+  @test kernel_sums(d, k, 0.3, reverse(POINTS)) == reverse(kernel_sums(d, k, 0.3, POINTS); dims = 2)
   out = zeros(3, 81)
-  @test kernelsums!(out, d, k, 0.3, POINTS) === out
-  @test out == kernelsums(d, k, 0.3, POINTS; kmax = 2)
-  @test kernelsums(d, k, 1, 0:2) == kernelsums(d, k, 1.0, [0.0, 1.0, 2.0])
-  @test @inferred(kernelsums(d, k, 0.3, POINTS)) isa Matrix{Float64}
-  @test_throws ArgumentError kernelsums(d, k, 0.0, POINTS)
-  @test_throws ArgumentError kernelsums(d, k, -1.0, POINTS)
-  @test_throws ArgumentError kernelsums(d, k, Inf, POINTS)
-  @test_throws ArgumentError kernelsums(d, k, NaN, POINTS)
-  @test_throws ArgumentError kernelsums(d, k, 0.3, [0.0, NaN])
-  @test_throws ArgumentError kernelsums(d, k, 0.3, POINTS; kmax = -1)
-  @test_throws DimensionMismatch kernelsums(d, k, 0.3, POINTS; z = YS[1:10])
-  @test_throws ArgumentError kernelsums(d, k, 0.3, POINTS; z = fill(NaN, 500))
-  @test_throws DimensionMismatch kernelsums!(zeros(3, 80), d, k, 0.3, POINTS)
-  @test_throws "at least one row" kernelsums!(zeros(0, 81), d, k, 0.3, POINTS)
-  @test_throws MethodError kernelsums!(zeros(Float32, 1, 81), d, k, 0.3, POINTS)
-  @test kernelsums(d, k, Float64[], Float64[]) == zeros(1, 0)
+  @test kernel_sums!(out, d, k, 0.3, POINTS) === out
+  @test out == kernel_sums(d, k, 0.3, POINTS; kmax = 2)
+  @test kernel_sums(d, k, 1, 0:2) == kernel_sums(d, k, 1.0, [0.0, 1.0, 2.0])
+  @test @inferred(kernel_sums(d, k, 0.3, POINTS)) isa Matrix{Float64}
+  @test_throws ArgumentError kernel_sums(d, k, 0.0, POINTS)
+  @test_throws ArgumentError kernel_sums(d, k, -1.0, POINTS)
+  @test_throws ArgumentError kernel_sums(d, k, Inf, POINTS)
+  @test_throws ArgumentError kernel_sums(d, k, NaN, POINTS)
+  @test_throws ArgumentError kernel_sums(d, k, 0.3, [0.0, NaN])
+  @test_throws ArgumentError kernel_sums(d, k, 0.3, POINTS; kmax = -1)
+  @test_throws DimensionMismatch kernel_sums(d, k, 0.3, POINTS; z = YS[1:10])
+  @test_throws ArgumentError kernel_sums(d, k, 0.3, POINTS; z = fill(NaN, 500))
+  @test_throws DimensionMismatch kernel_sums!(zeros(3, 80), d, k, 0.3, POINTS)
+  @test_throws "at least one row" kernel_sums!(zeros(0, 81), d, k, 0.3, POINTS)
+  @test_throws MethodError kernel_sums!(zeros(Float32, 1, 81), d, k, 0.3, POINTS)
+  @test kernel_sums(d, k, Float64[], Float64[]) == zeros(1, 0)
   # an error raised in a task is thrown as itself, whatever the number of points
   for m in (5, 300, 3000)
-    @test_throws DomainError kernelsums(d, FailingKernel(), 0.3, collect(range(0, 1; length = m)); engine = DirectSums())
+    @test_throws DomainError kernel_sums(d, FailingKernel(), 0.3, collect(range(0, 1; length = m)); engine = DirectSums())
   end
 end
 
@@ -256,19 +256,19 @@ end
   k = EpanechnikovKernel()
   pts = collect(range(0, 1; length = 11))
   for h in (1e3, 1e5, 1e7)
-    F = kernelsums(d, k, h, pts; kmax = 2, engine = FastSums())
-    D = kernelsums(d, k, h, pts; kmax = 2, engine = DirectSums())
+    F = kernel_sums(d, k, h, pts; kmax = 2, engine = FastSums())
+    D = kernel_sums(d, k, h, pts; kmax = 2, engine = DirectSums())
     for r in 1:3   # relative to the sum of the absolute terms, since the sums cancel
       scale = [sum(abs(k((xi - p) / h) * ((xi - p) / h)^(r - 1)) for xi in x) for p in pts]
       @test all(abs.(F[r, :] .- D[r, :]) .<= 1e-13 .* scale)
     end
   end
-  @test !any(isnan, kernelsums(d, k, 1e308, pts; kmax = 2))
+  @test !any(isnan, kernel_sums(d, k, 1e308, pts; kmax = 2))
   # the slope of a linear function, from the sums of the chosen engine
   m = fit(LocalPolynomialRegression, x, 2 .+ 3 .* x; bandwidth = 1e7, derivative = 1, points = [0.5])
   @test predict(m, collect(range(0, 1; length = 201)))[101] ≈ 3 rtol = 1e-12
   # at a tie the sums with u and u² vanish exactly
-  @test kernelsums(SmoothingData(fill(-3.0, 50)), k, 0.1, [-3.0]; kmax = 2, engine = FastSums())[2:3] == [0.0, 0.0]
+  @test kernel_sums(SmoothingData(fill(-3.0, 50)), k, 0.1, [-3.0]; kmax = 2, engine = FastSums())[2:3] == [0.0, 0.0]
 end
 
 @testset "many powers, overflowing arguments, other output arrays and interrupts" begin
@@ -278,21 +278,21 @@ end
   # beyond 16 powers the accumulators are the columns of out, with the same order of
   # summation, so that windowed and direct sums stay identical
   for kmax in (15, 16, 40)
-    @test kernelsums(d, k, 0.8, pts; kmax, engine = WindowSums()) == kernelsums(d, k, 0.8, pts; kmax, engine = DirectSums())
+    @test kernel_sums(d, k, 0.8, pts; kmax, engine = WindowSums()) == kernel_sums(d, k, 0.8, pts; kmax, engine = DirectSums())
   end
-  F40, D40 = kernelsums(d, k, 0.8, pts; kmax = 40, engine = FastSums()), kernelsums(d, k, 0.8, pts; kmax = 40, engine = DirectSums())
+  F40, D40 = kernel_sums(d, k, 0.8, pts; kmax = 40, engine = FastSums()), kernel_sums(d, k, 0.8, pts; kmax = 40, engine = DirectSums())
   @test all(isapprox.(F40, D40; rtol = 1e-8, atol = 1e-10 * maximum(abs, D40)))
-  @test (@allocated kernelsums(d, k, 0.8, pts; kmax = 40, engine = WindowSums())) < 10^6
+  @test (@allocated kernel_sums(d, k, 0.8, pts; kmax = 40, engine = WindowSums())) < 10^6
   # an argument that overflows to ±Inf, where the kernel vanishes, adds nothing
-  @test kernelsums(SmoothingData([0.0, 1e300]), k, 1e-10, [0.0, 1.0]; kmax = 2, engine = DirectSums()) ==
+  @test kernel_sums(SmoothingData([0.0, 1e300]), k, 1e-10, [0.0, 1.0]; kmax = 2, engine = DirectSums()) ==
         [0.75 0.0; 0.0 0.0; 0.0 0.0]
-  @test !any(isnan, kernelsums(SmoothingData([0.0, 1e300]), GaussianKernel(), 1e-10, [0.0]; kmax = 2, engine = DirectSums()))
+  @test !any(isnan, kernel_sums(SmoothingData([0.0, 1e300]), GaussianKernel(), 1e-10, [0.0]; kmax = 2, engine = DirectSums()))
   # the tasks write columns of out, which only a strided array allows; others, such as
   # a sparse matrix or this transpose, receive a copy
-  @test kernelsums!(view(zeros(5, 300), 1:3, :), d, k, 0.8, pts) == kernelsums(d, k, 0.8, pts; kmax = 2)
+  @test kernel_sums!(view(zeros(5, 300), 1:3, :), d, k, 0.8, pts) == kernel_sums(d, k, 0.8, pts; kmax = 2)
   T = transpose(zeros(300, 3))
-  @test kernelsums!(T, d, k, 0.8, pts) === T
-  @test T == kernelsums(d, k, 0.8, pts; kmax = 2)
+  @test kernel_sums!(T, d, k, 0.8, pts) === T
+  @test T == kernel_sums(d, k, 0.8, pts; kmax = 2)
   # an interrupt while waiting for the tasks is thrown at once, not after them
   c = Channel{Int}(2)
   tasks = [Threads.@spawn take!(c) for _ in 1:2]
@@ -311,9 +311,9 @@ end
   @test KernelSmoothing._zerosupport(k) == (-Inf, Inf)
   @test _choose_engine(k, d.x, 1.0, [0.0], 0) isa DirectSums
   for kmax in (0, 1, 2)
-    direct = kernelsums(d, k, 1.0, [0.0]; kmax, engine = DirectSums())
+    direct = kernel_sums(d, k, 1.0, [0.0]; kmax, engine = DirectSums())
     @test direct[1, 1] ≈ 2.339769131090447e105 rtol = 2e-12
-    @test kernelsums(d, k, 1.0, [0.0]; kmax) == direct
+    @test kernel_sums(d, k, 1.0, [0.0]; kmax) == direct
   end
   # A zero cached normalizer can also hide a nonzero derivative.
   broad = KernelSmoothing.GaussianDerivativeKernel(1e100, 4, 1e308)
@@ -326,12 +326,12 @@ end
 @testset "bandwidths stay positive and finite after conversion" begin
   d, k = SmoothingData([0.0, 1.0]), EpanechnikovKernel()
   for h in (big"1e-400", big"1e400")
-    @test_throws ArgumentError kernelsums(d, k, h, [0.0])
-    @test_throws ArgumentError kernelsums(d, k, [h], [0.0])
+    @test_throws ArgumentError kernel_sums(d, k, h, [0.0])
+    @test_throws ArgumentError kernel_sums(d, k, [h], [0.0])
     @test_throws ArgumentError fit(KDE, d; bandwidth = h)
   end
-  @test kernelsums(d, k, big"0.5", [0.0]) == kernelsums(d, k, 0.5, [0.0])
-  @test kernelsums(d, k, [big"0.5"], [0.0]) == kernelsums(d, k, [0.5], [0.0])
+  @test kernel_sums(d, k, big"0.5", [0.0]) == kernel_sums(d, k, 0.5, [0.0])
+  @test kernel_sums(d, k, [big"0.5"], [0.0]) == kernel_sums(d, k, [0.5], [0.0])
 end
 
 @testset "the engine choice samples the points in their sorted order" begin
@@ -343,7 +343,7 @@ end
   ws = SumsWorkspace()
   for n in (10, 1000, 10)
     dn = SmoothingData(collect(range(0, 1; length = n)))
-    @test kernelsums(dn, k, 0.2, [0.5]; workspace = ws) == kernelsums(dn, k, 0.2, [0.5])
+    @test kernel_sums(dn, k, 0.2, [0.5]; workspace = ws) == kernel_sums(dn, k, 0.2, [0.5])
   end
 end
 

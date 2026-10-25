@@ -14,7 +14,7 @@ tail directly, so that they keep their relative accuracy far above the data for 
 named and piecewise polynomial kernels, the Gaussian kernel and kernels that define
 `ccdf`. Broadcasting `pdf.(f, xs)`, `logpdf.(f, xs)`, `cdf.(f, xs)`, `ccdf.(f, xs)` or
 `stderror.(f, xs)` over many points computes them for all points at once, with
-[`kernelsums`](@ref) or one pass over the windows, which is much faster than
+[`kernel_sums`](@ref) or one pass over the windows, which is much faster than
 evaluating point by point, also inside fused broadcasts, and gives the same values
 up to rounding; points that are not plain numbers, such as dual numbers, use the
 scalar methods, so that automatic differentiation works.
@@ -132,7 +132,7 @@ function _evaluate(vector, scalar, x::AbstractArray{<:Real})
 end
 
 _sums(f::KDE, k, points; z = nothing, engine = f.engine) =
-  vec(kernelsums(f.data, k, f.h, points; z, engine))
+  vec(kernel_sums(f.data, k, f.h, points; z, engine))
 
 # clamped at zero, since a kernel accepted as nonnegative can round to a tiny
 # negative value

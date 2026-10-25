@@ -33,7 +33,7 @@ const KERNELS = Dict("triangular" => TriangularKernel(), "uniform" => UniformKer
     @test m.h[2] == m.h[1] && m.b == m.h
     @test m.estimate ≈ c.estimate rtol = tol
     @test m.se ≈ c.se rtol = tol
-    @test worstcasebias(m, M; class) ≈ c.maxbias rtol = 10tol
+    @test worst_case_bias(m, M; class) ≈ c.maxbias rtol = 10tol
     @test vec(confint(m; method = Honest(M; class))) ≈ [c.lower, c.upper] rtol = tol
     c.fuzzy && @test m.firststage.estimate ≈ c.firststage rtol = tol
   end
@@ -47,10 +47,10 @@ end
   @test ci1[2] - ci1[1] < ci2[2] - ci2[1]
   @test confint(m; method = Honest(1), level = 0.9)[2] < ci1[2]
   # the Taylor class bounds the bias by more than the Hölder class
-  @test worstcasebias(m, 1; class = :taylor) >= worstcasebias(m, 1)
+  @test worst_case_bias(m, 1; class = :taylor) >= worst_case_bias(m, 1)
   # the bias of a degree of 2 is bounded in the Taylor class
   m2 = fit(RegressionDiscontinuity, X, Y; degree = 2, bandwidth = 0.6)
-  @test worstcasebias(m2, 1; class = :taylor) > 0
+  @test worst_case_bias(m2, 1; class = :taylor) > 0
   @test sprint(show, Honest((1, 0.5); class = :taylor)) == "Honest((1.0, 0.5); class = :taylor)"
   @test sprint(show, RDHonestOptimal(1; criterion = :flci)) == "RDHonestOptimal(1.0; criterion = :flci)"
   @test fit(RegressionDiscontinuity, X, Y; bandwidth = RDHonestOptimal(1)).selection.details.M == 1
@@ -66,10 +66,10 @@ end
   mf = fit(RegressionDiscontinuity, X, YF; treatment = T, bandwidth = 0.5)
   @test_throws ArgumentError confint(mf; method = Honest(1))
   @test_throws ArgumentError confint(m; method = Honest((1, 1)))
-  @test_throws ArgumentError confint(m; method = Honest(1; biascorrected = true))
-  @test_throws ArgumentError worstcasebias(fit(RegressionDiscontinuity, X, Y; degree = 2, bandwidth = 0.6), 1)
-  @test_throws ArgumentError worstcasebias(fit(RegressionDiscontinuity, X, Y; derivative = 1, degree = 2, bandwidth = 0.6), 1)
-  @test_throws ArgumentError worstcasebias(fit(RegressionDiscontinuity, X, Y; covariates = sin.(I), bandwidth = 0.4), 1)
+  @test_throws ArgumentError confint(m; method = Honest(1; bias_corrected = true))
+  @test_throws ArgumentError worst_case_bias(fit(RegressionDiscontinuity, X, Y; degree = 2, bandwidth = 0.6), 1)
+  @test_throws ArgumentError worst_case_bias(fit(RegressionDiscontinuity, X, Y; derivative = 1, degree = 2, bandwidth = 0.6), 1)
+  @test_throws ArgumentError worst_case_bias(fit(RegressionDiscontinuity, X, Y; covariates = sin.(I), bandwidth = 0.4), 1)
   @test_throws ArgumentError fit(RegressionDiscontinuity, X, Y; degree = 2, bandwidth = RDHonestOptimal(1))
   @test_throws ArgumentError fit(RegressionDiscontinuity, X, Y; bandwidth = RDHonestOptimal((1, 1)))
   @test_throws ArgumentError fit(RegressionDiscontinuity, X, Y; covariates = sin.(I), bandwidth = RDHonestOptimal(1))
@@ -79,7 +79,7 @@ end
   @test_throws ArgumentError Honest(1; class = :lipschitz)
   @test_throws ArgumentError Honest((1, -1))
   @test_throws ArgumentError confint(fit(LocalPolynomialRegression, X, Y; bandwidth = 0.3, points = [0.5]); method = Honest(1; class = :holder))
-  @test_throws ArgumentError worstcasebias(fit(LocalPolynomialRegression, X, Y; bandwidth = 0.3, points = [0.5]), (1, 1))
+  @test_throws ArgumentError worst_case_bias(fit(LocalPolynomialRegression, X, Y; bandwidth = 0.3, points = [0.5]), (1, 1))
   @test_throws ArgumentError fit(KDE, X; bandwidth = RDHonestOptimal(1))
   # the rule of thumb for M needs 4 distinct values of x on each side
   @test_throws ArgumentError KernelSmoothing._mrot([0.1, 0.2, 0.2, 0.3], [1.0, 2.0, 2.5, 3.0], nothing)

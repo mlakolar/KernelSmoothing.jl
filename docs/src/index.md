@@ -44,7 +44,7 @@ confint(fit(PointwiseDensity, x; points = [-1, 0, 1]))   # robust bias-corrected
 t = rand(2000); y = sin.(2π .* t) .+ 0.3 .* randn(2000)
 m = fit(LocalPolynomialRegression, t, y; points = range(0, 1; length = 21))
 coef(m), confint(m)                  # estimates and robust bias-corrected intervals
-confband(m)                          # a uniform band over the 21 points
+conf_band(m)                          # a uniform band over the 21 points
 ```
 
 ## Defaults and agreement with R
@@ -142,7 +142,7 @@ The pages of the estimators give the details.
 For all fits, `coef(m)` and `stderror(m)` describe the conventional estimates, and
 `coef(m; method = RobustBiasCorrected())` and `stderror(m; method = RobustBiasCorrected())`
 give the bias-corrected estimates and their robust standard errors. The
-intervals of `confint(m)` and the bands of `confband(m)` are robust bias-corrected
+intervals of `confint(m)` and the bands of `conf_band(m)` are robust bias-corrected
 by default and centred at the bias-corrected estimates, since conventional intervals
 cover only for bandwidths well below the ones that minimize the mean squared error.
 `coeftable(m)` lists both.
@@ -164,7 +164,7 @@ Loading Plots.jl, or another package that uses RecipesBase, adds plot recipes.
 [`PointwiseDensity`](@ref) or [`LocalPolynomialDensity`](@ref)) over its shaded
 robust bias-corrected intervals, and `plot(f)` the density estimate of a
 [`KDE`](@ref). The keywords `level` and `method` choose the intervals as for
-[`confint`](@ref), `uniform = true` draws the uniform band of [`confband`](@ref)
+[`confint`](@ref), `uniform = true` draws the uniform band of [`conf_band`](@ref)
 instead, and `data = true` adds the observations of a regression.
 
 ```julia
@@ -189,6 +189,18 @@ GitHub:
 using Pkg
 Pkg.add(url = "https://github.com/mlakolar/KernelSmoothing.jl")
 ```
+
+## Development tests
+
+From a master checkout's package root, run:
+
+```sh
+julia scripts/test_master.jl
+```
+
+This prepares the dedicated master-based test environment, including test extras
+and sibling workspace dependencies, and runs the complete suite. Package version
+numbers and dependency declarations remain unchanged.
 
 ## Acknowledgements
 

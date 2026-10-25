@@ -79,7 +79,7 @@ estimate of the jump, with the pilot bandwidth ``b`` selected in the same way fo
 the bias correction. The other rules of rdrobust select a bandwidth for each side
 or for the sum of the estimates, combine these, or shrink them to the rate that
 minimizes the coverage error of the robust intervals.
-`selectbandwidth(RDOptimal(), x, y; cutoff)` returns the bandwidths without the
+`select_bandwidth(RDOptimal(), x, y; cutoff)` returns the bandwidths without the
 fit, as rdrobust's `rdbwselect`.
 
 The rules estimate the variance and the bias of the local fits with pilot fits, as
@@ -122,7 +122,7 @@ rounding.
 ```julia
 m = fit(RegressionDiscontinuity, x, y; bandwidth = RDHonestOptimal(1.5))
 confint(m; method = Honest(1.5))                       # the honest 95% interval
-worstcasebias(m, 1.5)                                  # its bound on the bias
+worst_case_bias(m, 1.5)                                  # its bound on the bias
 m = fit(RegressionDiscontinuity, x, y; treatment = t, bandwidth = RDHonestOptimal((1.5, 0.5); criterion = :flci))
 confint(m; method = Honest((1.5, 0.5)))
 ```

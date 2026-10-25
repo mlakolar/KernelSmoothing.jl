@@ -44,7 +44,7 @@ end
     d = SmoothingData(X, Y; weights = c.weighted ? W : nothing, cluster = G)
     base = c.bwselect == "imse-dpi" ? IMSEOptimal() : MSEOptimal()
     rule = c.bwselect == "ce-rot" ? CoverageOptimal(base) : base
-    s = selectbandwidth(rule, d, NPKERNELS[c.kernel]; degree = c.p, derivative = c.deriv, points = [0, 0.3, 0.5, 1],
+    s = select_bandwidth(rule, d, NPKERNELS[c.kernel]; degree = c.p, derivative = c.deriv, points = [0, 0.3, 0.5, 1],
                         vce = ClusterVariance(crtype(c.vce)), compat = true)
     @test [s.h;] ≈ c.h rtol = 1e-7
     @test [s.details.b;] ≈ c.b rtol = 1e-7
@@ -72,8 +72,8 @@ end
   # the plug-in rules estimate their variances in the same way
   d, dc = SmoothingData(X, Y), SmoothingData(X, Y; cluster = I)
   for t in 0:2, rule in (MSEOptimal(), IMSEOptimal())
-    sh = selectbandwidth(rule, d, EpanechnikovKernel(); points = [0, 0.3, 1], vce = HCVariance(t))
-    sc = selectbandwidth(rule, dc, EpanechnikovKernel(); points = [0, 0.3, 1], vce = ClusterVariance(t))
+    sh = select_bandwidth(rule, d, EpanechnikovKernel(); points = [0, 0.3, 1], vce = HCVariance(t))
+    sc = select_bandwidth(rule, dc, EpanechnikovKernel(); points = [0, 0.3, 1], vce = ClusterVariance(t))
     @test sc.h ≈ sh.h rtol = 1e-10
   end
 end
@@ -114,7 +114,7 @@ end
   m = fit(LocalPolynomialRegression, X, Y; cluster = GX, bandwidth = 0.08, points = [0.15, 0.25, 0.55])
   C = vcov(m)
   @test C[1, 3] == 0 && C[1, 2] != 0
-  @test confband(m).critical > 1.96
+  @test conf_band(m).critical > 1.96
 end
 
 @testset "few clusters" begin
@@ -148,7 +148,7 @@ end
   @test all(isnan, C[1, :]) && all(isnan, C[:, 1]) && isfinite(C[2, 2])
   # and the plug-in rules cannot estimate their variance constants there
   e = try
-    selectbandwidth(MSEOptimal(), SmoothingData(X, Y; cluster = X .< 0.5), EpanechnikovKernel(); points = [0.05])
+    select_bandwidth(MSEOptimal(), SmoothingData(X, Y; cluster = X .< 0.5), EpanechnikovKernel(); points = [0.05])
   catch err
     err
   end
@@ -174,7 +174,7 @@ end
   m = fit(LocalPolynomialRegression, X, Y; cluster = G, bandwidth = 0.2, points = [0.3, 0.5])
   ci = confint(m; method = Honest(10.0))
   @test all(ci[:, 2] .- ci[:, 1] .> 2 * 1.959 .* m.se)
-  s = selectbandwidth(FLCIOptimal(10.0), SmoothingData(X, Y; cluster = G), EpanechnikovKernel(); points = [0.5])
+  s = select_bandwidth(FLCIOptimal(10.0), SmoothingData(X, Y; cluster = G), EpanechnikovKernel(); points = [0.5])
   @test 0 < only(s.h) < 1
 end
 
@@ -183,7 +183,7 @@ end
   @test_throws ArgumentError fit(LocalPolynomialRegression, X, Y; vce = ClusterVariance(), bandwidth = 0.2)
   @test_throws ArgumentError fit(LocalPolynomialRegression, X, Y; cluster = G, vce = HCVariance(1), bandwidth = 0.2)
   @test_throws ArgumentError fit(LocalPolynomialRegression, X, Y; cluster = G, vce = NNVariance(), bandwidth = 0.2)
-  @test_throws ArgumentError selectbandwidth(MSEOptimal(), SmoothingData(X, Y; cluster = G), EpanechnikovKernel();
+  @test_throws ArgumentError select_bandwidth(MSEOptimal(), SmoothingData(X, Y; cluster = G), EpanechnikovKernel();
                                              vce = HCVariance(1))
   @test_throws DimensionMismatch SmoothingData(X, Y; cluster = G[1:10])
   @test_throws ArgumentError SmoothingData([1.0, 2.0], [1.0, 2.0]; cluster = [1, missing])

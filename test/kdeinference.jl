@@ -27,7 +27,7 @@ const NPKERNELS = Dict("epa" => EpanechnikovKernel(), "uni" => UniformKernel())
     @test all(isapprox.(m.se, c.se_us; rtol = 1e-12))
     @test all(isapprox.(m.se_rbc, c.se_rb; rtol = 1e-11))
   end
-  s = selectbandwidth(IMSEOptimal(), SmoothingData(X), EpanechnikovKernel(); compat = true)
+  s = select_bandwidth(IMSEOptimal(), SmoothingData(X), EpanechnikovKernel(); compat = true)
   @test s.h ≈ KDBW_IMSE_DEFAULT_GRID.h rtol = 1e-12
   @test s.details.b ≈ KDBW_IMSE_DEFAULT_GRID.b rtol = 1e-12
 end
@@ -98,10 +98,10 @@ end
         hcat(pdf.(f, EVAL) .- 1.959963984540054 .* stderror.(f, EVAL), pdf.(f, EVAL) .+ 1.959963984540054 .* stderror.(f, EVAL))
   # the integrated plug-in bandwidth as the bandwidth of a density estimate
   @test bandwidth(fit(KDE, X; bandwidth = IMSEOptimal())) ≈
-        selectbandwidth(IMSEOptimal(), d, EpanechnikovKernel()).h
+        select_bandwidth(IMSEOptimal(), d, EpanechnikovKernel()).h
   # coverage-error rescaling leaves second-order density bandwidths unchanged, as in nprobust
-  @test selectbandwidth(CoverageOptimal(), d, EpanechnikovKernel(); points = EVAL).h ==
-        selectbandwidth(MSEOptimal(), d, EpanechnikovKernel(); points = EVAL).h
+  @test select_bandwidth(CoverageOptimal(), d, EpanechnikovKernel(); points = EVAL).h ==
+        select_bandwidth(MSEOptimal(), d, EpanechnikovKernel(); points = EVAL).h
 end
 
 @testset "plug-in bandwidths for densities" begin
@@ -111,27 +111,27 @@ end
   x = rand(MersenneTwister(11), dist, 2000)
   d = SmoothingData(x)
   k = EpanechnikovKernel()
-  s = selectbandwidth(MSEOptimal(), d, k; points = [-1.0, 0.0, 1.0])
-  sc = selectbandwidth(MSEOptimal(), d, k; points = [-1.0, 0.0, 1.0], compat = true)
+  s = select_bandwidth(MSEOptimal(), d, k; points = [-1.0, 0.0, 1.0])
+  sc = select_bandwidth(MSEOptimal(), d, k; points = [-1.0, 0.0, 1.0], compat = true)
   hsj = bandwidth(SheatherJones(), d, k)
   @test s.details.sheatherjones == hsj
   @test all(s.h .< 2hsj) && sc.h[2] > 5hsj
   @test s.details.b[1] < sc.details.b[1] / 2
   # the integrated bandwidth is close to Sheather–Jones
-  @test selectbandwidth(IMSEOptimal(), d, k).h ≈ hsj rtol = 0.2
+  @test select_bandwidth(IMSEOptimal(), d, k).h ≈ hsj rtol = 0.2
   # regularization keeps the bandwidth finite where f'' vanishes (the inflection
   # points ±1 of the normal density)
   z = rand(MersenneTwister(12), Normal(), 2000)
   dz = SmoothingData(z)
-  r1 = selectbandwidth(MSEOptimal(), dz, k; points = [1.0])
-  r0 = selectbandwidth(MSEOptimal(regularization = 0), dz, k; points = [1.0])
+  r1 = select_bandwidth(MSEOptimal(), dz, k; points = [1.0])
+  r0 = select_bandwidth(MSEOptimal(regularization = 0), dz, k; points = [1.0])
   @test r1.h[1] < r0.h[1]
   # equivariance under location and scale
-  s2 = selectbandwidth(MSEOptimal(), SmoothingData(3 .+ 2 .* x), k; points = [1.0, 3.0, 5.0])
+  s2 = select_bandwidth(MSEOptimal(), SmoothingData(3 .+ 2 .* x), k; points = [1.0, 3.0, 5.0])
   @test s2.h ≈ 2 .* s.h rtol = 1e-6
   # any symmetric second-order kernel, and the default of the fit
   for kk in (BiweightKernel(), GaussianKernel())
-    @test all(isfinite, selectbandwidth(MSEOptimal(), d, kk; points = [0.0, 1.0]).h)
+    @test all(isfinite, select_bandwidth(MSEOptimal(), d, kk; points = [0.0, 1.0]).h)
     @test fit(PointwiseDensity, d; points = [0.0], kernel = kk).selection.rule == MSEOptimal()
   end
   # nprobust's kdrobust accepts the Epanechnikov and uniform kernels only
@@ -139,7 +139,7 @@ end
   @test_throws ArgumentError fit(PointwiseDensity, d; points = [0.0], kernel = BiweightKernel(), bandwidth = 0.5,
                                  compat = true)
   @test fit(PointwiseDensity, d; points = [0.0], kernel = UniformKernel(), compat = true).selection.rule == MSEOptimal()
-  @test_throws ArgumentError selectbandwidth(MSEOptimal(), d, BiweightKernel(); points = [0.0], compat = true)
+  @test_throws ArgumentError select_bandwidth(MSEOptimal(), d, BiweightKernel(); points = [0.0], compat = true)
 end
 
 @testset "plug-in bandwidths where the density vanishes, and responses" begin
@@ -147,9 +147,9 @@ end
   v = quantile.(Normal(), range(0.002, 0.998; length = 500))
   c = [v; 10 .+ v]   # two clusters, with nothing near 5
   d = SmoothingData(c)
-  s = selectbandwidth(MSEOptimal(), d, k; points = [0.0, 5.0, 10.0])
+  s = select_bandwidth(MSEOptimal(), d, k; points = [0.0, 5.0, 10.0])
   @test all(isfinite, s.h) && s.h[2] == knn_distance(d, 5.0, 21)
-  s0 = selectbandwidth(MSEOptimal(), d, k; points = [5.0], minobs = 0)
+  s0 = select_bandwidth(MSEOptimal(), d, k; points = [5.0], minobs = 0)
   @test s0.h[1] == 5 - minimum(c)   # the cap: the distance to the farther end
   @test isfinite(fit(PointwiseDensity, c; points = [5.0]).estimate[1])
   # the density rules ignore responses, also through prepared data
@@ -205,14 +205,14 @@ end
   dx = SmoothingData(X)
   g = derivative(GaussianKernel(), 2)
   for rule in (NormalReference(), SilvermanRule(), SheatherJones(), LSCV())
-    @test_throws "integrate to one" selectbandwidth(rule, dx, g)
+    @test_throws "integrate to one" select_bandwidth(rule, dx, g)
   end
   # a KDE takes nothing for its default bandwidth, and gives an interval at a point
   f = fit(KDE, X)
   @test bandwidth(fit(KDE, X; bandwidth = nothing)) == bandwidth(f)
   @test confint(f, 0.3) == Tuple(confint(f, [0.3]))
   @inferred vcov(ml)
-  @inferred confband(ml)
+  @inferred conf_band(ml)
 end
 
 @testset "windows without data, intervals at zero, counts" begin
@@ -223,7 +223,7 @@ end
   @test m.estimate[2] == 0 && isnan(m.se[2]) && isnan(m.se_rbc[2]) && mc.se[2] == 0
   @test all(isnan, confint(m)[2, :]) && confint(mc)[2, :] == [0.0, 0.0]
   @test all(isnan, vcov(m)[2, :]) && isfinite(vcov(m)[1, 1])
-  b = confband(m; rng = MersenneTwister(1))
+  b = conf_band(m; rng = MersenneTwister(1))
   @test isnan(b.lower[2]) && isfinite(b.lower[1])
   # the lower ends are clamped at zero, unless compat
   @test confint(m)[1, 1] == 0 && confint(mc)[1, 1] < 0
@@ -234,7 +234,7 @@ end
   @test fit(PointwiseDensity, xt; points = [1.0], bandwidth = 0.5, minobs = 0).nwindow == [90]
   @test fit(PointwiseDensity, xt; points = [1.0], bandwidth = 0.5, minobs = 0, compat = true).nwindow == [110]
   # grid = :points needs the evaluation points
-  @test_throws ArgumentError selectbandwidth(IMSEOptimal(grid = :points), SmoothingData(xe), EpanechnikovKernel())
+  @test_throws ArgumentError select_bandwidth(IMSEOptimal(grid = :points), SmoothingData(xe), EpanechnikovKernel())
   @test IMSEOptimal().grid === nothing
 end
 

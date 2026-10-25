@@ -24,7 +24,7 @@ end
 
 Base.show(io::IO, r::RDDensityOptimal) = print(io, "RDDensityOptimal(", repr(r.bwselect), ")")
 
-selectbandwidth(rule::RDDensityOptimal, d::SmoothingData, k::AbstractKernel; kwargs...) =
+select_bandwidth(rule::RDDensityOptimal, d::SmoothingData, k::AbstractKernel; kwargs...) =
   throw(ArgumentError("$rule chooses bandwidths for the manipulation test; fit a DensityDiscontinuity"))
 
 """
@@ -436,7 +436,7 @@ _rddreflect(v::AbstractVector) = [_rddflipsign(a) * v[_rddflipindex(a)] for a in
 # and the sandwich has the bread fL S₋ + fR S₊ and the meat fL³ G₋ + fR³ G₊, the
 # left matrices reflected from the right ones.
 function _rddplugin(fL, fR, N, hl, hr, p, k, restricted)
-  Sp, Gp = _rddS(k, p, 0, 1), _cjmG(k, p, 0, 1)
+  Sp, Gp = _rdd_s(k, p, 0, 1), _cjm_g(k, p, 0, 1)
   if !restricted
     Si = inv(Sp)
     v = (Si * Gp * Si)[2, 2]
@@ -453,8 +453,8 @@ function _rddplugin(fL, fR, N, hl, hr, p, k, restricted)
 end
 
 # S[i, j] = ∫_a^b x^(i+j-2) k(x) dx and C[i] = ∫_a^b x^(i+m-1) k(x) dx, i, j = 1, …, p + 1
-_rddS(k, p, a, b) = [_kintegral(k, x -> x^(i + j - 2) * k(x), a, b) for i in 1:p+1, j in 1:p+1]
-_rddC(k, m, p, a, b) = [_kintegral(k, x -> x^(i + m - 1) * k(x), a, b) for i in 1:p+1]
+_rdd_s(k, p, a, b) = [_kintegral(k, x -> x^(i + j - 2) * k(x), a, b) for i in 1:p+1, j in 1:p+1]
+_rdd_c(k, m, p, a, b) = [_kintegral(k, x -> x^(i + m - 1) * k(x), a, b) for i in 1:p+1]
 
 # probabilists' Hermite polynomials
 _hermite(x, p) = p == 0 ? 1.0 : p == 1 ? x : x * _hermite(x, p - 1) - (p - 1) * _hermite(x, p - 2)
@@ -531,7 +531,7 @@ function _rddbandwidths(X, Y, N, Nl, p, k, restricted, vce, ties, regularize, mi
   # solved together
   βL, βR = fb.coef.left, fb.coef.right
   fL, fR = fc.est.left, fc.est.right
-  Sp, Cp = _rddS(k, p, 0, 1), _rddC(k, p + 1, p, 0, 1)
+  Sp, Cp = _rdd_s(k, p, 0, 1), _rdd_c(k, p + 1, p, 0, 1)
   BL, BR = if restricted
     S₊, C₊ = _rddright(Sp), _rddright(Cp)
     t = (fR * S₊ + fL * _rddreflect(S₊)) \ (βL * (fR * C₊ + (-1)^(p + 1) * fL * _rddreflect(C₊)))

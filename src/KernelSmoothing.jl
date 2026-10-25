@@ -10,13 +10,13 @@ points with robust bias-corrected intervals; [`LocalPolynomialDensity`](@ref), t
 boundary-adaptive density estimator of Cattaneo, Jansson and Ma; and
 [`LocalPolynomialRegression`](@ref), local polynomial estimates of a regression
 function or its derivatives with conventional, robust bias-corrected and
-[`Honest`](@ref) intervals and uniform bands, see [`confband`](@ref); and
+[`Honest`](@ref) intervals and uniform bands, see [`conf_band`](@ref); and
 [`RegressionDiscontinuity`](@ref), estimates for regression discontinuity designs.
 They are fitted
 with `fit` and choose their bandwidths with a [`BandwidthSelector`](@ref).
 Underneath are the smoothing kernels, see [`AbstractKernel`](@ref), samples
 prepared for smoothing, see [`SmoothingData`](@ref), and the kernel sums that many
-of the estimators and bandwidth selectors are built from, see [`kernelsums`](@ref).
+of the estimators and bandwidth selectors are built from, see [`kernel_sums`](@ref).
 """
 module KernelSmoothing
 
@@ -36,18 +36,18 @@ export
   TriweightKernel, GaussianKernel, PiecewisePolynomialKernel,
   derivative, roughness, smoothness,
   cdf, ccdf, support, insupport, convolve, moment,
-  SmoothingData, nobs, effective_nobs, nunique, weightsum, window, knn_distance,
-  kernelsums, kernelsums!, SumEngine, DirectSums, WindowSums, FastSums, BinnedSums, isexact,
+  SmoothingData, nobs, effective_nobs, nunique, weight_sum, window, knn_distance,
+  kernel_sums, kernel_sums!, SumEngine, DirectSums, WindowSums, FastSums, BinnedSums, isexact,
   SumsWorkspace,
-  BandwidthSelector, BandwidthSelection, selectbandwidth, bandwidth,
+  BandwidthSelector, BandwidthSelection, select_bandwidth, bandwidth,
   NormalReference, SilvermanRule, SheatherJones, LSCV, CrossValidation,
   KDE, fit, pdf, logpdf, quantile, cquantile, mean, var, std, median, stderror,
   LocalPolynomialRegression, PointwiseDensity, LocalPolynomialDensity, RuleOfThumb, MSEOptimal, IMSEOptimal, CoverageOptimal,
   VarianceEstimator, NNVariance, HCVariance, ClusterVariance,
-  InferenceMethod, Conventional, RobustBiasCorrected, Honest, FLCIOptimal, worstcasebias,
+  InferenceMethod, Conventional, RobustBiasCorrected, Honest, FLCIOptimal, worst_case_bias,
   RegressionDiscontinuity, RDOptimal, RDHonestOptimal, DensityDiscontinuity, RDDensityOptimal,
-  coef, confint, coeftable, predict, fitted, residuals, vcov, confband,
-  localpolynomial, smoothermatrix, PartiallyLinear, LocalLikelihood,
+  coef, confint, coeftable, predict, fitted, residuals, vcov, conf_band,
+  local_polynomial, smoother_matrix, PartiallyLinear, LocalLikelihood,
   kernelweights, regressionpoints, bandwidthgrid, gridminimize, sandwich, supt_critical
 
 include("polynomials.jl")
@@ -72,6 +72,7 @@ include("semiparametric.jl")
 include("locallik.jl")
 include("rddensity.jl")
 include("building.jl")
+include("compat_naming.jl")
 include("precompile.jl")
 
 end

@@ -125,13 +125,13 @@ end
   s = sqrt(sum(abs2, XS .- sum(XS) / 500) / 500)
   m2 = [(2α[3] + 6α[4] * zi + 12α[5] * zi^2) / s^2 for zi in z]
   R = maximum(XS) - minimum(XS)
-  sel = selectbandwidth(RuleOfThumb(), d, EpanechnikovKernel())
+  sel = select_bandwidth(RuleOfThumb(), d, EpanechnikovKernel())
   @test sel.h ≈ 15^(1 / 5) * (σ2 * R / sum(abs2, m2))^(1 / 5) rtol = 1e-10
   @test sel.details.variance ≈ σ2 rtol = 1e-10
   # without a signal the curvature is small, and the bandwidth is capped at the range
   @test bandwidth(RuleOfThumb(), SmoothingData(XS, sin.(11.1 .* (1:500))), EpanechnikovKernel()) <= R
   # local constant fits (p - ν even) use the rule of order 1
-  @test selectbandwidth(RuleOfThumb(), d, EpanechnikovKernel(); degree = 0).h ≈ sel.h
+  @test select_bandwidth(RuleOfThumb(), d, EpanechnikovKernel(); degree = 0).h ≈ sel.h
   m = fit(LocalPolynomialRegression, XS, YS; bandwidth = RuleOfThumb(), points = [0.5])
   @test m.selection.rule == RuleOfThumb() && m.h == [sel.h]
 end
@@ -303,7 +303,7 @@ end
           confint(m; method)
   end
   @test coef(m) == m.estimate && coef(m; method = RobustBiasCorrected()) == m.estimate_bc
-  @test coef(m; method = Honest(:rot; biascorrected = true)) == m.estimate_bc
+  @test coef(m; method = Honest(:rot; bias_corrected = true)) == m.estimate_bc
   for f in (fit(PointwiseDensity, XS; points = [0.0]), fit(LocalPolynomialDensity, XS; points = [0.0]))
     @test coef(f; method = RobustBiasCorrected()) == f.estimate_bc && coef(f) == f.estimate
   end

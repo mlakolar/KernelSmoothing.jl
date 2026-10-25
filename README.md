@@ -29,10 +29,10 @@ development.
   manipulation test of rddensity (Cattaneo, Jansson and Ma 2020).
 - `fit(PartiallyLinear, u, X, y)`: partially linear models (Robinson's double
   residuals), with sandwich standard errors and cross-validated bandwidths.
-  Varying-coefficient models are in CoordinateDescent.jl, on the kernels of this
+  Varying-coefficient models are in HighDimensionalModels.jl, on the kernels of this
   package.
 - `fit(LocalLikelihood, x, y; family)`: local logistic and Poisson regression.
-- `localpolynomial` and `smoothermatrix`: local polynomial estimates and their
+- `local_polynomial` and `smoother_matrix`: local polynomial estimates and their
   weights at given points and bandwidths, without inference, for smoothing many
   curves and for building other estimators, also for two covariates (covariance
   surfaces), with leave-one-out or leave-group-out cross-validation.
@@ -46,7 +46,7 @@ development.
   that make honest intervals shortest.
 - The layers underneath: smoothing kernels with their distribution functions,
   moments, derivatives, convolutions and products; `SmoothingData`, a sample sorted
-  once with its weights and ties; and `kernelsums`, the sums all estimators are
+  once with its weights and ties; and `kernel_sums`, the sums all estimators are
   built from, with exact and fast engines that run in parallel with several
   threads (`julia --threads=auto`).
 
@@ -68,7 +68,7 @@ pdf.(f, range(-3, 3; length = 401))  # many points at once
 t = rand(2000); y = sin.(2π .* t) .+ 0.3 .* randn(2000)
 m = fit(LocalPolynomialRegression, t, y; points = range(0, 1; length = 21))
 coef(m), confint(m)                  # estimates and robust bias-corrected intervals
-confband(m)                          # a uniform band over the points
+conf_band(m)                          # a uniform band over the points
 ```
 
 ## Installation
@@ -80,6 +80,20 @@ GitHub:
 using Pkg
 Pkg.add(url = "https://github.com/mlakolar/KernelSmoothing.jl")
 ```
+
+## Development and testing
+
+Use a `master` checkout for this package and its workspace dependencies. From
+the package root, run the complete test suite with:
+
+```sh
+julia scripts/test_master.jl
+```
+
+The runner resolves sibling master checkouts and test extras in a dedicated
+`.master-test-env` environment, leaving the package dependency declarations
+unchanged. Missing workspace dependencies are cloned from their master branches.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the naming and development policy.
 
 ## Acknowledgements
 

@@ -2,13 +2,13 @@
     BandwidthSelector
 
 Supertype of the rules that choose a bandwidth from the data, such as
-[`NormalReference`](@ref) and [`SilvermanRule`](@ref). [`selectbandwidth`](@ref)
+[`NormalReference`](@ref) and [`SilvermanRule`](@ref). [`select_bandwidth`](@ref)
 applies a rule and records what it computed on the way, and
 [`bandwidth`](@ref) returns only the bandwidth. Estimators accept a rule wherever
 they accept a bandwidth.
 
 A new rule `R <: BandwidthSelector` implements
-`selectbandwidth(rule::R, d::SmoothingData, k::AbstractKernel)`.
+`select_bandwidth(rule::R, d::SmoothingData, k::AbstractKernel)`.
 """
 abstract type BandwidthSelector end
 
@@ -37,7 +37,7 @@ end
 """
     BandwidthSelection
 
-The result of [`selectbandwidth`](@ref): the bandwidth `h`, a number or a vector
+The result of [`select_bandwidth`](@ref): the bandwidth `h`, a number or a vector
 with one bandwidth per evaluation point, the `rule` that chose it (`nothing` for a
 bandwidth given by the user) and the named tuple `details` with what the rule
 computed on the way, such as the scale estimate of a rule of thumb.
@@ -63,14 +63,14 @@ function Base.show(io::IO, s::BandwidthSelection)
 end
 
 """
-    selectbandwidth(rule::BandwidthSelector, d::SmoothingData, k::AbstractKernel)
+    select_bandwidth(rule::BandwidthSelector, d::SmoothingData, k::AbstractKernel)
 
 Applies the bandwidth selector `rule` to the sample `d` for the kernel `k` and
 returns a [`BandwidthSelection`](@ref). Bandwidths follow the convention of
 [`AbstractKernel`](@ref): a half-width for the compactly supported kernels and a
 standard deviation for the Gaussian kernel.
 """
-function selectbandwidth end
+function select_bandwidth end
 
 """
     bandwidth(rule::BandwidthSelector, d::SmoothingData, k::AbstractKernel; kwargs...)
@@ -78,17 +78,17 @@ function selectbandwidth end
     bandwidth(f)
 
 The bandwidth that `rule` chooses for the sample `d` and the kernel `k`, with the
-keywords of [`selectbandwidth`](@ref) for the rule, such as `degree` for
+keywords of [`select_bandwidth`](@ref) for the rule, such as `degree` for
 regression; the bandwidth of a selection `s`; or the bandwidth of a fitted
 estimate `f`.
 """
 bandwidth(s::BandwidthSelection) = s.h
 bandwidth(rule::BandwidthSelector, d::SmoothingData, k::AbstractKernel; kwargs...) =
-  bandwidth(selectbandwidth(rule, d, k; kwargs...))
+  bandwidth(select_bandwidth(rule, d, k; kwargs...))
 
 # a bandwidth given as a number, or chosen by a rule
 _selection(h::Real, d, k) = BandwidthSelection(h)
-_selection(rule::BandwidthSelector, d, k) = selectbandwidth(rule, d, k)
+_selection(rule::BandwidthSelector, d, k) = select_bandwidth(rule, d, k)
 _selection(h, d, k) = throw(ArgumentError(
   "bandwidth must be a positive number or a BandwidthSelector, got $(repr(h))"))
 
@@ -120,7 +120,7 @@ end
 
 NormalReference(; robust::Bool = true) = NormalReference(robust)
 
-function selectbandwidth(rule::NormalReference, d::SmoothingData, k::AbstractKernel)
+function select_bandwidth(rule::NormalReference, d::SmoothingData, k::AbstractKernel)
   _check_mass(k, rule)
   sd, iqr = _sdiqr(d)
   σ = rule.robust ? _robustscale(sd, iqr / 1.349) : sd
@@ -143,7 +143,7 @@ factor 0.9 instead of 1.06 suits densities with several modes better.
 """
 struct SilvermanRule <: BandwidthSelector end
 
-function selectbandwidth(rule::SilvermanRule, d::SmoothingData, k::AbstractKernel)
+function select_bandwidth(rule::SilvermanRule, d::SmoothingData, k::AbstractKernel)
   _check_mass(k, rule)
   sd, iqr = _sdiqr(d)
   σ = _robustscale(sd, iqr / 1.34)

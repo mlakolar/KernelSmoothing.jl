@@ -1,7 +1,7 @@
 ## Honest confidence intervals (Armstrong and Kolesár 2020)
 
 """
-    Honest(M; biascorrected = false, class = :default)
+    Honest(M; bias_corrected = false, class = :default)
 
 Honest confidence intervals for local polynomial regression (Armstrong and Kolesár
 2018, 2020). Under regularity conditions, they have asymptotic coverage at least
@@ -22,7 +22,7 @@ therefore required, chosen before seeing the estimates. With `M = :rot`, it is t
 largest absolute derivative of order `p + 1` of a global polynomial of order
 `p + 3` over the range of the data (of lower order when `x` has fewer than `p + 4`
 distinct values), the rule of thumb of Armstrong and Kolesár for local linear fits,
-which they offer as a starting point for a sensitivity analysis, not as a bound. With `biascorrected = true`, the interval is built
+which they offer as a starting point for a sensitivity analysis, not as a bound. With `bias_corrected = true`, the interval is built
 around the bias-corrected estimate and its weights.
 
 For [`RegressionDiscontinuity`](@ref), the class is by default the Hölder class of
@@ -33,10 +33,10 @@ rule of thumb of RDHonest.
 """
 struct Honest <: InferenceMethod
   M::Union{Float64,NTuple{2,Float64},Symbol}
-  biascorrected::Bool
+  bias_corrected::Bool
   class::Symbol
 
-  function Honest(M::Union{Real,Symbol,Tuple{Real,Real}}, biascorrected::Bool, class::Symbol = :default)
+  function Honest(M::Union{Real,Symbol,Tuple{Real,Real}}, bias_corrected::Bool, class::Symbol = :default)
     M isa Symbol && M != :rot && throw(ArgumentError("M must be a nonnegative number or :rot, got :$M"))
     Mv = M isa Real ? Float64(M) : M isa Tuple ? Float64.(M) : M
     # the bounds as given and as stored, which can overflow
@@ -44,37 +44,54 @@ struct Honest <: InferenceMethod
     M isa Real && !ok(M, Mv) && throw(ArgumentError("M must be a nonnegative number, got $M"))
     M isa Tuple && !all(ok.(M, Mv)) && throw(ArgumentError("the bounds M must be nonnegative numbers, got $M"))
     class in (:default, :taylor, :holder) || throw(ArgumentError("class must be :taylor or :holder, got :$class"))
-    new(Mv, biascorrected, class)
+    new(Mv, bias_corrected, class)
   end
 end
 
-Honest(M::Union{Real,Symbol,Tuple{Real,Real}}; biascorrected::Bool = false, class::Symbol = :default) =
-  Honest(M, biascorrected, class)
-Honest(; biascorrected::Bool = false) = throw(ArgumentError("Honest needs a bound M on the " *
+# Accept the old spelling during the naming transition, while rejecting ambiguous calls.
+function _bias_corrected_keyword(bias_corrected, biascorrected)
+  if biascorrected !== nothing
+    bias_corrected === nothing || throw(ArgumentError("specify only bias_corrected, not both keyword spellings"))
+    Base.depwarn("keyword biascorrected is deprecated; use bias_corrected", :biascorrected)
+    return biascorrected::Bool
+  end
+  return bias_corrected === nothing ? false : bias_corrected::Bool
+end
+
+function Honest(M::Union{Real,Symbol,Tuple{Real,Real}};
+                bias_corrected::Union{Nothing,Bool} = nothing,
+                biascorrected::Union{Nothing,Bool} = nothing, class::Symbol = :default)
+  return Honest(M, _bias_corrected_keyword(bias_corrected, biascorrected), class)
+end
+Honest(; bias_corrected::Union{Nothing,Bool} = nothing,
+         biascorrected::Union{Nothing,Bool} = nothing) = throw(ArgumentError("Honest needs a bound M on the " *
   "derivative of order p + 1, chosen in advance, such as Honest(40), or Honest(:rot) for the rule of thumb"))
 
 function Base.show(io::IO, m::Honest)
   print(io, "Honest(", repr(m.M))
-  kw = [m.biascorrected ? "biascorrected = true" : "", m.class === :default ? "" : "class = $(repr(m.class))"]
+  kw = [m.bias_corrected ? "bias_corrected = true" : "", m.class === :default ? "" : "class = $(repr(m.class))"]
   kw = filter(!isempty, kw)
   isempty(kw) || print(io, "; ", join(kw, ", "))
   print(io, ")")
 end
 
 """
-    worstcasebias(m::LocalPolynomialRegression, M; biascorrected = false)
+    worst_case_bias(m::LocalPolynomialRegression, M; bias_corrected = false)
 
 The worst-case bias `M / (p + 1)! ∑ᵢ |ℓᵢ| |xᵢ - x₀|^(p+1)` of the estimates at the
 points over the Taylor class with bound `M` on the derivative of order `p + 1`, as
 in [`Honest`](@ref); `M = :rot` uses the rule of thumb.
 """
-function worstcasebias(m::LocalPolynomialRegression, M; biascorrected::Bool = false)
+function worst_case_bias(m::LocalPolynomialRegression, M;
+                         bias_corrected::Union{Nothing,Bool} = nothing,
+                         biascorrected::Union{Nothing,Bool} = nothing)
+  bias_corrected = _bias_corrected_keyword(bias_corrected, biascorrected)
   Honest(M)   # checks M
   M isa Tuple && throw(ArgumentError("a pair of bounds M is for fuzzy regression discontinuity designs"))
-  Mv = M === :rot ? _honestM(m.data, m.degree) : Float64(M)::Float64
+  Mv = M === :rot ? _honest_bound(m.data, m.degree) : Float64(M)::Float64
   p, ν = m.degree, m.derivative
   return _pointwise(eachindex(m.points)) do j
-    Mv * _absmoment(m.data, m.kernel, m.points[j], m.h[j], m.b[j], p, ν, biascorrected) / factorial(p + 1)
+    Mv * _absmoment(m.data, m.kernel, m.points[j], m.h[j], m.b[j], p, ν, bias_corrected) / factorial(p + 1)
   end
 end
 
@@ -96,7 +113,7 @@ end
 
 # the largest |m^(p+1)| of a global polynomial of order p + 3 over the range of x,
 # or of the highest order that the distinct values identify
-function _honestM(d::SmoothingData, p)
+function _honest_bound(d::SmoothingData, p)
   d.y === nothing && throw(ArgumentError("the rule of thumb for M needs responses"))
   P = min(p + 3, nunique(d) - 1)
   P >= p + 1 || throw(ArgumentError("the rule of thumb for M fits a global polynomial of " *
@@ -124,9 +141,9 @@ end
 
 function _honestconfint(m::LocalPolynomialRegression, level, method::Honest)
   0 < level < 1 || throw(ArgumentError("level must be between 0 and 1, got $level"))
-  bc = method.biascorrected
+  bc = method.bias_corrected
   method.class === :holder && throw(ArgumentError("honest intervals for local polynomial regression use the Taylor class"))
-  B = worstcasebias(m, method.M; biascorrected = bc)
+  B = worst_case_bias(m, method.M; bias_corrected = bc)
   est, se = bc ? (m.estimate_bc, m.se_rbc) : (m.estimate, m.se)
   # cv(B / se) se tends to B as se tends to 0
   half = [se[j] == 0 ? B[j] : _cvb(B[j] / se[j], level) * se[j] for j in eachindex(se)]
@@ -172,7 +189,7 @@ function Base.show(io::IO, r::FLCIOptimal)
   print(io, ")")
 end
 
-function selectbandwidth(rule::FLCIOptimal, d::SmoothingData, k::AbstractKernel; derivative::Integer = 0,
+function select_bandwidth(rule::FLCIOptimal, d::SmoothingData, k::AbstractKernel; derivative::Integer = 0,
                          degree::Integer = derivative + 1, points = nothing,
                          vce::Union{Nothing,VarianceEstimator} = nothing, minobs::Integer = 21)
   d.y === nothing && throw(ArgumentError("FLCIOptimal needs responses; use SmoothingData(x, y)"))
@@ -182,7 +199,7 @@ function selectbandwidth(rule::FLCIOptimal, d::SmoothingData, k::AbstractKernel;
   minobs >= 0 || throw(ArgumentError("minobs must be nonnegative, got $minobs"))
   p, ν = Int(degree), Int(derivative)
   pts = points === nothing ? collect(range(d.x[1], d.x[end]; length = 30)) : _checkpoints(points)
-  M = rule.M === :rot ? _honestM(d, p) : rule.M::Float64
+  M = rule.M === :rot ? _honest_bound(d, p) : rule.M::Float64
   hmax = d.x[end] - d.x[1]
   hs = _pointwise(pts) do c
     hmin = max(knn_distance(d, c, min(max(minobs, 21, p + 2), nobs(d))), hmax / 1e4)
@@ -202,7 +219,7 @@ function selectbandwidth(rule::FLCIOptimal, d::SmoothingData, k::AbstractKernel;
   return BandwidthSelection(hs, rule, (M = M, points = pts))
 end
 
-_usesbc(method::Honest) = method.biascorrected
+_usesbc(method::Honest) = method.bias_corrected
 _confint(m::LocalPolynomialRegression, level, method::Honest) = _honestconfint(m, level, method)
 _confint(m::PointwiseDensity, level, method::Honest) =
   throw(ArgumentError("honest intervals are implemented for local polynomial regression"))

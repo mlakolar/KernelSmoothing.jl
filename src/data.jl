@@ -9,7 +9,7 @@ starts in the sorted order.
 
 Sorting once makes local questions cheap. [`window`](@ref) finds the
 observations within a bandwidth of a point in `O(log n)` time,
-[`nunique`](@ref) and [`weightsum`](@ref) count the distinct values and add up
+[`nunique`](@ref) and [`weight_sum`](@ref) count the distinct values and add up
 the weights among them in `O(1)` time, and [`knn_distance`](@ref) finds the
 distance to the `k`-th nearest observation in `O(log n + k)` time. Estimators and
 bandwidth selectors will accept a `SmoothingData`, so a sample used for many fits
@@ -25,7 +25,7 @@ type, one per observation, such as integers or strings; observations with equal
 identifiers form a cluster. Values are stored as `Float64`, with
 `-0.0` stored as `0.0`. Weights whose largest value lies outside `[2^-200, 2^200]`
 are stored divided by a power of two, so that products of weights neither overflow
-nor underflow; [`weightsum`](@ref) undoes the division.
+nor underflow; [`weight_sum`](@ref) undoes the division.
 
 The fields, all in sorted order:
 - `x`: the observations
@@ -247,16 +247,16 @@ nunique(d::SmoothingData, r::AbstractUnitRange{<:Integer}) =
   isempty(r) ? 0 : d.valueindex[last(r)] - d.valueindex[first(r)] + 1
 
 """
-    weightsum(d::SmoothingData)
-    weightsum(d::SmoothingData, r::AbstractUnitRange)
+    weight_sum(d::SmoothingData)
+    weight_sum(d::SmoothingData, r::AbstractUnitRange)
 
 The total weight of the observations, overall or among the sorted observations
 `r`, such as a [`window`](@ref), in `O(1)` time from the cumulative weights and
 their rounding errors, so that a small range after large weights keeps its
 accuracy. Without weights every observation counts one.
 """
-weightsum(d::SmoothingData) = ldexp(d.sumw, d.wexp)
-weightsum(d::SmoothingData, r::AbstractUnitRange{<:Integer}) = ldexp(_wsum(d, first(r), last(r)), d.wexp)
+weight_sum(d::SmoothingData) = ldexp(d.sumw, d.wexp)
+weight_sum(d::SmoothingData, r::AbstractUnitRange{<:Integer}) = ldexp(_wsum(d, first(r), last(r)), d.wexp)
 
 """
     window(d::SmoothingData, x0, h)

@@ -22,24 +22,24 @@ end
   g1, g2 = [0.0, 0.3, 0.75], [0.1, 0.5, 0.9, 1.0]
   for k in (EpanechnikovKernel(), TriangularKernel(), GaussianKernel()), p in (0, 1), w in (nothing, W)
     h = k isa GaussianKernel ? (0.08, 0.1) : (0.2, 0.25)
-    E = localpolynomial((X1, X2), Y, (g1, g2); bandwidth = h, degree = p, kernel = k, weights = w)
+    E = local_polynomial((X1, X2), Y, (g1, g2); bandwidth = h, degree = p, kernel = k, weights = w)
     @test size(E) == (3, 4)
     @test E ≈ [wls(s, t, h, p, k, w === nothing ? ones(N) : w) for s in g1, t in g2] rtol = 1e-10
     # scattered points as a matrix or as pairs
-    @test localpolynomial((X1, X2), Y, [0.3 0.5; 0.75 0.1]; bandwidth = h, degree = p, kernel = k, weights = w) ≈
+    @test local_polynomial((X1, X2), Y, [0.3 0.5; 0.75 0.1]; bandwidth = h, degree = p, kernel = k, weights = w) ≈
           [E[2, 2], E[3, 1]] rtol = 1e-12
-    @test localpolynomial((X1, X2), Y, [(0.3, 0.5)]; bandwidth = h, degree = p, kernel = k, weights = w) ≈ [E[2, 2]]
+    @test local_polynomial((X1, X2), Y, [(0.3, 0.5)]; bandwidth = h, degree = p, kernel = k, weights = w) ≈ [E[2, 2]]
     # the weights, in the input order and column-major over the grid
-    L = smoothermatrix((X1, X2), (g1, g2); bandwidth = h, degree = p, kernel = k, weights = w)
+    L = smoother_matrix((X1, X2), (g1, g2); bandwidth = h, degree = p, kernel = k, weights = w)
     @test L * Y ≈ vec(E) rtol = 1e-10
     @test all(sum(L; dims = 2) .≈ 1)
     p == 1 && @test L * X2 ≈ vec([t for s in g1, t in g2]) atol = 1e-10
   end
   # one bandwidth for both coordinates
-  @test localpolynomial((X1, X2), Y, (g1, g2); bandwidth = 0.2) == localpolynomial((X1, X2), Y, (g1, g2); bandwidth = (0.2, 0.2))
+  @test local_polynomial((X1, X2), Y, (g1, g2); bandwidth = 0.2) == local_polynomial((X1, X2), Y, (g1, g2); bandwidth = (0.2, 0.2))
   # a window without enough observations
-  @test isnan(localpolynomial((X1, X2), Y, [(3.0, 3.0)]; bandwidth = 0.1)[1])
-  @inferred localpolynomial((X1, X2), Y, (g1, g2); bandwidth = 0.2)
+  @test isnan(local_polynomial((X1, X2), Y, [(3.0, 3.0)]; bandwidth = 0.1)[1])
+  @inferred local_polynomial((X1, X2), Y, (g1, g2); bandwidth = 0.2)
 end
 
 @testset "cross-validation" begin
@@ -58,27 +58,27 @@ end
   end
   @test KernelSmoothing._surfacecv(b, k, h, 1, false) ≈ loo / N rtol = 1e-10
   @test KernelSmoothing._surfacecv(b, k, h, 1, true) ≈ lgo / N rtol = 1e-10
-  s = selectbandwidth(CrossValidation(), (X1, X2), Y)
+  s = select_bandwidth(CrossValidation(), (X1, X2), Y)
   @test s.h[1] == s.h[2] && 0.05 < s.h[1] < 0.5
   @test s.rule == CrossValidation() && length(s.details.grid) == 40 && !s.details.groups
-  sg = selectbandwidth(CrossValidation(), (X1, X2), Y; groups = G, aspect = 2)
+  sg = select_bandwidth(CrossValidation(), (X1, X2), Y; groups = G, aspect = 2)
   @test sg.h[2] ≈ 2 * sg.h[1] && sg.details.groups
   # candidate bandwidths
-  sc = selectbandwidth(CrossValidation(), (X1, X2), Y; bandwidths = [0.3, 0.1, 0.2])
+  sc = select_bandwidth(CrossValidation(), (X1, X2), Y; bandwidths = [0.3, 0.1, 0.2])
   @test sc.details.grid == [0.1, 0.2, 0.3] && sc.h[1] == sc.details.grid[argmin(sc.details.criterion)]
 end
 
 @testset "errors" begin
-  @test_throws ArgumentError localpolynomial((X1, X2), Y, (X1, X2); bandwidth = 0.1, degree = 2)
-  @test_throws ArgumentError localpolynomial((X1, X2), Y, [0.1, 0.2]; bandwidth = 0.1)
-  @test_throws ArgumentError localpolynomial((X1, X2), Y, [0.1 0.2 0.3]; bandwidth = 0.1)
-  @test_throws ArgumentError localpolynomial((X1, X2), Y, [(0.1, 0.2)]; bandwidth = (0.1, -0.2))
-  @test_throws DimensionMismatch localpolynomial((X1, X2[1:10]), Y, [(0.1, 0.2)]; bandwidth = 0.1)
-  @test_throws DimensionMismatch localpolynomial((X1, X2), Y[1:10], [(0.1, 0.2)]; bandwidth = 0.1)
-  @test_throws ArgumentError localpolynomial((X1, X2), Y, [(0.1, 0.2)]; bandwidth = 0.1, weights = -W)
-  @test_throws ArgumentError selectbandwidth(CrossValidation(), (X1, X2), Y; aspect = 0)
-  @test_throws ArgumentError selectbandwidth(CrossValidation(), (X1, X2), Y; bandwidths = [0.001])
-  @test_throws DimensionMismatch selectbandwidth(CrossValidation(), (X1, X2), Y; groups = G[1:5])
+  @test_throws ArgumentError local_polynomial((X1, X2), Y, (X1, X2); bandwidth = 0.1, degree = 2)
+  @test_throws ArgumentError local_polynomial((X1, X2), Y, [0.1, 0.2]; bandwidth = 0.1)
+  @test_throws ArgumentError local_polynomial((X1, X2), Y, [0.1 0.2 0.3]; bandwidth = 0.1)
+  @test_throws ArgumentError local_polynomial((X1, X2), Y, [(0.1, 0.2)]; bandwidth = (0.1, -0.2))
+  @test_throws DimensionMismatch local_polynomial((X1, X2[1:10]), Y, [(0.1, 0.2)]; bandwidth = 0.1)
+  @test_throws DimensionMismatch local_polynomial((X1, X2), Y[1:10], [(0.1, 0.2)]; bandwidth = 0.1)
+  @test_throws ArgumentError local_polynomial((X1, X2), Y, [(0.1, 0.2)]; bandwidth = 0.1, weights = -W)
+  @test_throws ArgumentError select_bandwidth(CrossValidation(), (X1, X2), Y; aspect = 0)
+  @test_throws ArgumentError select_bandwidth(CrossValidation(), (X1, X2), Y; bandwidths = [0.001])
+  @test_throws DimensionMismatch select_bandwidth(CrossValidation(), (X1, X2), Y; groups = G[1:5])
 end
 
 end

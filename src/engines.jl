@@ -1,7 +1,7 @@
 """
     SumEngine
 
-Supertype of the algorithms that compute [`kernelsums`](@ref).
+Supertype of the algorithms that compute [`kernel_sums`](@ref).
 [`DirectSums`](@ref), [`WindowSums`](@ref) and [`FastSums`](@ref) are exact up to
 rounding; [`BinnedSums`](@ref) approximates. [`isexact`](@ref) tells them apart.
 All engines work on several points at once when Julia runs with several threads.
@@ -92,7 +92,7 @@ isexact(::BinnedSums) = false
 """
     SumsWorkspace()
 
-Buffers that [`kernelsums!`](@ref) can reuse: the values `wᵢ zᵢ`, the order of the
+Buffers that [`kernel_sums!`](@ref) can reuse: the values `wᵢ zᵢ`, the order of the
 points, the blocks and power sums of [`FastSums`](@ref) and the grid of
 [`BinnedSums`](@ref). Passing the same workspace to repeated calls, as in a
 bandwidth search, saves allocating them every time. A workspace must not be used
@@ -119,8 +119,8 @@ Base.show(io::IO, ::SumsWorkspace) = print(io, "SumsWorkspace()")
 const _Bandwidths = Union{Real,AbstractVector{<:Real}}
 
 """
-    kernelsums(d::SmoothingData, k, h, points; kmax = 0, z = nothing, engine, workspace)
-    kernelsums(d::SmoothingData, k, h; kmax = 0, z = nothing, engine, workspace)
+    kernel_sums(d::SmoothingData, k, h, points; kmax = 0, z = nothing, engine, workspace)
+    kernel_sums(d::SmoothingData, k, h; kmax = 0, z = nothing, engine, workspace)
 
 The kernel sums
 
@@ -151,30 +151,30 @@ Gaussian derivatives whose cached scale factor overflows or vanishes use full su
 ```julia
 julia> d = SmoothingData([0.0, 0.5, 1.0]);
 
-julia> kernelsums(d, EpanechnikovKernel(), 1.0, [0.5]; kmax = 2)
+julia> kernel_sums(d, EpanechnikovKernel(), 1.0, [0.5]; kmax = 2)
 3×1 Matrix{Float64}:
  1.875
  0.0
  0.28125
 ```
 """
-function kernelsums(d::SmoothingData, k::AbstractKernel, h::_Bandwidths,
+function kernel_sums(d::SmoothingData, k::AbstractKernel, h::_Bandwidths,
                     points::AbstractVector{<:Real}; kmax::Integer = 0, kwargs...)
   kmax >= 0 || throw(ArgumentError("kmax must be nonnegative, got $kmax"))
   out = Matrix{Float64}(undef, kmax + 1, length(points))
-  return kernelsums!(out, d, k, h, points; kwargs...)
+  return kernel_sums!(out, d, k, h, points; kwargs...)
 end
 
-kernelsums(d::SmoothingData, k::AbstractKernel, h::_Bandwidths; kwargs...) =
-  kernelsums(d, k, h, d.x; kwargs...)
+kernel_sums(d::SmoothingData, k::AbstractKernel, h::_Bandwidths; kwargs...) =
+  kernel_sums(d, k, h, d.x; kwargs...)
 
 """
-    kernelsums!(out, d::SmoothingData, k, h, points; z = nothing, engine, workspace)
+    kernel_sums!(out, d::SmoothingData, k, h, points; z = nothing, engine, workspace)
 
-[`kernelsums`](@ref) into the `Float64` matrix `out`, whose number of rows sets
+[`kernel_sums`](@ref) into the `Float64` matrix `out`, whose number of rows sets
 `kmax = size(out, 1) - 1`.
 """
-function kernelsums!(out::AbstractMatrix{Float64}, d::SmoothingData, k::AbstractKernel,
+function kernel_sums!(out::AbstractMatrix{Float64}, d::SmoothingData, k::AbstractKernel,
                      h::_Bandwidths, points::AbstractVector{<:Real}; z = nothing,
                      engine::Union{Nothing,SumEngine} = nothing,
                      workspace::SumsWorkspace = SumsWorkspace())
@@ -185,7 +185,7 @@ function kernelsums!(out::AbstractMatrix{Float64}, d::SmoothingData, k::Abstract
     "out must have length(points) = $(length(points)) columns, got size $(size(out))"))
   # the engines write the columns of out from several tasks, which only a strided
   # array allows; others, such as a sparse matrix, receive a copy
-  out isa StridedMatrix || return copyto!(out, kernelsums!(Matrix{Float64}(undef, size(out)), d, k, h, points;
+  out isa StridedMatrix || return copyto!(out, kernel_sums!(Matrix{Float64}(undef, size(out)), d, k, h, points;
                                                          z, engine, workspace))
   hs = _bandwidths(h, length(points))
   vals = _sumvalues!(workspace, d, z)
@@ -511,7 +511,7 @@ function _windowsums2!(S, T, xs, v1, v2, k, h, points, ::Val{K1}, ::Val{K2}, lo,
 end
 
 # The kernel sums at the observations with and without the responses,
-# S = kernelsums(d, k, h; kmax = 2p) and T = kernelsums(d, k, h; kmax = p, z = d.y),
+# S = kernel_sums(d, k, h; kmax = 2p) and T = kernel_sums(d, k, h; kmax = p, z = d.y),
 # in one pass where the engine allows it; with `binned`, Gaussian kernels use the
 # binned sums where those are faster than the exact ones
 function _sumsyz(d::SmoothingData, k::AbstractKernel, h, p, ws::SumsWorkspace; binned::Bool = false)
@@ -527,8 +527,8 @@ function _sumsyz(d::SmoothingData, k::AbstractKernel, h, p, ws::SumsWorkspace; b
     lo, hi = e isa WindowSums ? support(k) : _zerosupport(k)
     _windowsums2!(S, T, d.x, vS, vT, k, h, d.x, Val(2p), Val(p), lo, hi, order)
   else
-    kernelsums!(S, d, k, h, d.x; engine = e, workspace = ws)
-    kernelsums!(T, d, k, h, d.x; z = d.y, engine = e, workspace = ws)
+    kernel_sums!(S, d, k, h, d.x; engine = e, workspace = ws)
+    kernel_sums!(T, d, k, h, d.x; z = d.y, engine = e, workspace = ws)
   end
   return S, T
 end

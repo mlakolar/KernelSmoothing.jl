@@ -1,7 +1,7 @@
 # [Bandwidth selection](@id bandwidths-page)
 
 Estimators accept a number or a [`BandwidthSelector`](@ref) as bandwidth.
-[`selectbandwidth`](@ref) applies a rule and returns a [`BandwidthSelection`](@ref)
+[`select_bandwidth`](@ref) applies a rule and returns a [`BandwidthSelection`](@ref)
 that records what the rule computed, such as pilot bandwidths or a
 cross-validation curve, and every fit stores the selection that chose its
 bandwidth.
@@ -19,7 +19,7 @@ rdrobust; see [Regression discontinuity](@ref rd-page).
 
 ```julia
 d = SmoothingData(randn(1000))
-s = selectbandwidth(LSCV(), d, EpanechnikovKernel())
+s = select_bandwidth(LSCV(), d, EpanechnikovKernel())
 s.h, s.details.minimizers        # the bandwidth, and all local minimizers of the criterion
 ```
 
@@ -106,7 +106,7 @@ have no ties, the grid extends downward first. For regression,
 ```
 
 where ``\ell_{ii}`` is the weight of ``y_i`` in the fit at ``x_i``. The fits at all
-observations come from [`kernelsums`](@ref), so that a bandwidth costs ``O(n)``
+observations come from [`kernel_sums`](@ref), so that a bandwidth costs ``O(n)``
 operations for polynomial kernels; for Gaussian kernels and more than 1000
 observations, the sums come from binned data where that is faster. The grid starts
 where the leave-one-out fits exist, at the smallest bandwidth that leaves ``p + 1``

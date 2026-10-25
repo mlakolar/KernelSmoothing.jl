@@ -28,7 +28,7 @@ Every kernel can be evaluated, `k(u)`, and supports [`support`](@ref),
 kernels too, although a derivative integrates to zero rather than one.
 
 A new kernel type `K <: AbstractKernel` defines the evaluation `(k::K)(u::Real)`
-and `support(k)`, which `kernelsums` and local polynomial regression with a given
+and `support(k)`, which `kernel_sums` and local polynomial regression with a given
 bandwidth need. A kernel density estimate also needs `moment(k, j)`, to check that
 the kernel integrates to one and for its mean and variance, and `cdf(k, u)` for its
 distribution function and quantiles; `ccdf(k, u)` keeps its upper tail accurate

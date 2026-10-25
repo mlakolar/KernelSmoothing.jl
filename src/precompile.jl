@@ -10,7 +10,7 @@
     pdf.(f, [-1.0, 0.0, 1.0]); cdf.(f, [-1.0, 0.0, 1.0])
     fit(KDE, x[1:50])   # exact sums for Sheather and Jones
     m = fit(LocalPolynomialRegression, x, y; points = [-1.0, 0.0, 1.0])
-    confint(m); coeftable(m); vcov(m); confband(m; draws = 100)
+    confint(m); coeftable(m); vcov(m); conf_band(m; draws = 100)
     confint(fit(LocalPolynomialRegression, x, y; points = [0.0]))
     confint(fit(PointwiseDensity, x; points = [-1.0, 0.0, 1.0]))
     confint(fit(LocalPolynomialDensity, x .- minimum(x); points = [0.0, 1.0, 2.0]))

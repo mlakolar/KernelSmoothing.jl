@@ -34,7 +34,7 @@ psi(x, f, g, r) = sum(f((xi - xj) / g) for xi in x, xj in x) / (length(x) * (len
   g = GaussianKernel()
   @test bandwidth(SheatherJones(method = :dpi, exact = 1000), d, g) ≈ R_SJ_DPI rtol = 2e-6
   # R rounds the constant 1.35733 of α₂ to 1.357, which moves its bandwidth by 4e-5
-  s = selectbandwidth(SheatherJones(exact = 1000), d, g)
+  s = select_bandwidth(SheatherJones(exact = 1000), d, g)
   @test s.h ≈ R_SJ_STE rtol = 1e-4
   # the equation solved by its definition, with α₂'s constant unrounded
   n = length(Q)
@@ -47,7 +47,7 @@ psi(x, f, g, r) = sum(f((xi - xj) / g) for xi in x, xj in x) / (length(x) * (len
   @test s.details.exact && !s.details.fallback
   # binned sums agree with exact ones, and are the default above 100 observations
   @test bandwidth(SheatherJones(exact = 0), d, g) ≈ s.h rtol = 1e-5
-  @test !selectbandwidth(SheatherJones(), d, g).details.exact
+  @test !select_bandwidth(SheatherJones(), d, g).details.exact
   @test bandwidth(SheatherJones(method = :dpi, exact = 0), d, g) ≈ R_SJ_DPI rtol = 1e-5
   @test _psi(d, 4, 0.3, false) ≈ _psi(d, 4, 0.3, true) rtol = 1e-4
   # other kernels get the canonical bandwidth ratio, (R(k) / μ₂(k)²)^(1/5) over the Gaussian one
@@ -65,11 +65,11 @@ psi(x, f, g, r) = sum(f((xi - xj) / g) for xi in x, xj in x) / (length(x) * (len
   r = @test_logs (:warn,) KernelSmoothing._sparse(SheatherJones(), d, g, "a test", (fallback = true,))
   @test r.details.fallback && r.h == bandwidth(NormalReference(), d, g) && r.rule == SheatherJones()
   # one shape of the details in every case, so that the default density estimate is inferable
-  @inferred selectbandwidth(SheatherJones(), d, g)
-  @inferred selectbandwidth(SheatherJones(method = :dpi), d, g)
+  @inferred select_bandwidth(SheatherJones(), d, g)
+  @inferred select_bandwidth(SheatherJones(method = :dpi), d, g)
   @inferred fit(KDE, Q)
   @test_throws ArgumentError SheatherJones(method = :plugin)
-  @test_throws ArgumentError selectbandwidth(SheatherJones(), SmoothingData([1.0]), g)
+  @test_throws ArgumentError select_bandwidth(SheatherJones(), SmoothingData([1.0]), g)
   # the default bandwidth of a density estimate
   @test bandwidth(fit(KDE, Q)) == bandwidth(SheatherJones(), d, EpanechnikovKernel())
 end
@@ -90,18 +90,18 @@ end
   @test repr(SheatherJones(compat = true)) == "SheatherJones(compat = true)"
   # rounded data: R takes the root that the ties create, 0.0026, at which the estimate is
   # a comb of spikes; the default rule searches only bandwidths that do not resolve the grid
-  s = selectbandwidth(SheatherJones(), SmoothingData(z), g)
+  s = select_bandwidth(SheatherJones(), SmoothingData(z), g)
   @test 0.09 < s.h < 0.12 && !s.details.fallback && s.details.resolution ≈ 0.1
   @test 0.09 < bandwidth(SheatherJones(method = :dpi), SmoothingData(z), g) < 0.12
   # integers with a standard deviation of 1: no root is left above half the resolution, and
   # the normal reference, 0.17, is raised to it
   zi = SmoothingData(round.(q(10_000)))
-  si = @test_logs (:warn, r"raised to half the resolution") selectbandwidth(SheatherJones(), zi, g)
+  si = @test_logs (:warn, r"raised to half the resolution") select_bandwidth(SheatherJones(), zi, g)
   @test si.details.fallback && si.h == 0.5
-  sd = @test_logs (:warn, r"resolves the grid") selectbandwidth(SheatherJones(method = :dpi), zi, g)
+  sd = @test_logs (:warn, r"resolves the grid") select_bandwidth(SheatherJones(method = :dpi), zi, g)
   @test sd.h == 0.5
   # data that are not rounded are not affected: the bound is far below the bandwidth
-  sy = selectbandwidth(SheatherJones(), SmoothingData(y), g)
+  sy = select_bandwidth(SheatherJones(), SmoothingData(y), g)
   @test sy.details.resolution < 1e-2 && !sy.details.fallback
   # the zero finder of the compatible rule
   r, it = KernelSmoothing._brentzero(x -> x^2 - 2, 0.0, 2.0, -2.0, 2.0, 1e-12)
@@ -179,18 +179,18 @@ KernelSmoothing.roughness(::BumpKernel) = 0.6
     for h in (0.1, 0.35, 0.9)
       @test crit(h) ≈ cv(h) rtol = 1e-9
     end
-    s = selectbandwidth(LSCV(), d, k)
+    s = select_bandwidth(LSCV(), d, k)
     @test !s.details.atbound
     @test s.h ≈ s.details.minimizers[end] rtol = 0.15
     @test cv(s.h) <= min(cv(0.99 * s.h), cv(1.01 * s.h)) + 1e-12   # a local minimizer
     @test length(s.details.grid) == length(s.details.criterion) == 60
   end
   # with heavy ties the criterion falls as h shrinks, without an interior minimum
-  st = @test_logs (:warn, r"end of the grid") selectbandwidth(LSCV(), SmoothingData(repeat([0.0, 1.0, 2.0, 3.0], 50)),
+  st = @test_logs (:warn, r"end of the grid") select_bandwidth(LSCV(), SmoothingData(repeat([0.0, 1.0, 2.0, 3.0], 50)),
                                                             GaussianKernel())
   @test st.details.atbound && isempty(st.details.minimizers)
   @test st.h == st.details.grid[1]
-  @test_throws ArgumentError selectbandwidth(LSCV(), SmoothingData(Z), BumpKernel())
+  @test_throws ArgumentError select_bandwidth(LSCV(), SmoothingData(Z), BumpKernel())
   d = SmoothingData(Z)
   # binned once on a fine grid, the minimizer moves by about 1e-5
   @test bandwidth(LSCV(exact = 0), d, GaussianKernel()) ≈ bandwidth(LSCV(), d, GaussianKernel()) rtol = 2e-5
@@ -199,7 +199,7 @@ KernelSmoothing.roughness(::BumpKernel) = 0.6
     @test crit(h) ≈ crit0(h) rtol = 1e-5
   end
   @test_throws ArgumentError LSCV(gridsize = 2)
-  @test_throws ArgumentError selectbandwidth(LSCV(), d, derivative(GaussianKernel(), 2))
+  @test_throws ArgumentError select_bandwidth(LSCV(), d, derivative(GaussianKernel(), 2))
 end
 
 @testset "cross-validation for regression" begin
@@ -232,7 +232,7 @@ end
       @test _cvcriterion(d, k, h, p, SumsWorkspace()) ≈ cv(h) rtol = 1e-9
     end
     @test _cvcriterion(d, k, 0.05, p, SumsWorkspace()) == Inf
-    sel = selectbandwidth(CrossValidation(), d, k; degree = p)
+    sel = select_bandwidth(CrossValidation(), d, k; degree = p)
     @test !sel.details.atbound
     @test sel.details.scored == count(scored)
     # the criterion is continuous but wiggles as observations enter and leave windows
@@ -272,7 +272,7 @@ end
   # whose criterion falls towards the end of the grid
   for y in (Z .+ 0.5 .* sin.(1e4 .* (1:400)), 2 .* Z .+ 0.3 .* cos.(7e3 .* (1:400)), sin.(2 .* Z) .+ 0.5 .* cos.(13.7 .* (1:400)))
     d = SmoothingData(Z, y)
-    sel = selectbandwidth(CrossValidation(), d, EpanechnikovKernel())
+    sel = select_bandwidth(CrossValidation(), d, EpanechnikovKernel())
     @test _cvcriterion(d, EpanechnikovKernel(), sel.h, 1, SumsWorkspace(), cvscored(d, 1)) <=
           minimum(filter(isfinite, sel.details.criterion)) * (1 + 1e-12)
   end
@@ -351,8 +351,8 @@ end
   dy = SmoothingData(xs, sin.(2π .* xs); weights = 1 .+ mod.(1:3000, 3))
   for k in (EpanechnikovKernel(), TriangularKernel(), GaussianKernel()), h in (0.003, 0.03, 0.3), p in (1, 2)
     S, T = KernelSmoothing._sumsyz(dy, k, h, p, SumsWorkspace())
-    @test S ≈ kernelsums(dy, k, h; kmax = 2p) rtol = 1e-12
-    @test T ≈ kernelsums(dy, k, h; kmax = p, z = dy.y) rtol = 1e-12
+    @test S ≈ kernel_sums(dy, k, h; kmax = 2p) rtol = 1e-12
+    @test T ≈ kernel_sums(dy, k, h; kmax = p, z = dy.y) rtol = 1e-12
   end
 end
 
@@ -362,12 +362,12 @@ end
   y = sin.(2π .* x) .+ 0.3 .* cos.(37.1 .* (1:1000))
   h0 = bandwidth(CrossValidation(), SmoothingData(x, y), k)
   # one isolated observation is left out of the criterion and does not set the floor
-  s = selectbandwidth(CrossValidation(), SmoothingData([x; 10.0], [y; 0.0]), k)
+  s = select_bandwidth(CrossValidation(), SmoothingData([x; 10.0], [y; 0.0]), k)
   @test s.h ≈ h0 rtol = 0.02
   @test s.details.scored < 1001 && s.details.grid[1] < 0.05
   # with a floor that binds, the rule warns
   x2 = x[1:200]
-  @test_logs (:warn, r"lower end of its grid") selectbandwidth(CrossValidation(), SmoothingData(x2, sin.(80π .* x2)), k)
+  @test_logs (:warn, r"lower end of its grid") select_bandwidth(CrossValidation(), SmoothingData(x2, sin.(80π .* x2)), k)
   # Gaussian kernels: binned sums above `exact` observations, close to the exact ones
   g = GaussianKernel()
   xs = [mod(0.7548776662466927i, 1) for i in 1:3000]
@@ -375,8 +375,8 @@ end
   d = SmoothingData(xs, ys; weights = 1 .+ mod.(1:3000, 3))
   for h in (0.03, 0.1, 0.3)
     Sb, Tb = KernelSmoothing._binnedsumsyz(d, g, h, 1)
-    Se = kernelsums(d, g, h; kmax = 2)
-    Te = kernelsums(d, g, h; kmax = 1, z = d.y)
+    Se = kernel_sums(d, g, h; kmax = 2)
+    Te = kernel_sums(d, g, h; kmax = 1, z = d.y)
     @test all(abs.(Sb .- Se) .<= 5e-4 .* maximum(abs.(Se); dims = 2))
     @test all(abs.(Tb .- Te) .<= 5e-4 .* maximum(abs.(Te); dims = 2))
     @test _cvcriterion(d, g, h, 1, SumsWorkspace(), trues(3000), true) ≈ _cvcriterion(d, g, h, 1, SumsWorkspace()) rtol = 2e-4
@@ -394,8 +394,8 @@ end
     scored = d.x .< outlier
     @test _cvcriterion(d, g, 0.1, 1, SumsWorkspace(), scored, true) ==
           _cvcriterion(d, g, 0.1, 1, SumsWorkspace(), scored, false)
-    sb = selectbandwidth(CrossValidation(gridsize = 8, exact = 0), d, g)
-    se = selectbandwidth(CrossValidation(gridsize = 8, exact = 1000), d, g)
+    sb = select_bandwidth(CrossValidation(gridsize = 8, exact = 0), d, g)
+    se = select_bandwidth(CrossValidation(gridsize = 8, exact = 1000), d, g)
     @test sb.h == se.h && sb.details.scored == se.details.scored == 300
     @test isequal(sb.details.criterion, se.details.criterion)
   end
@@ -410,16 +410,16 @@ end
   # compact kernels give local minimizers at the scale of the gaps between clusters,
   # far above the lowest local minimum; Sheather's largest local minimizer took them
   x2 = [q(100); 10 .+ reverse(q(100))]
-  s2 = selectbandwidth(LSCV(), SmoothingData(x2), EpanechnikovKernel())
+  s2 = select_bandwidth(LSCV(), SmoothingData(x2), EpanechnikovKernel())
   @test s2.details.minimizers[end] > 10 && s2.h < 2
   x5 = vcat([10j .+ 0.1 .* q(60) for j in 1:5]...)
   @test bandwidth(LSCV(), SmoothingData(x5), EpanechnikovKernel()) < 0.2
   # lognormal data: the minimizer lies below the grid, which extends downward
-  sl = @test_logs selectbandwidth(LSCV(), SmoothingData(exp.(3 .* q(2000))), GaussianKernel())
+  sl = @test_logs select_bandwidth(LSCV(), SmoothingData(exp.(3 .* q(2000))), GaussianKernel())
   @test !sl.details.atbound && length(sl.details.grid) > 60
   # rounded data: the criterion falls without bound below the rounding, at the lower end
   # of the grid, and the largest local minimizer stays
-  sr = selectbandwidth(LSCV(), SmoothingData(round.(q(1000); digits = 1)), GaussianKernel())
+  sr = select_bandwidth(LSCV(), SmoothingData(round.(q(1000); digits = 1)), GaussianKernel())
   @test sr.h > 0.3 && length(sr.details.grid) == 60
 end
 
