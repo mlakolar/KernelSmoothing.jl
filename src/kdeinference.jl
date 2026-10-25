@@ -206,9 +206,22 @@ function _densityfit(d::SmoothingData, k, x0, h, b, c0, c2, κ, compat::Bool)
   hb = max(h, b)
   r = _densitywindow(d, k, x0, h, ρ)
   rad = maximum(abs, support(k))
-  s0, s1, s2, t0, t1, t2 = _densitysums(d, k, x0, h, ρ, r, c0, c2, κ, Val(false))
+  s0 = s1 = s2 = t0 = t1 = t2 = 0.0
+  for i in r
+    u = (x0 - xs[i]) / h
+    kv = k(u)
+    v = ρ * u
+    m = kv - ρ^3 * κ * k(v) * (c0 + c2 * v^2)
+    w = _weight(d.w, i)
+    s0 += w * kv
+    s1 += w^2 * kv
+    s2 += w^2 * kv^2
+    t0 += w * m
+    t1 += w^2 * m
+    t2 += w^2 * m^2
+  end
   if !compat && (!isfinite(t0 + t1 + t2) || _biascare(d, k, x0, h, ρ, r, c0, c2, κ))
-    s0, s1, s2, t0, t1, t2 = _densitysums(d, k, x0, h, ρ, r, c0, c2, κ, Val(true))
+    s0, s1, s2, t0, t1, t2 = _densitysumscareful(d, k, x0, h, ρ, r, c0, c2, κ)
   end
   W = d.sumw
   se(s0, s1, s2) = !compat && s2 == 0 ? NaN : _densityse(s0, s1, s2, h, W, d.neff)
@@ -218,16 +231,16 @@ function _densityfit(d::SmoothingData, k, x0, h, b, c0, c2, κ, compat::Bool)
   return (f = s0 / (h * W), se = se(s0, s1, s2), fbc = t0 / (h * W), sebc = se(t0, t1, t2), n = nwin)
 end
 
-# the sums of _densityfit over the window r, with the bias terms as products, or
-# with careful = true from _densitybias
-function _densitysums(d, k, x0, h, ρ, r, c0, c2, κ, ::Val{careful}) where {careful}
+# the sums of _densityfit over the window r with the bias terms from _densitybias;
+# kept out of line, so that the usual loop compiles as it would without it
+@noinline function _densitysumscareful(d, k, x0, h, ρ, r, c0, c2, κ)
   xs = d.x
   s0 = s1 = s2 = t0 = t1 = t2 = 0.0
   for i in r
     u = (x0 - xs[i]) / h
     kv = k(u)
     v = ρ * u
-    m = careful ? kv - _densitybias(k, v, ρ, c0, c2, κ) : kv - ρ^3 * κ * k(v) * (c0 + c2 * v^2)
+    m = kv - _densitybias(k, v, ρ, c0, c2, κ)
     w = _weight(d.w, i)
     s0 += w * kv
     s1 += w^2 * kv
