@@ -521,47 +521,70 @@ _dofscale(n, k) = n > k ? sqrt(n / (n - k)) : NaN
 
 _nnvariances(d::SmoothingData, a, e, J, tol) = _nnresiduals(d, a, e, J, tol) .^ 2
 
-# Nearest-neighbour residuals √(J/(J+1)) (yᵢ - ȳᵢ) for the observations a:e, with the
-# neighbours taken among a:e: all observations tied with xᵢ, and then whole groups
-# of tied observations, nearest first and both sides at equal distances, until
-# there are at least J; distances within the relative tolerance tol count as equal.
+# Nearest-neighbour residuals √(m/(m+1)) (yᵢ - ȳᵢ) for the observations a:e, where ȳᵢ
+# is the mean of the m neighbours of observation i; their squares estimate the
+# conditional variances (Calonico, Cattaneo and Titiunik 2014, with m = J
+# neighbours). The neighbours are taken among a:e: all observations tied with xᵢ,
+# and then whole groups of tied observations, nearest first and both sides at
+# equal distances, until there are at least J; distances within the relative
+# tolerance tol count as equal. The neighbourhood depends only on the value xᵢ, so
+# that it is found once for each distinct value. The window a:e holds whole groups
+# of tied values, as every window of positive kernel weight does.
 function _nnresiduals(d::SmoothingData, a, e, J, tol)
-  xs, ys = d.x, d.y
-  n = e - a + 1
-  σ2 = Vector{Float64}(undef, n)
-  groupsize(i) = (g = d.valueindex[i]; d.starts[g + 1] - d.starts[g])
-  target = min(J, n - 1)
-  ctarget = sqrt(target / (target + 1))
-  for pos in a:e
-    g = d.valueindex[pos]
-    l = pos - max(d.starts[g], a)          # neighbours on the left of pos
-    r = min(d.starts[g + 1] - 1, e) - pos  # and on the right
-    while l + r < target
-      left, right = pos - l - 1, pos + r + 1
-      if left < a
-        r += groupsize(right)
-      elseif right > e
-        l += groupsize(left)
-      else
-        dl, dr = xs[pos] - xs[left], xs[right] - xs[pos]
-        tied = abs(dl - dr) <= tol * max(dl, dr)
-        (dl >= dr || tied) && (r += groupsize(right))
-        (dl <= dr || tied) && (l += groupsize(left))
+  y, starts = d.y, d.starts
+  ε = Vector{Float64}(undef, e - a + 1)
+  K = min(J, e - a)   # the neighbours sought, fewer in a window of J or fewer
+  cK = _nnfactor(K)
+  ga, gb = d.valueindex[a], d.valueindex[e]
+  for g in ga:gb
+    lo, hi = _nnwindow(d.values, starts, g, ga, gb, K, tol)
+    m = hi - lo   # the neighbours of each observation at g
+    c = m == K ? cK : _nnfactor(m)
+    # the sum of the neighbours of i in increasing order, i left out: the part
+    # below i is carried from one observation at g to the next
+    below = 0.0
+    for j in lo:starts[g] - 1
+      below += y[j]
+    end
+    for i in starts[g]:starts[g + 1] - 1
+      t = below
+      for j in i + 1:hi
+        t += y[j]
       end
+      ε[i - a + 1] = c * (y[i] - t / m)
+      below += y[i]
     end
-    lo, hi = pos - l, min(e, pos + r)
-    m = hi - lo
-    s = 0.0
-    for i in lo:pos-1
-      s += ys[i]
-    end
-    for i in pos+1:hi
-      s += ys[i]
-    end
-    c = m == 0 ? NaN : m == target ? ctarget : sqrt(m / (m + 1))
-    σ2[pos - a + 1] = c * (ys[pos] - s / m)
   end
-  return σ2
+  return ε
+end
+
+# the factor √(m/(m+1)) of m neighbours, undefined without neighbours
+_nnfactor(m) = m == 0 ? NaN : sqrt(m / (m + 1))
+
+# The observations lo:hi of the neighbourhood of the distinct value g among the
+# values ga:gb, from the starts of the groups of tied observations: a merge of the
+# distances to the values gl - 1 on the left and gr + 1 on the right of the values
+# gl:gr taken so far, which takes a value that is not farther than the other one,
+# or that is the only one left, and both when their distances agree within the
+# relative tolerance tol, until there are at least K observations besides one at g
+function _nnwindow(v, starts, g, ga, gb, K, tol)
+  gl = gr = g
+  lo, hi = starts[g], starts[g + 1] - 1
+  while hi - lo < K
+    hasl, hasr = gl > ga, gr < gb
+    δl = hasl ? v[g] - v[gl - 1] : 0.0
+    δr = hasr ? v[gr + 1] - v[g] : 0.0
+    equal = hasl & hasr && abs(δl - δr) <= tol * max(δl, δr)
+    if hasl & (!hasr | (δl <= δr) | equal)
+      gl -= 1
+      lo = starts[gl]
+    end
+    if hasr & (!hasl | (δr <= δl) | equal)
+      gr += 1
+      hi = starts[gr + 1] - 1
+    end
+  end
+  return lo, hi
 end
 
 

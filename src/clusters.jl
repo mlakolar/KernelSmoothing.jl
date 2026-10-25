@@ -316,8 +316,8 @@ function _clustergram(keys, vals)
 end
 
 # The cluster-robust counterpart of _coefvar, c ∑_g (∑_{i ∈ g} wᵢ k(uᵢ) g'r(uᵢ) ε̃ᵢ)²
-# over the window of a fit, from its residuals; under compat, as nprobust's
-# lprobust.bw, the residuals of HCVariance(type) with the factor c of CR1
+# over the window of a fit, from its residuals; under compat, as nprobust's plug-in
+# bandwidths, the residuals of HCVariance(type) with the factor c of CR1
 function _coefvar(d, k, f, g, vce::ClusterVariance, compat::Bool)
   a, e, h, o, c = f.a, f.e, f.h, f.o, f.c
   m, P = e - a + 1, o + 1
