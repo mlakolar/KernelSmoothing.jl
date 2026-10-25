@@ -11,19 +11,19 @@ bands. Their results agree with those inside the estimators.
 ```julia
 d = SmoothingData(x, y)
 k = EpanechnikovKernel()
-grid = bandwidthgrid(d; mindistinct = 3)          # local linear fits are identified on it
-h, details = gridminimize(cvcriterion, grid)      # a criterion of your own, a function of h
-r = kernelweights(d, k, 0.5, h)
+grid = bandwidth_grid(d; mindistinct = 3)          # local linear fits are identified on it
+h, details = grid_minimize(cvcriterion, grid)      # a criterion of your own, a function of h
+r = kernel_weights(d, k, 0.5, h)
 Z = [ones(length(r.window)) (d.x[r.window] .- 0.5) ./ h]
 θ = (Z' * (r.weights .* Z)) \ (Z' * (r.weights .* d.y[r.window]))
 V = sandwich(Z, r.weights, d.y[r.window] .- Z * θ; vce = HCVariance(3))
 ```
 
 ```@docs
-kernelweights
-regressionpoints
-bandwidthgrid
-gridminimize
+kernel_weights
+regression_points
+bandwidth_grid
+grid_minimize
 sandwich
 supt_critical
 ```
