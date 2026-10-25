@@ -205,38 +205,24 @@ _rddslot(j, left) = j == 0 ? 1 : j == 1 ? (left ? 2 : 3) : j + 2
 # first Nl of them on the left, with values Y of the empirical distribution function
 # of all N observations. Returns (est, coef, var): the densities on the two sides,
 # the coefficients of order s divided by the bandwidth to the power s, and the
-# variances of the densities, each as (left, right, diff, sum); all NaN when the
-# weighted normal matrix is singular. With variance = false the variances are NaN,
-# for the pilot fits that do not need them.
+# variances of the densities, each as (left, right, diff, sum). All are NaN when the
+# fit is not identified: a side with fewer distinct values of positive weight than
+# the design needs, where the normal matrix is singular and its solution arbitrary,
+# or a normal matrix that is singular to working precision. With variance = false
+# the variances are NaN, for the pilot fits that do not need them.
 function _rddfit(X, Y, N, Nl, hl, hr, p, s, k, restricted, vce, ties; variance::Bool = true)
   Nh = length(X)
+  nan = (est = _RDDNANS, coef = _RDDNANS, var = _RDDNANS)
   # kernel-weighted power sums of each side: P[m + 1] = ∑ w uᵐ, m = 0, …, 2p, and
-  # Q[j + 1] = ∑ w uʲ F̂, j = 0, …, p
-  PL, QL = _rddpowersums(X, Y, 1:Nl, hl, k, p)
-  PR, QR = _rddpowersums(X, Y, Nl+1:Nh, hr, k, p)
-  # the normal equations S β = b, with S = ∑ w z zᵀ and b = ∑ w z F̂ for the
-  # regressors z of each observation
-  d = restricted ? p + 2 : 2p + 2
-  S, b = zeros(d, d), zeros(d)
-  if restricted
-    for (P, Q, left) in ((PL, QL, true), (PR, QR, false)), j in 0:p
-      a = _rddslot(j, left)
-      b[a] += Q[j + 1]
-      for l in 0:p
-        S[a, _rddslot(l, left)] += P[j + l + 1]
-      end
-    end
-  else
-    for j in 0:p
-      b[j + 1], b[p + 2 + j] = QL[j + 1], QR[j + 1]
-      for l in 0:p
-        S[j + 1, l + 1] = PL[j + l + 1]
-        S[p + 2 + j, p + 2 + l] = PR[j + l + 1]
-      end
-    end
-  end
+  # Q[j + 1] = ∑ w uʲ F̂, j = 0, …, p, and the numbers of distinct values with
+  # positive weight, in all and away from the cutoff
+  PL, QL, nL, _ = _rddpowersums(X, Y, 1:Nl, hl, k, p)
+  PR, QR, nR, nR0 = _rddpowersums(X, Y, Nl+1:Nh, hr, k, p)
+  _rddidentified(nL, nR, nR0, p, restricted) || return nan
+  S, b = _rddnormal(PL, PR, QL, QR, p, restricted)
+  _rddrcond(S) >= eps() || return nan
   F = LinearAlgebra.lu!(S; check = false)
-  LinearAlgebra.issuccess(F) || return (est = _RDDNANS, coef = _RDDNANS, var = _RDDNANS)
+  LinearAlgebra.issuccess(F) || return nan
   β = LinearAlgebra.ldiv!(F, b)
   # the positions of the two slopes, and the bandwidths that undo the scaling of
   # the coefficients of order one; the restricted model has hl = hr and uses hl
@@ -258,6 +244,58 @@ function _rddfit(X, Y, N, Nl, hl, hr, p, s, k, restricted, vce, ties; variance::
   return (est = est, coef = coef, var = _rddnonneg(var))
 end
 
+# The normal equations S β = b of the fit, with S = ∑ w z zᵀ and b = ∑ w z F̂ for
+# the regressors z of each observation, from the power sums of the two sides
+function _rddnormal(PL, PR, QL, QR, p, restricted)
+  d = restricted ? p + 2 : 2p + 2
+  S, b = zeros(d, d), zeros(d)
+  if restricted
+    for (P, Q, left) in ((PL, QL, true), (PR, QR, false)), j in 0:p
+      a = _rddslot(j, left)
+      b[a] += Q[j + 1]
+      for l in 0:p
+        S[a, _rddslot(l, left)] += P[j + l + 1]
+      end
+    end
+  else
+    for j in 0:p
+      b[j + 1], b[p + 2 + j] = QL[j + 1], QR[j + 1]
+      for l in 0:p
+        S[j + 1, l + 1] = PL[j + l + 1]
+        S[p + 2 + j, p + 2 + l] = PR[j + l + 1]
+      end
+    end
+  end
+  return S, b
+end
+
+# Whether the design can identify the coefficients, from the numbers of distinct
+# values with positive weight on the left (nL) and on the right (nR, and nR0 of them
+# away from the cutoff), since the rank of S is at most the number of distinct
+# regressor vectors. Unrestricted, each side's polynomial of order p needs p + 1
+# distinct values. Restricted, the p + 2 coefficients need p + 2 distinct values
+# in all, and each slope a value on its side away from the cutoff.
+_rddidentified(nL, nR, nR0, p, restricted) =
+  restricted ? nL >= 1 && nR0 >= 1 && nL + nR >= p + 2 : nL >= p + 1 && nR >= p + 1
+
+# The reciprocal condition number, in the 1-norm, of the normal matrix scaled to a
+# unit diagonal. A fit needs it at least eps, the tolerance of R's solve. Unscaled,
+# the test would depend on the units of the coefficients: the columns of high powers
+# are small where the data fill only part of the window, and the unscaled number
+# falls below 1e-17 for ordinary pilot fits of order p + 2 = 4, whose solutions are
+# accurate. Scaled, it stayed above 1e-13 for ordinary fits up to order 8, and
+# above 7e-16 for the pilot fits of order 9 (p = 7).
+function _rddrcond(S)
+  d = size(S, 1)
+  D = [S[i, i] > 0 ? 1 / sqrt(S[i, i]) : 0.0 for i in 1:d]
+  all(>(0), D) || return 0.0
+  A = D .* S .* D'
+  anorm = LinearAlgebra.opnorm(A, 1)
+  F = LinearAlgebra.lu!(A; check = false)
+  LinearAlgebra.issuccess(F) || return 0.0
+  return LinearAlgebra.LAPACK.gecon!('1', F.factors, anorm)
+end
+
 # The power sums ∑ w uᵐ, m = 0, …, 2p, and ∑ w uʲ F̂, j = 0, …, p, over the
 # observations r of one side, with u = x/h and w = k(u)/h. The sums are compensated
 # (Knuth's TwoSum), so that they are nearly exact: the normal matrix of a fit of
@@ -266,9 +304,16 @@ end
 function _rddpowersums(X, Y, r, h, k, p)
   P, Pc = zeros(2p + 1), zeros(2p + 1)
   Q, Qc = zeros(p + 1), zeros(p + 1)
+  n = n0 = 0                    # distinct values with positive weight, and those not at 0
+  last = 0.0
   @inbounds for i in r
     u = X[i] / h
     t = k(u) / h
+    if t > 0 && (n == 0 || X[i] != last)
+      n += 1
+      n0 += X[i] != 0
+      last = X[i]
+    end
     y = Y[i]
     for m in 1:2p+1
       P[m], e = _twosum(P[m], t)
@@ -280,7 +325,7 @@ function _rddpowersums(X, Y, r, h, k, p)
       t *= u
     end
   end
-  return P .+ Pc, Q .+ Qc
+  return P .+ Pc, Q .+ Qc, n, n0
 end
 
 @inline function _twosum(a, b)
@@ -431,7 +476,9 @@ const _RDD_CC = (4.8000000000000246914, 548.57142857155463389, 100800.0000002042
 
 # The distance from the cutoff to the m-th nearest observation on the left and on
 # the right of the sorted X, the first Nl of them negative, or to the m-th nearest
-# distinct value; on a side with fewer, to the farthest one
+# distinct value; on a side with fewer, to the farthest one. Values are distinct by
+# ==, so that -0.0 and 0.0 are one value, as for R's unique() and the ties of the
+# empirical distribution function
 function _rddreach(X, Nl, m, distinct::Bool)
   N = length(X)
   if !distinct
@@ -529,27 +576,36 @@ end
 # the total probability of the outcomes at most 1 + 1e-7 times as likely as x. The
 # distribution is symmetric and its probabilities increase up to the mode, so that
 # these outcomes are the tail of x, i ≤ t for t = min(x, n - x) (or its mirror), and
-# on the other side the mirror of i ≤ a, with a the last outcome below n/2 within
-# the tolerance. In floating point a = t unless the next outcomes are within 1e-7 of
-# x, which needs n beyond 10⁷, or their probabilities underflow, as for x = 0 and
-# n ≥ 1075; the search for a is then by bisection. The tail of x stays i ≤ t also
-# when underflow puts the outcomes after t within the tolerance, which changes the
-# p-value only by the smallest subnormal number.
+# on the other side the mirror of i ≤ a, with a ≥ t the last outcome below n/2
+# within the tolerance. The outcomes after t come within 1e-7 of x only for n beyond
+# 10⁷; the probabilities of Distributions.jl are accurate there only to about n
+# times the machine epsilon (3e-7 for n = 10⁸), so that a is found from the exact
+# ratios P(j + 1)/P(j) = (n - j)/(j + 1) instead. When the probability of x
+# underflows, as for x = 0 and n ≥ 1075, the outcomes after t whose probabilities
+# underflow as well count as at most as likely, and a is the last of them, found by
+# bisection; the tail of x stays i ≤ t, which changes the p-value only by the
+# smallest subnormal number.
 function _binomtest(x, n)
   (n == 0 || 2x == n) && return 1.0
   D = Distributions.Binomial(n, 0.5)
-  c = pdf(D, x) * (1 + 1e-7)
   t = min(x, n - x)
   m = (n - 1) ÷ 2               # the last outcome below n/2
   a = t
-  if t < m && pdf(D, t + 1) <= c
-    a, b = t + 1, m + 1         # pdf(a) ≤ c, and pdf(b) > c or b beyond m
-    while b - a > 1
-      j = (a + b) ÷ 2
-      pdf(D, j) <= c ? (a = j) : (b = j)
+  if pdf(D, x) > 0
+    r = 1.0                     # P(a)/P(t)
+    while a < m
+      q = r * (n - a) / (a + 1)
+      q <= 1 + 1e-7 || break
+      a, r = a + 1, q
     end
     # with the mode of an even n within the tolerance, so are all outcomes
-    a == m && iseven(n) && pdf(D, n ÷ 2) <= c && return 1.0
+    a == m && iseven(n) && r * (n - a) / (a + 1) <= 1 + 1e-7 && return 1.0
+  else
+    b = m + 1                   # pdf(a) = 0, and pdf(b) > 0 or b beyond m
+    while b - a > 1
+      j = (a + b) ÷ 2
+      pdf(D, j) == 0 ? (a = j) : (b = j)
+    end
   end
   # for an odd n with a = (n - 1)/2 the two tails cover all outcomes
   2a + 1 >= n && return 1.0
