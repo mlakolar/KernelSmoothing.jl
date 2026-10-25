@@ -21,6 +21,8 @@ tests = [
   "rddensity",
   "rdhonest",
   "lpdensity",
+  "mvkde",
+  "boundedkde",
   "conditional",
   "recipes",
   "building",

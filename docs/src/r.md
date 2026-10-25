@@ -33,6 +33,11 @@ in the next section.
 | RDHonest, local linear regression | `confint(m; method = Honest(M))` of `LocalPolynomialRegression` | 4 | 1e-10 |
 | R 4.5, `stats::bw.SJ` | `SheatherJones(compat = true)` | 13 samples | 1e-10 to 1e-12 |
 | R 4.5, `stats::glm` with kernel prior weights | `fit(LocalLikelihood, x, y; family, bandwidth)` | 6 | 1e-10 |
+| ks 1.15.3, `kde` with `binned = FALSE` | `pdf(fit(MultivariateKDE, x; bandwidth, weights), points)` | d = 2, 3, with and without weights | 1e-12 |
+| ks, `Hns`, `Hns.diag` (d = 2), `kfe`, `scv.mat`, `lscv.mat` | `NormalScaleMatrix`, the estimates of the functionals and the criteria | d = 2, 3 | 1e-12; `Hns.diag` to 1e-7 |
+| ks, `Hpi` and `Hpi.diag` with `pilot = "samse"`, `binned = FALSE` | `PlugInMatrix(; stages, compat = true)` | d = 2, 3, one and two stages | 5e-4, the accuracy of R's numerical minimization |
+| ks, `Hlscv` and `Hlscv.diag` with `binned = FALSE` | `LSCVMatrix()` | d = 2 (full), 2 and 3 (diagonal) | 2e-3, with a criterion at least as low as R's |
+| evmix 2.12, `dbckden` and `pbckden` with `bcmethod = "reflect"`, `"beta1"`, `"beta2"`, `"gamma1"`, `"gamma2"`, `"logtrans"` | `fit(BoundedKDE, x; support, method, kernel, bandwidth)` | 7 | densities to 1e-12 before normalization; after it, and distribution functions, to 1e-9 to 1e-6, the accuracy of R's numerical integration |
 | np 0.70.5, `npcdens` at given bandwidths | `pdf(fit(ConditionalDensity, x, y; bandwidth), y, x)` | 2 | 1e-12; np orders the bandwidths (y, x) |
 | np, `npcdensbw(bwmethod = "cv.ml")` | `ConditionalCV()` | 1 | 1e-3, the accuracy of R's numerical minimization, with a criterion at least as low |
 | quantreg 6.1, `lprq` and `rq` with weights | `fit(LocalQuantileRegression, x, y; tau, kernel = GaussianKernel())` and the local fits | 3 and 3 | 1e-12 |
@@ -136,6 +141,27 @@ reproduces the R package where the keyword exists.
 15. The honest intervals agree with RDHonest by default. Its rule of thumb for
     ``M`` needs 5 distinct values of ``x`` on each side of the cutoff, and like
     RDHonest we throw an error below that.
+16. ks's two-stage plug-in matrix (`Hpi`, and `Hpi.diag`, with the pilot
+    `"samse"`) reads the estimated functionals of order 6 in the wrong order when it
+    chooses the pilot of order 4: it passes the whole tensor of derivatives where the
+    pilot expects the distinct functionals, so that, for example, ``\psi_{51}`` takes
+    the place of ``\psi_{42}`` in two dimensions. For the sample of the tests, its
+    pilot was 0.723 instead of 0.653, and the matrix differed by 5%.
+    [`PlugInMatrix`](@ref) reads them in the right order, and `compat = true`
+    reproduces ks.
+17. For ``d \geq 3``, ks's plug-in and smoothed cross-validation matrices default to
+    the pilot `"dscalar"` of Chacón and Duong (2010); [`PlugInMatrix`](@ref) uses the
+    SAMSE pilot of Duong and Hazelton (2003) in every dimension, which is ks's default
+    for ``d = 2``. Furthermore, ks bins the data by default above 500 observations in
+    two dimensions and above 1000 in three; our selectors sum over the pairs exactly.
+18. [`SCVMatrix`](@ref) agrees with ks's `Hscv` in its criterion, to rounding at a
+    given pilot, but its pilot follows Theorem 4 of Duong (2004), from which ks's
+    differs, by about 5% for the samples of the tests; the selected matrices
+    differed by 2% to 3%. Least-squares cross-validation agrees with ks's `Hlscv` in two
+dimensions; in three, for the sample of the tests, ks stopped at a matrix whose
+criterion was higher than at ours. For ``d \geq 3`` ks's `Hns.diag` is not the diagonal
+    matrix that minimizes the normal-reference error; `NormalScaleMatrix(diagonal =
+    true)` is, and agrees with ks for ``d = 2``.
 
 19. np's least-squares cross-validation for conditional densities (`bwmethod =
     "cv.ls"`) reports a criterion that differs by about 0.6% from that of Hall, Racine

@@ -10,6 +10,11 @@ It provides:
   Distributions.jl, robust bias-corrected intervals for densities at interior
   points, and the local polynomial density estimator of Cattaneo, Jansson and Ma
   for densities with a boundary;
+- [multivariate kernel density estimates](@ref multivariate-page) with a bandwidth
+  matrix, chosen by normal scale, plug-in, smoothed or least-squares
+  cross-validation rules;
+- [density estimates on a bounded support](@ref bounded-page) that are
+  distributions there: reflection, beta and gamma kernels, and transformations;
 - [local polynomial regression](@ref regression-page) of a regression function or
   its derivatives, with conventional, robust bias-corrected and honest intervals,
   covariances between points and uniform bands;
@@ -159,6 +164,18 @@ you use the package, please cite the papers of the methods you use.
   intervals. Armstrong and Kolesár (2018), *Econometrica* 86(2); (2020),
   *Quantitative Economics* 11(1); Kolesár and Rothe (2018), *American Economic
   Review* 108(8).
+- [ks](https://cran.r-project.org/package=ks) (Duong): multivariate kernel density
+  estimation. Duong (2007), *Journal of Statistical Software* 21(7).
+- [evmix](https://cran.r-project.org/package=evmix) (Hu and Scarrott): boundary
+  corrected kernel density estimation. Hu and Scarrott (2018), *Journal of
+  Statistical Software* 84(5).
+- [np](https://cran.r-project.org/package=np) (Hayfield and Racine): conditional
+  density estimation. Hayfield and Racine (2008), *Journal of Statistical Software*
+  27(5); Hall, Racine and Li (2004), *Journal of the American Statistical
+  Association* 99(468).
+- [quantreg](https://cran.r-project.org/package=quantreg) (Koenker): quantile
+  regression. Koenker (2005), *Quantile Regression*, Cambridge University Press; Yu
+  and Jones (1998), *Journal of the American Statistical Association* 93(441).
 - R's `stats` package (R Core Team): `bw.SJ`, the bandwidth of Sheather and Jones
   (1991), *Journal of the Royal Statistical Society, Series B* 53(3), and `glm`,
   against which the local likelihood fits are checked.
