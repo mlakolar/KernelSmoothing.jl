@@ -52,6 +52,12 @@ const RDBWSELECT = [
    bws = [0.17027080795010804, 0.17027080795010804, 0.37004817226897768, 0.37004817226897768]),
   (bwselect = "msetwo", y = "y", x = "x", p = 1, deriv = 0, kernel = "tri", vce = "nn", fuzzy = false, covs = false, weighted = false, clustered = false, masspoints = "adjust", bwcheck = 50,
    bws = [0.34215831282606857, 0.34314736682918184, 0.5589860039143878, 0.50249394015110216]),
+  (bwselect = "cerrd", y = "y", x = "x", p = 2, deriv = 1, kernel = "tri", vce = "nn", fuzzy = false, covs = false, weighted = false, clustered = false, masspoints = "adjust", bwcheck = nothing,
+   bws = [0.26009860444798089, 0.26009860444798089, 0.54480882811323394, 0.54480882811323394]),
+  (bwselect = "mserd", y = "yf", x = "x", p = 2, deriv = 1, kernel = "tri", vce = "nn", fuzzy = true, covs = false, weighted = false, clustered = false, masspoints = "adjust", bwcheck = nothing,
+   bws = [0.39447295655823966, 0.39447295655823966, 0.57727223025150187, 0.57727223025150187]),
+  (bwselect = "msetwo", y = "yf", x = "x", p = 2, deriv = 1, kernel = "tri", vce = "hc1", fuzzy = true, covs = false, weighted = false, clustered = false, masspoints = "adjust", bwcheck = nothing,
+   bws = [0.36472351058349656, 0.34436080164457411, 0.53954295928994112, 0.51863736415230932]),
 ]
 const RDDEFAULT = [
   (y = "y", vce = "nn", fuzzy = false, covs = false, clustered = false, h = [0.38627185979962997, 0.38627185979962997], b = [0.59462351026192517, 0.59462351026192517], coef = [0.43210419549188855, 0.44238868073544507, 0.44238868073544507], se = [0.054975977065145433, 0.054975977065145433, 0.065116701680854816]),

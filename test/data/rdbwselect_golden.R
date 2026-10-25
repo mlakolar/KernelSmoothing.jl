@@ -32,7 +32,11 @@ cfgs <- c(lapply(sel, function(s) list(bw = s, y = "y", x = "x", p = 1, d = 0, k
   list(bw = "msetwo", y = "y", x = "x",  p = 1, d = 0, k = "tri", v = "cr3", cl = TRUE),
   list(bw = "mserd", y = "y",  x = "xm", p = 1, d = 0, k = "tri", v = "nn"),
   list(bw = "mserd", y = "y",  x = "xm", p = 1, d = 0, k = "tri", v = "nn", mp = "off"),
-  list(bw = "msetwo", y = "y", x = "x",  p = 1, d = 0, k = "tri", v = "nn", bwcheck = 50)))
+  list(bw = "msetwo", y = "y", x = "x",  p = 1, d = 0, k = "tri", v = "nn", bwcheck = 50),
+  # kink designs
+  list(bw = "cerrd", y = "y",  x = "x",  p = 2, d = 1, k = "tri", v = "nn"),
+  list(bw = "mserd", y = "yf", x = "x",  p = 2, d = 1, k = "tri", v = "nn", fuzzy = TRUE),
+  list(bw = "msetwo", y = "yf", x = "x", p = 2, d = 1, k = "tri", v = "hc1", fuzzy = TRUE)))
 cat("const RDBWSELECT = [\n")
 for (c in cfgs) {
   args <- list(y = get(c$y), x = get(c$x), p = c$p, deriv = c$d, kernel = c$k, vce = c$v, bwselect = c$bw)
