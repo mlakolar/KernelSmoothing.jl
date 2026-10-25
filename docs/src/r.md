@@ -28,6 +28,7 @@ in the next section.
 | lpdensity 3.0.1, `lpdensity` and `lpbwdensity` | `fit(LocalPolynomialDensity, x; compat = true)` | 15 | 1e-12 at given bandwidths, 1e-5 with selected ones, since R integrates the kernel constants numerically |
 | rdrobust 4.1.1, `rdrobust` | `fit(RegressionDiscontinuity, x, y; compat = true)` | 18 | 1e-10 |
 | rdrobust, `rdbwselect` | `RDOptimal(bwselect)` | 30 | 1e-8 |
+| rdpower 3.0, `rdpower` (`power.rbc`) and `rdsampsi` (`sampsi.tot`) | `rd_power(m; tau, alpha, n)`, `rd_samplesize(m; tau, power, alpha)` | 3 and 2 | power to 1e-8, sample sizes exactly; rdpower's power of the conventional test, which shifts the effect by a multiple of the estimated bias that its documentation does not give, is not reproduced |
 | rddensity 3.0, `rddensity` and `rdbwdensity` | `fit(DensityDiscontinuity, x)` | 19 | 1e-8, binomial tests to 1e-10 |
 | RDHonest 1.0.2, `RDHonest` | `RDHonestOptimal(M)` and `confint(m; method = Honest(M))` | 17, and 24 for the rule of thumb for M | 1e-10 at given bandwidths, 1e-6 for optimized ones |
 | RDHonest, local linear regression | `confint(m; method = Honest(M))` of `LocalPolynomialRegression` | 4 | 1e-10 |

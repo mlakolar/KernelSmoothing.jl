@@ -90,6 +90,28 @@ observations and keeps at least 10 distinct values in every window. A bandwidth 
 also be given, as one number or a pair for the left and the right side, with
 `pilot` (by default ``b = h``) or `rho` (``b = h / \rho``).
 
+## Power and sample size
+
+[`rd_power`](@ref) gives the power of the robust bias-corrected test of no effect
+against an effect ``\tau`` (Cattaneo, Titiunik and Vazquez-Bare 2019),
+
+```math
+1 - \Phi\Big(z_{1-\alpha/2} - \frac{\tau}{\widehat{\mathrm{se}}}\Big)
++ \Phi\Big(-z_{1-\alpha/2} - \frac{\tau}{\widehat{\mathrm{se}}}\Big),
+```
+
+with the robust standard error of a fit, for the sample at hand or for a sample of
+``n`` observations spread in the same way, whose standard error is
+``\widehat{\mathrm{se}} \sqrt{N/n}`` at the same bandwidths. [`rd_samplesize`](@ref)
+is the smallest ``n`` that reaches a given power. Both agree with rdpower's
+`rdpower` and `rdsampsi`, which plan a study from a pilot sample or a previous one.
+
+```julia
+m = fit(RegressionDiscontinuity, x, y)
+rd_power(m; tau = 0.3)                  # the power against an effect of 0.3
+rd_samplesize(m; tau = 0.3, power = 0.8) # the observations needed for 80%
+```
+
 ## Honest intervals
 
 Robust bias correction estimates the bias and removes it, while honest intervals
