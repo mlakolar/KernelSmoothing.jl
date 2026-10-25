@@ -51,6 +51,12 @@ recipe(m; kwargs...) = RecipesBase.apply_recipe(Dict{Symbol,Any}(kwargs...), m)
   @test length(g1) == length(g2) == 31 && size(z) == (31, 31)
   @test z[3, 5] ≈ pdf(k, [g1[5], g2[3]])
   @test_throws ArgumentError recipe(fit(MultivariateKDE, [xy; X']; bandwidth = 0.1))
+  b = fit(BoundedKDE, X; support = (0, 1))
+  (curve,) = recipe(b; npoints = 51)
+  @test curve.args[1][1] == 0 && curve.args[1][end] == 1
+  @test curve.args[2] == pdf.(b, curve.args[1])
+  (curve,) = recipe(fit(BoundedKDE, X; support = (0, Inf)))
+  @test curve.args[1][1] == 0 && isfinite(curve.args[1][end])
 end
 
 end

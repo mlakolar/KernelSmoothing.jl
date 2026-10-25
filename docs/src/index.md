@@ -13,6 +13,8 @@ It provides:
 - [multivariate kernel density estimates](@ref multivariate-page) with a bandwidth
   matrix, chosen by normal scale, plug-in, smoothed or least-squares
   cross-validation rules;
+- [density estimates on a bounded support](@ref bounded-page) that are
+  distributions there: reflection, beta and gamma kernels, and transformations;
 - [local polynomial regression](@ref regression-page) of a regression function or
   its derivatives, with conventional, robust bias-corrected and honest intervals,
   covariances between points and uniform bands;

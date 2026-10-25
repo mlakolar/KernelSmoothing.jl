@@ -20,6 +20,9 @@ development.
 - `fit(MultivariateKDE, x)`: a kernel density estimate in several dimensions with
   a bandwidth matrix, a distribution of Distributions.jl, with the normal scale,
   plug-in, smoothed and least-squares cross-validation matrices of R's ks.
+- `fit(BoundedKDE, x; support, method)`: a density estimate on `[a, b]`, `[a, ∞)` or `(-∞, b]`
+  that is a distribution there, by reflection, the beta and gamma kernels of Chen
+  (1999, 2000), or a transformation, as R's evmix.
 - `fit(LocalPolynomialRegression, x, y)`: local polynomial estimates of a
   regression function or its derivatives, as nprobust's `lprobust`, with
   conventional, robust bias-corrected and honest intervals (Armstrong and Kolesár),

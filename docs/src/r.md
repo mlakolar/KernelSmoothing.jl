@@ -37,6 +37,7 @@ in the next section.
 | ks, `Hns`, `Hns.diag` (d = 2), `kfe`, `scv.mat`, `lscv.mat` | `NormalScaleMatrix`, the estimates of the functionals and the criteria | d = 2, 3 | 1e-12; `Hns.diag` to 1e-7 |
 | ks, `Hpi` and `Hpi.diag` with `pilot = "samse"`, `binned = FALSE` | `PlugInMatrix(; stages, compat = true)` | d = 2, 3, one and two stages | 5e-4, the accuracy of R's numerical minimization |
 | ks, `Hlscv` and `Hlscv.diag` with `binned = FALSE` | `LSCVMatrix()` | d = 2 (full), 2 and 3 (diagonal) | 2e-3, with a criterion at least as low as R's |
+| evmix 2.12, `dbckden` and `pbckden` with `bcmethod = "reflect"`, `"beta1"`, `"beta2"`, `"gamma1"`, `"gamma2"`, `"logtrans"` | `fit(BoundedKDE, x; support, method, kernel, bandwidth)` | 7 | densities to 1e-12 before normalization; after it, and distribution functions, to 1e-9 to 1e-6, the accuracy of R's numerical integration |
 
 Where agreement is not to rounding, the reason is the R package's own numerical
 accuracy, such as a numerical minimization or integration with a coarse tolerance,
