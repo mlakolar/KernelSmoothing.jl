@@ -33,6 +33,9 @@ in the next section.
 | RDHonest, local linear regression | `confint(m; method = Honest(M))` of `LocalPolynomialRegression` | 4 | 1e-10 |
 | R 4.5, `stats::bw.SJ` | `SheatherJones(compat = true)` | 13 samples | 1e-10 to 1e-12 |
 | R 4.5, `stats::glm` with kernel prior weights | `fit(LocalLikelihood, x, y; family, bandwidth)` | 6 | 1e-10 |
+| np 0.70.5, `npcdens` at given bandwidths | `pdf(fit(ConditionalDensity, x, y; bandwidth), y, x)` | 2 | 1e-12; np orders the bandwidths (y, x) |
+| np, `npcdensbw(bwmethod = "cv.ml")` | `ConditionalCV()` | 1 | 1e-3, the accuracy of R's numerical minimization, with a criterion at least as low |
+| quantreg 6.1, `lprq` and `rq` with weights | `fit(LocalQuantileRegression, x, y; tau, kernel = GaussianKernel())` and the local fits | 3 and 3 | 1e-12 |
 
 Where agreement is not to rounding, the reason is the R package's own numerical
 accuracy, such as a numerical minimization or integration with a coarse tolerance,
@@ -133,6 +136,12 @@ reproduces the R package where the keyword exists.
 15. The honest intervals agree with RDHonest by default. Its rule of thumb for
     ``M`` needs 5 distinct values of ``x`` on each side of the cutoff, and like
     RDHonest we throw an error below that.
+
+19. np's least-squares cross-validation for conditional densities (`bwmethod =
+    "cv.ls"`) reports a criterion that differs by about 0.6% from that of Hall, Racine
+    and Li (2004) at its bandwidths, and its selection is not a minimum of that
+    criterion. `ConditionalCV(criterion = :leastsquares)` minimizes the criterion of
+    the paper.
 
 ## Translating the arguments
 

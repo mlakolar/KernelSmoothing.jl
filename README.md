@@ -32,6 +32,10 @@ development.
   Varying-coefficient models are in HighDimensionalModels.jl, on the kernels of this
   package.
 - `fit(LocalLikelihood, x, y; family)`: local logistic and Poisson regression.
+- `fit(ConditionalDensity, x, y)`: kernel estimates of the conditional density of
+  `y` given `x` (local constant and local linear), with likelihood and least-squares
+  cross-validation, as R's np; `fit(LocalQuantileRegression, x, y; tau)`: local
+  polynomial quantile regression with exact local fits, as quantreg's `lprq`.
 - `local_polynomial` and `smoother_matrix`: local polynomial estimates and their
   weights at given points and bandwidths, without inference, for smoothing many
   curves and for building other estimators, also for two covariates (covariance

@@ -21,6 +21,7 @@ tests = [
   "rddensity",
   "rdhonest",
   "lpdensity",
+  "conditional",
   "recipes",
   "building",
   "aqua"

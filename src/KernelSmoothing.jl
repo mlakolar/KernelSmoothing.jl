@@ -48,7 +48,8 @@ export
   RegressionDiscontinuity, RDOptimal, RDHonestOptimal, DensityDiscontinuity, RDDensityOptimal,
   coef, confint, coeftable, predict, fitted, residuals, vcov, conf_band,
   local_polynomial, smoother_matrix, PartiallyLinear, LocalLikelihood,
-  kernel_weights, regression_points, bandwidth_grid, grid_minimize, sandwich, supt_critical
+  kernel_weights, regression_points, bandwidth_grid, grid_minimize, sandwich, supt_critical,
+  ConditionalDensity, ConditionalCV, conditional, LocalQuantileRegression, YuJones
 
 include("polynomials.jl")
 include("kernels.jl")
@@ -71,6 +72,8 @@ include("rdhonest.jl")
 include("semiparametric.jl")
 include("locallik.jl")
 include("rddensity.jl")
+include("conditional.jl")
+include("quantreg.jl")
 include("building.jl")
 include("precompile.jl")
 
