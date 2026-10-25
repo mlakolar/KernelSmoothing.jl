@@ -52,7 +52,6 @@ jobs:
         run: julia --color=yes scripts/test_master.jl
         env:
           JULIA_TEST_COVERAGE: "true"
-        env:
           # the current release runs the tests with four threads, so that the
           # independence of the results from the number of threads is tested
           JULIA_NUM_THREADS: ${{ matrix.version == '1' && '4' || '1' }}
