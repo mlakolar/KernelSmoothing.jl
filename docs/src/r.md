@@ -36,6 +36,8 @@ in the next section.
 | RDHonest, local linear regression | `confint(m; method = Honest(M))` of `LocalPolynomialRegression` | 4 | 1e-10 |
 | R 4.5, `stats::bw.SJ` | `SheatherJones(compat = true)` | 13 samples | 1e-10 to 1e-12 |
 | R 4.5, `stats::glm` with kernel prior weights | `fit(LocalLikelihood, x, y; family, bandwidth)` | 6 | 1e-10 |
+| R 4.5, `glm` with `Gamma`, `inverse.gaussian`, MASS 7.3's `negative.binomial(2)` and `gaussian` | `fit(LocalLikelihood, x, y; family, link, theta, bandwidth)` | 8 | 1e-7, the accuracy of `glm`'s Fisher scoring for links that are not canonical; 1e-10 for the Gaussian family |
+| locfit 1.5, `locfit.raw(lp(x, h, deg), kern = "epan")`, density | `fit(LocalLikelihoodDensity, x; degree, bandwidth)` | 4, degrees 0 to 3 | 1e-8 for degrees up to 2, which locfit integrates exactly, and 1e-6 for degree 3 |
 | coneproj 1.23, `coneA` with and without weights; R 4.5, `isoreg` | `shape_projection(values, points; shape, weights)` | 8 shapes | 1e-9 |
 | cgam (`incr`) and scam (`bs = "mpi"`), constrained spline fits | `constrain(fit(LocalPolynomialRegression, x, y), :increasing)` | 1 | within 0.05 of cgam's step function and 0.03 of scam's fit, for a sample with noise of 0.2; a different smoother |
 | ks 1.15.3, `kde` with `binned = FALSE` | `pdf(fit(MultivariateKDE, x; bandwidth, weights), points)` | d = 2, 3, with and without weights | 1e-12 |

@@ -151,20 +151,61 @@ Pages = ["semiparametric.jl"]
 
 ## Local likelihood
 
-For binary or count responses, [`LocalLikelihood`](@ref) fits a local polynomial in
-the linear predictor of a logistic (`family = :logit`) or Poisson (`:poisson`)
-model by maximizing the kernel-weighted log likelihood at each point (Tibshirani and
-Hastie 1987; Fan, Heckman and Wand 1995), which keeps the estimates of
-probabilities in ``(0, 1)`` and of means positive. The standard errors are the
-sandwich ones of the local fit, intervals for the mean transform those for the
-linear predictor, and [`CrossValidation`](@ref) maximizes the leave-one-out log
-likelihood, from one Newton step without each observation. At given bandwidths the
-estimates and standard errors are those of R's `glm` with the kernel weights as
-prior weights.
+For responses from an exponential family, [`LocalLikelihood`](@ref) fits a local
+polynomial in the linear predictor by maximizing the kernel-weighted log likelihood
+at each point (Tibshirani and Hastie 1987; Fan, Heckman and Wand 1995),
+
+```math
+\hat\beta = \arg\max_\beta \sum_{i=1}^n w_i\, k\Big(\frac{x_i - x_0}{h}\Big)\,
+\ell\big(y_i;\, \beta_0 + \beta_1 (x_i - x_0) + \dots + \beta_p (x_i - x_0)^p\big),
+```
+
+which keeps the estimates of probabilities in ``(0, 1)`` and of means positive. The
+families are the logistic (`family = :logit`), Poisson (`:poisson`), negative
+binomial with variance ``\mu + \mu^2/\theta`` (`:negative_binomial`, with a given
+`theta`), gamma (`:gamma`) and inverse Gaussian (`:inverse_gaussian`), these two with
+the log link by default and their canonical links with `link = :canonical`, and the
+Gaussian, for which the fit is local polynomial regression. The fits are by Fisher
+scoring from the local constant fit, with step halving.
+
+The standard errors are the sandwich ones of the local fit, which need neither the
+variance function nor the dispersion, and intervals for the mean transform those for
+the linear predictor. As for [`LocalPolynomialRegression`](@ref), the default
+intervals are robust bias-corrected (Calonico, Cattaneo and Farrell 2018): with
+``A = \sum_i k_i \omega_i r_p(u_i) r_p(u_i)^\top`` the information of the fit,
+``\omega_i = \mu'(\eta_i)^2 / V(\mu_i)`` and ``g = A^{-1} e_1``, the leading bias of
+``\hat\beta_0`` is ``(h/b)^{p+1} s\, \hat\gamma_{p+1}``, with ``s = g^\top \sum_i k_i
+\omega_i u_i^{p+1} r_p(u_i)`` and ``\hat\gamma`` the fit of order ``p + 1`` with the
+pilot bandwidth ``b``. Linearizing both fits gives the robust standard error, and for
+the Gaussian family the results are those of `LocalPolynomialRegression` with
+`vce = HCVariance(0)` and `minobs = 0`.
+
+[`CrossValidation`](@ref) maximizes the leave-one-out log likelihood, from one
+Fisher scoring step without each observation, and [`RuleOfThumb`](@ref) is the
+plug-in bandwidth of Fan, Heckman and Wand (1995): the bandwidth of local polynomial
+regression with the variance ``\sigma^2(x)`` replaced by that of the linearized
+responses, ``\sigma^2(x)\, g'(\mu(x))^2``, and the derivative of the regression
+function by that of the linear predictor, both from a global polynomial fit of order
+``p + 3``. It needs no floor on the windows, as cross-validation does. At given
+bandwidths the estimates and standard errors are those of R's `glm` with the kernel
+weights as prior weights.
+
+[`LocalLikelihoodDensity`](@ref) is the local likelihood density estimate of Loader
+(1996) and Hjort and Jones (1996): a polynomial ``P`` in ``x - x_0`` maximizes
+``\sum_i w_i k((x_i - x_0)/h) P(x_i - x_0) - W \int k((u - x_0)/h) \exp(P(u - x_0))\, du``,
+and ``\exp(P(0))`` estimates the density. Of order 0 it is the kernel density
+estimate, and higher orders remove its bias near the ends of the data and at peaks,
+while the estimate stays positive. The estimates agree with R's locfit, and by
+default the bandwidth is locfit's nearest-neighbour bandwidth holding 70% of the
+sample.
 
 ```julia
 m = fit(LocalLikelihood, x, y; family = :logit)    # y in {0, 1}
 predict(m), confint(m)                             # probabilities at the points, with intervals
+fit(LocalLikelihood, x, y; family = :gamma, bandwidth = RuleOfThumb())   # positive responses
+fit(LocalLikelihood, x, y; family = :negative_binomial, theta = 2)       # overdispersed counts
+d = fit(LocalLikelihoodDensity, x; degree = 2)     # Loader's density estimate
+coef(d), confint(d)
 ```
 
 ```@autodocs

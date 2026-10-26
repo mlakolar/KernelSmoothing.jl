@@ -52,7 +52,7 @@ export
   InferenceMethod, Conventional, RobustBiasCorrected, Honest, FLCIOptimal, worst_case_bias,
   RegressionDiscontinuity, RDOptimal, RDHonestOptimal, DensityDiscontinuity, RDDensityOptimal,
   coef, confint, coeftable, predict, fitted, residuals, vcov, conf_band,
-  local_polynomial, smoother_matrix, PartiallyLinear, LocalLikelihood,
+  local_polynomial, smoother_matrix, PartiallyLinear, LocalLikelihood, LocalLikelihoodDensity,
   kernel_weights, regression_points, bandwidth_grid, grid_minimize, sandwich, supt_critical,
   MultivariateKDE, marginal, cov, MatrixSelector, NormalScaleMatrix, PlugInMatrix, SCVMatrix, LSCVMatrix,
   BoundedKDE, BoundaryMethod, Reflection, BetaKernels, GammaKernels, Transformed,

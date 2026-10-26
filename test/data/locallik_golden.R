@@ -37,3 +37,107 @@ for (cfg in list(list(fam = "logit", y = "yb", p = 1, h = 0.2), list(fam = "logi
               cfg$fam, cfg$y, cfg$p, cfg$h, tolower(isTRUE(cfg$wt)), f(pts), f(est), f(se)))
 }
 cat("]\n")
+# The families beyond the logit and Poisson ones (the library with MASS and locfit is
+# the first argument, or on the library path): gamma and inverse Gaussian responses
+# with their log and canonical links, negative binomial counts with θ = 2, and the
+# Gaussian family, with the sandwich variance from μ'(η) and the variance function.
+RLIB <- commandArgs(trailingOnly = TRUE)[1]
+if (!is.na(RLIB)) .libPaths(c(RLIB, .libPaths()))
+c4 <- round(0.4142135623730951 * 2^30) / 2^30
+yg <- qgamma(((i * c4) %% 1) * 0.998 + 0.001, shape = 2, scale = exp(0.5 + sin(2 * pi * x)) / 2)
+cat("const YG = [", f(yg), "]\n", sep = "")
+cat("const LOCALLIK_FAMILIES = [\n")
+for (cfg in list(list(fam = "gamma", link = "log", y = "yg", p = 1, h = 0.25),
+                 list(fam = "gamma", link = "inverse", y = "yg", p = 1, h = 0.25),
+                 list(fam = "gamma", link = "log", y = "yg", p = 2, h = 0.35, wt = TRUE),
+                 list(fam = "inverse_gaussian", link = "log", y = "yg", p = 1, h = 0.25),
+                 list(fam = "inverse_gaussian", link = "inverse_squared", y = "yg", p = 1, h = 0.3),
+                 list(fam = "negative_binomial", link = "log", y = "yp", p = 1, h = 0.2),
+                 list(fam = "negative_binomial", link = "log", y = "yp", p = 2, h = 0.3, wt = TRUE),
+                 list(fam = "gaussian", link = "identity", y = "yg", p = 1, h = 0.2))) {
+  y <- get(cfg$y)
+  pts <- c(0.05, 0.3, 0.5, 0.8)
+  est <- se <- numeric(length(pts))
+  fam <- switch(cfg$fam, gamma = Gamma(link = cfg$link),
+                inverse_gaussian = inverse.gaussian(link = if (cfg$link == "log") "log" else "1/mu^2"),
+                negative_binomial = MASS::negative.binomial(theta = 2, link = "log"), gaussian = gaussian())
+  for (j in seq_along(pts)) {
+    u <- (x - pts[j]) / cfg$h
+    kw <- epa(u) * if (isTRUE(cfg$wt)) w else 1
+    keep <- kw > 0
+    Z <- outer(u[keep], 0:cfg$p, "^")
+    g <- suppressWarnings(glm.fit(Z, y[keep], weights = kw[keep], family = fam,
+                                  start = c(fam$linkfun(weighted.mean(y[keep], kw[keep])), rep(0, cfg$p)),
+                                  control = glm.control(epsilon = 1e-15, maxit = 200)))
+    eta <- drop(Z %*% g$coefficients); mu <- fam$linkinv(eta); me <- fam$mu.eta(eta); V <- fam$variance(mu)
+    A <- crossprod(Z * (kw[keep] * me^2 / V), Z)
+    s <- kw[keep] * (y[keep] - mu) * me / V
+    B <- crossprod(Z * s, Z * s)
+    Vs <- solve(A, t(solve(A, B)))
+    est[j] <- g$coefficients[1]; se[j] <- sqrt(Vs[1, 1])
+  }
+  cat(sprintf("  (family = :%s, link = :%s, y = \"%s\", degree = %d, h = %s, weighted = %s, points = [%s],\n   eta = [%s],\n   se = [%s]),\n",
+              cfg$fam, cfg$link, cfg$y, cfg$p, cfg$h, tolower(isTRUE(cfg$wt)), f(pts), f(est), f(se)))
+}
+cat("]\n")
+# Loader's local likelihood density estimate by locfit, at given bandwidths, with the
+# Epanechnikov kernel, of a normal sample; with 400 points for locfit's numerical
+# integration, since its default of 20 is off by up to 1% for degree 3 (degrees up to
+# 2 do not change)
+suppressPackageStartupMessages(library(locfit))
+xd <- qnorm(((i * c2) %% 1) * 0.998 + 0.001)
+cat("const XD = [", f(xd), "]\n", sep = "")
+cat("const LOCFIT_DENSITY = [\n")
+for (cfg in list(list(p = 2, h = 0.8), list(p = 1, h = 0.6), list(p = 0, h = 0.5), list(p = 3, h = 1.2))) {
+  pts <- c(-2.5, -1, 0, 0.7, 2.8)
+  fit <- locfit.raw(lp(xd, h = cfg$h, deg = cfg$p), kern = "epan", ev = pts, maxit = 100, mint = 400)
+  cat(sprintf("  (degree = %d, h = %s, points = [%s], density = [%s]),\n", cfg$p, cfg$h, f(pts), f(predict(fit, where = "fitp"))))
+}
+cat("]\n")
+cat("const LOCFIT_VERSION = \"", as.character(packageVersion("locfit")), "\"\n", sep = "")
+# The bias-corrected estimates and robust standard errors from the glm fits of order p
+# with bandwidth h and of order p + 1 with the pilot bandwidth b: with the information A
+# and the factors a = μ'/V and ω = μ'²/V of each fit, g = A⁻¹e₁, ℓ = kw a r_p(u)'g,
+# s = g'∑ kw ω u^(p+1) r_p(u), c = A_q⁻¹e_(p+2), the estimate is β₀ - (h/b)^(p+1) s γ_(p+1)
+# and the variance ∑ (ℓ - (h/b)^(p+1) s kw_b a_q r_q(v)'c)² (y - μ_q)²
+llfit <- function(y, x0, h, p, fam, kwt) {
+  u <- (x - x0) / h
+  kw <- epa(u) * kwt
+  keep <- kw > 0
+  Z <- outer(u, 0:p, "^")
+  g <- suppressWarnings(glm.fit(Z[keep, , drop = FALSE], y[keep], weights = kw[keep], family = fam,
+                                start = c(fam$linkfun(weighted.mean(y[keep], kw[keep])), rep(0, p)),
+                                control = glm.control(epsilon = 1e-15, maxit = 200)))
+  eta <- drop(Z %*% g$coefficients); mu <- fam$linkinv(eta); me <- fam$mu.eta(eta); V <- fam$variance(mu)
+  A <- crossprod(Z[keep, , drop = FALSE] * (kw[keep] * me[keep]^2 / V[keep]), Z[keep, , drop = FALSE])
+  list(beta = g$coefficients, u = u, kw = kw, Z = Z, mu = mu, a = me / V, om = me^2 / V, A = A)
+}
+cat("const LOCALLIK_RBC = [\n")
+for (cfg in list(list(fam = "gamma", y = "yg", p = 1, h = 0.25, b = 0.35),
+                 list(fam = "poisson", y = "yp", p = 1, h = 0.2, b = 0.15),
+                 list(fam = "logit", y = "yb", p = 1, h = 0.25, b = 0.3))) {
+  y <- get(cfg$y)
+  fam <- switch(cfg$fam, gamma = Gamma(link = "log"), poisson = poisson(), logit = binomial())
+  pts <- c(0.05, 0.3, 0.5, 0.8)
+  bc <- serbc <- numeric(length(pts))
+  for (j in seq_along(pts)) {
+    P <- llfit(y, pts[j], cfg$h, cfg$p, fam, 1)
+    Q <- llfit(y, pts[j], cfg$b, cfg$p + 1, fam, 1)
+    g <- solve(P$A, c(1, rep(0, cfg$p)))
+    l <- P$kw * P$a * drop(P$Z %*% g)
+    s <- sum(g * colSums(P$Z * (P$kw * P$om * P$u^(cfg$p + 1))))
+    cq <- solve(Q$A, c(rep(0, cfg$p + 1), 1))
+    rho <- (cfg$h / cfg$b)^(cfg$p + 1)
+    lbc <- l - rho * s * Q$kw * Q$a * drop(Q$Z %*% cq)
+    bc[j] <- P$beta[1] - rho * s * Q$beta[cfg$p + 2]
+    serbc[j] <- sqrt(sum((lbc * (y - Q$mu))^2))
+  }
+  cat(sprintf("  (family = :%s, y = \"%s\", degree = %d, h = %s, b = %s, points = [%s],\n   eta_bc = [%s],\n   se_rbc = [%s]),\n",
+              cfg$fam, cfg$y, cfg$p, cfg$h, cfg$b, f(pts), f(bc), f(serbc)))
+}
+cat("]\n")
+# locfit's default nearest-neighbour bandwidth, the fraction 0.7, for 101 observations
+xd101 <- xd[1:101]
+pts <- c(-1.5, 0, 0.7)
+fit <- locfit.raw(lp(xd101, nn = 0.7, deg = 2), kern = "epan", ev = pts, maxit = 100, mint = 400)
+cat("const LOCFIT_NN = (points = [", f(pts), "], density = [", f(predict(fit, where = "fitp")), "])\n", sep = "")
