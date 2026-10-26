@@ -20,6 +20,9 @@ development.
 - `fit(MultivariateKDE, x)`: a kernel density estimate in several dimensions with
   a bandwidth matrix, a distribution of Distributions.jl, with the normal scale,
   plug-in, smoothed and least-squares cross-validation matrices of R's ks.
+- `fit(BoundedKDE, x; support, method)`: a density estimate on `[a, b]`, `[a, ∞)` or `(-∞, b]`
+  that is a distribution there, by reflection, the beta and gamma kernels of Chen
+  (1999, 2000), or a transformation, as R's evmix.
 - `fit(LocalPolynomialRegression, x, y)`: local polynomial estimates of a
   regression function or its derivatives, as nprobust's `lprobust`, with
   conventional, robust bias-corrected and honest intervals (Armstrong and Kolesár),
@@ -35,6 +38,10 @@ development.
   Varying-coefficient models are in HighDimensionalModels.jl, on the kernels of this
   package.
 - `fit(LocalLikelihood, x, y; family)`: local logistic and Poisson regression.
+- `fit(ConditionalDensity, x, y)`: kernel estimates of the conditional density of
+  `y` given `x` (local constant and local linear), with likelihood and least-squares
+  cross-validation, as R's np; `fit(LocalQuantileRegression, x, y; tau)`: local
+  polynomial quantile regression with exact local fits, as quantreg's `lprq`.
 - `rearrange(m)` and `constrain(m, shape)`: monotone estimates and bands by
   rearrangement (Chernozhukov, Fernández-Val and Galichon 2009), and projections of
   the estimates onto monotone, convex or concave sequences.
@@ -130,6 +137,18 @@ you use the package, please cite the papers of the methods you use.
   intervals. Armstrong and Kolesár (2018), *Econometrica* 86(2); (2020),
   *Quantitative Economics* 11(1); Kolesár and Rothe (2018), *American Economic
   Review* 108(8).
+- [ks](https://cran.r-project.org/package=ks) (Duong): multivariate kernel density
+  estimation. Duong (2007), *Journal of Statistical Software* 21(7).
+- [evmix](https://cran.r-project.org/package=evmix) (Hu and Scarrott): boundary
+  corrected kernel density estimation. Hu and Scarrott (2018), *Journal of
+  Statistical Software* 84(5).
+- [np](https://cran.r-project.org/package=np) (Hayfield and Racine): conditional
+  density estimation. Hayfield and Racine (2008), *Journal of Statistical Software*
+  27(5); Hall, Racine and Li (2004), *Journal of the American Statistical
+  Association* 99(468).
+- [quantreg](https://cran.r-project.org/package=quantreg) (Koenker): quantile
+  regression. Koenker (2005), *Quantile Regression*, Cambridge University Press; Yu
+  and Jones (1998), *Journal of the American Statistical Association* 93(441).
 - R's `stats` package (R Core Team): `bw.SJ`, the bandwidth of Sheather and Jones
   (1991), *Journal of the Royal Statistical Society, Series B* 53(3), and `glm`,
   against which the local likelihood fits are checked.
