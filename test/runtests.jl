@@ -21,8 +21,10 @@ tests = [
   "rddensity",
   "rdhonest",
   "lpdensity",
+  "shape",
   "mvkde",
   "boundedkde",
+  "conditional",
   "recipes",
   "building",
   "aqua"

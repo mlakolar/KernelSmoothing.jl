@@ -18,6 +18,9 @@ It provides:
 - [local polynomial regression](@ref regression-page) of a regression function or
   its derivatives, with conventional, robust bias-corrected and honest intervals,
   covariances between points and uniform bands;
+- [conditional densities and local polynomial quantile regression](@ref conditional-page);
+- [shape constraints](@ref shape-page): rearranged estimates and bands, and
+  projections onto monotone and convex sequences;
 - [regression discontinuity](@ref rd-page) estimates for sharp, fuzzy and kink
   designs, with covariates, and the manipulation test of the density at the cutoff;
 - [bandwidth selectors](@ref bandwidths-page): rules of thumb, Sheather and Jones,
@@ -163,6 +166,18 @@ you use the package, please cite the papers of the methods you use.
   intervals. Armstrong and Kolesár (2018), *Econometrica* 86(2); (2020),
   *Quantitative Economics* 11(1); Kolesár and Rothe (2018), *American Economic
   Review* 108(8).
+- [ks](https://cran.r-project.org/package=ks) (Duong): multivariate kernel density
+  estimation. Duong (2007), *Journal of Statistical Software* 21(7).
+- [evmix](https://cran.r-project.org/package=evmix) (Hu and Scarrott): boundary
+  corrected kernel density estimation. Hu and Scarrott (2018), *Journal of
+  Statistical Software* 84(5).
+- [np](https://cran.r-project.org/package=np) (Hayfield and Racine): conditional
+  density estimation. Hayfield and Racine (2008), *Journal of Statistical Software*
+  27(5); Hall, Racine and Li (2004), *Journal of the American Statistical
+  Association* 99(468).
+- [quantreg](https://cran.r-project.org/package=quantreg) (Koenker): quantile
+  regression. Koenker (2005), *Quantile Regression*, Cambridge University Press; Yu
+  and Jones (1998), *Journal of the American Statistical Association* 93(441).
 - [locfit](https://cran.r-project.org/package=locfit) (Loader): local regression,
   likelihood and density estimation. Loader (1996), *Annals of Statistics* 24(4);
   Loader (1999), *Local Regression and Likelihood*, Springer.

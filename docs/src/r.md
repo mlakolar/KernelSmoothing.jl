@@ -35,11 +35,16 @@ in the next section.
 | R 4.5, `stats::glm` with kernel prior weights | `fit(LocalLikelihood, x, y; family, bandwidth)` | 6 | 1e-10 |
 | R 4.5, `glm` with `Gamma`, `inverse.gaussian`, MASS 7.3's `negative.binomial(2)` and `gaussian` | `fit(LocalLikelihood, x, y; family, link, theta, bandwidth)` | 8 | 1e-7, the accuracy of `glm`'s Fisher scoring for links that are not canonical; 1e-10 for the Gaussian family |
 | locfit 1.5, `locfit.raw(lp(x, h, deg), kern = "epan")`, density | `fit(LocalLikelihoodDensity, x; degree, bandwidth)` | 4, degrees 0 to 3 | 1e-8 for degrees up to 2, which locfit integrates exactly, and 1e-6 for degree 3 |
+| coneproj 1.23, `coneA` with and without weights; R 4.5, `isoreg` | `shape_projection(values, points; shape, weights)` | 8 shapes | 1e-9 |
+| cgam (`incr`) and scam (`bs = "mpi"`), constrained spline fits | `constrain(fit(LocalPolynomialRegression, x, y), :increasing)` | 1 | within 0.05 of cgam's step function and 0.03 of scam's fit, for a sample with noise of 0.2; a different smoother |
 | ks 1.15.3, `kde` with `binned = FALSE` | `pdf(fit(MultivariateKDE, x; bandwidth, weights), points)` | d = 2, 3, with and without weights | 1e-12 |
 | ks, `Hns`, `Hns.diag` (d = 2), `kfe`, `scv.mat`, `lscv.mat` | `NormalScaleMatrix`, the estimates of the functionals and the criteria | d = 2, 3 | 1e-12; `Hns.diag` to 1e-7 |
 | ks, `Hpi` and `Hpi.diag` with `pilot = "samse"`, `binned = FALSE` | `PlugInMatrix(; stages, compat = true)` | d = 2, 3, one and two stages | 5e-4, the accuracy of R's numerical minimization |
 | ks, `Hlscv` and `Hlscv.diag` with `binned = FALSE` | `LSCVMatrix()` | d = 2 (full), 2 and 3 (diagonal) | 2e-3, with a criterion at least as low as R's |
 | evmix 2.12, `dbckden` and `pbckden` with `bcmethod = "reflect"`, `"beta1"`, `"beta2"`, `"gamma1"`, `"gamma2"`, `"logtrans"` | `fit(BoundedKDE, x; support, method, kernel, bandwidth)` | 7 | densities to 1e-12 before normalization; after it, and distribution functions, to 1e-9 to 1e-6, the accuracy of R's numerical integration |
+| np 0.70.5, `npcdens` at given bandwidths | `pdf(fit(ConditionalDensity, x, y; bandwidth), y, x)` | 2 | 1e-12; np orders the bandwidths (y, x) |
+| np, `npcdensbw(bwmethod = "cv.ml")` | `ConditionalCV()` | 1 | 1e-3, the accuracy of R's numerical minimization, with a criterion at least as low |
+| quantreg 6.1, `lprq` and `rq` with weights | `fit(LocalQuantileRegression, x, y; tau, kernel = GaussianKernel())` and the local fits | 3 and 3 | 1e-12 |
 
 Where agreement is not to rounding, the reason is the R package's own numerical
 accuracy, such as a numerical minimization or integration with a coarse tolerance,
@@ -162,6 +167,12 @@ criterion was higher than at ours. For ``d \geq 3`` ks's `Hns.diag` is not the d
     matrix that minimizes the normal-reference error; `NormalScaleMatrix(diagonal =
     true)` is, and agrees with ks for ``d = 2``.
 
+19. np's least-squares cross-validation for conditional densities (`bwmethod =
+    "cv.ls"`) reports a criterion that differs by about 0.6% from that of Hall, Racine
+    and Li (2004) at its bandwidths, and its selection is not a minimum of that
+    criterion. `ConditionalCV(criterion = :leastsquares)` minimizes the criterion of
+    the paper.
+
 ## Translating the arguments
 
 The names of the arguments differ between the R packages and the Julia keywords.
@@ -235,3 +246,13 @@ that rdrobust's `rdrobust(y, x)` becomes `fit(RegressionDiscontinuity, x, y)`.
 | `sclass = "H"`, `"T"` | `class = :holder`, `:taylor` |
 | `se.method = "nn"`, `"EHW"` | `vce = NNVariance()`, `HCVariance(0)` |
 | `T0` | `RDHonestOptimal(M; T0)` |
+
+**np** (`npcdens`, `npcdensbw`) and **quantreg** (`lprq`)
+
+| R | Julia |
+|---|---|
+| `npcdens(txdat = x, tydat = y, bws = c(b, h))`, the bandwidths ordered (y, x) | `fit(ConditionalDensity, x, y; bandwidth = (h, b))`, ordered (x, y) |
+| `exdat`, `eydat` | `pdf(m, y, x)` at each pair |
+| `npcdensbw(bwmethod = "cv.ml")`, `"cv.ls"` | `ConditionalCV()`, `ConditionalCV(criterion = :leastsquares)` |
+| `lprq(x, y, h, tau, m)` | `fit(LocalQuantileRegression, x, y; bandwidth = h, tau, kernel = GaussianKernel(), points = range(minimum(x), maximum(x); length = m))` |
+| `lprq(...)$dv` | the same with `derivative = 1, degree = 1` |
