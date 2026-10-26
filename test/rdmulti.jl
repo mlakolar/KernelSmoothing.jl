@@ -82,6 +82,7 @@ end
   @test sprint(show, m) == "MultipleCutoffs(2 cutoffs, 1200 observations)"
   s = fit(CumulativeCutoffs, X2, Y2; cutoffs = [33, 66])
   @test coeftable(s).cutoff == ["33.0", "66.0"]
+  @test sprint(show, s) == "CumulativeCutoffs(2 cutoffs)"
   @test occursin("cumulative", sprint(show, MIME("text/plain"), s))
   @test_throws ArgumentError fit(MultipleCutoffs, X, Y, fill(33.0, length(X)))
   @test_throws ArgumentError fit(MultipleCutoffs, X, Y, C; cutoff = 1)

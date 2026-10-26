@@ -50,13 +50,9 @@ function rd_samplesize(m::RegressionDiscontinuity; tau::Real, power::Real = 0.8,
   end
   nreal = nobs(m) * (hi * m.se_rbc / abs(tau))^2
   nreal < 2.0^52 || throw(ArgumentError("the sample size for tau = $tau is too large to represent"))
-  # adjust for rounding: the smallest n whose power reaches the target
+  # guards against rounding: the smallest n whose power reaches the target
   n = max(1, ceil(Int, nreal))
-  while n > 1 && rd_power(m; tau, alpha, n = n - 1) >= power
-    n -= 1
-  end
-  while rd_power(m; tau, alpha, n) < power
-    n += 1
-  end
+  while n > 1 && rd_power(m; tau, alpha, n = n - 1) >= power; n -= 1; end
+  while rd_power(m; tau, alpha, n) < power; n += 1; end
   return n
 end
