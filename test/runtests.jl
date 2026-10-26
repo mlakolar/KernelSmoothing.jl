@@ -23,6 +23,7 @@ tests = [
   "lpdensity",
   "mvkde",
   "boundedkde",
+  "conditional",
   "recipes",
   "building",
   "aqua"

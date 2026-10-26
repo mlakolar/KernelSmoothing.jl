@@ -38,6 +38,10 @@ development.
   Varying-coefficient models are in HighDimensionalModels.jl, on the kernels of this
   package.
 - `fit(LocalLikelihood, x, y; family)`: local logistic and Poisson regression.
+- `fit(ConditionalDensity, x, y)`: kernel estimates of the conditional density of
+  `y` given `x` (local constant and local linear), with likelihood and least-squares
+  cross-validation, as R's np; `fit(LocalQuantileRegression, x, y; tau)`: local
+  polynomial quantile regression with exact local fits, as quantreg's `lprq`.
 - `local_polynomial` and `smoother_matrix`: local polynomial estimates and their
   weights at given points and bandwidths, without inference, for smoothing many
   curves and for building other estimators, also for two covariates (covariance
@@ -130,6 +134,18 @@ you use the package, please cite the papers of the methods you use.
   intervals. Armstrong and Kolesár (2018), *Econometrica* 86(2); (2020),
   *Quantitative Economics* 11(1); Kolesár and Rothe (2018), *American Economic
   Review* 108(8).
+- [ks](https://cran.r-project.org/package=ks) (Duong): multivariate kernel density
+  estimation. Duong (2007), *Journal of Statistical Software* 21(7).
+- [evmix](https://cran.r-project.org/package=evmix) (Hu and Scarrott): boundary
+  corrected kernel density estimation. Hu and Scarrott (2018), *Journal of
+  Statistical Software* 84(5).
+- [np](https://cran.r-project.org/package=np) (Hayfield and Racine): conditional
+  density estimation. Hayfield and Racine (2008), *Journal of Statistical Software*
+  27(5); Hall, Racine and Li (2004), *Journal of the American Statistical
+  Association* 99(468).
+- [quantreg](https://cran.r-project.org/package=quantreg) (Koenker): quantile
+  regression. Koenker (2005), *Quantile Regression*, Cambridge University Press; Yu
+  and Jones (1998), *Journal of the American Statistical Association* 93(441).
 - R's `stats` package (R Core Team): `bw.SJ`, the bandwidth of Sheather and Jones
   (1991), *Journal of the Royal Statistical Society, Series B* 53(3), and `glm`,
   against which the local likelihood fits are checked.

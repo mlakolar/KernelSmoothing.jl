@@ -11,6 +11,7 @@ makedocs(;
     "Multivariate density estimation" => "multivariate.md",
     "Densities on a bounded support" => "bounded.md",
     "Local polynomial regression" => "regression.md",
+    "Conditional densities and quantiles" => "conditional.md",
     "Regression discontinuity" => "rd.md",
     "Bandwidth selection" => "bandwidths.md",
     "Kernels" => "kernels.md",

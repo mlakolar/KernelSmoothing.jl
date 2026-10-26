@@ -13,7 +13,9 @@ function or its derivatives with conventional, robust bias-corrected and
 [`Honest`](@ref) intervals and uniform bands, see [`conf_band`](@ref);
 [`RegressionDiscontinuity`](@ref), estimates for regression discontinuity designs;
 [`MultivariateKDE`](@ref), a kernel density estimate in several dimensions with a
-bandwidth matrix; and [`BoundedKDE`](@ref), a density estimate on a bounded support.
+bandwidth matrix; [`BoundedKDE`](@ref), a density estimate on a bounded support;
+[`ConditionalDensity`](@ref), a kernel estimate of a conditional density; and
+[`LocalQuantileRegression`](@ref), local polynomial quantile regression.
 They are fitted
 with `fit` and choose their bandwidths with a [`BandwidthSelector`](@ref).
 Underneath are the smoothing kernels, see [`AbstractKernel`](@ref), samples
@@ -53,7 +55,8 @@ export
   local_polynomial, smoother_matrix, PartiallyLinear, LocalLikelihood,
   kernel_weights, regression_points, bandwidth_grid, grid_minimize, sandwich, supt_critical,
   MultivariateKDE, marginal, cov, MatrixSelector, NormalScaleMatrix, PlugInMatrix, SCVMatrix, LSCVMatrix,
-  BoundedKDE, BoundaryMethod, Reflection, BetaKernels, GammaKernels, Transformed
+  BoundedKDE, BoundaryMethod, Reflection, BetaKernels, GammaKernels, Transformed,
+  ConditionalDensity, ConditionalCV, conditional, LocalQuantileRegression, YuJones
 
 include("polynomials.jl")
 include("kernels.jl")
@@ -80,6 +83,8 @@ include("rddensity.jl")
 include("multivariate.jl")
 include("bandwidthmatrices.jl")
 include("bounded.jl")
+include("conditional.jl")
+include("quantreg.jl")
 include("building.jl")
 include("precompile.jl")
 
