@@ -32,7 +32,11 @@ cfgs <- list(
   list(y = "y",  p = 1, d = 0, k = "tri", v = "cr3", h = 0.3,  b = 0.5, cl = TRUE),
   list(y = "y",  p = 1, d = 0, k = "tri", v = "cr3", h = 0.3,  b = 0.3, cl = TRUE),
   list(y = "yf", p = 1, d = 0, k = "tri", v = "cr1", h = 0.4,  b = 0.6, cl = TRUE, fuzzy = TRUE),
-  list(y = "yc", p = 3, d = 2, k = "epa", v = "hc0", h = 0.7,  b = 0.9, covs = TRUE))
+  list(y = "yc", p = 3, d = 2, k = "epa", v = "hc0", h = 0.7,  b = 0.9, covs = TRUE),
+  # kink designs: the jump in the slope, sharp and fuzzy (Card, Lee, Pei and Weber 2015)
+  list(y = "y",  p = 1, d = 1, k = "tri", v = "hc0", h = 0.5,  b = 0.7),
+  list(y = "yf", p = 2, d = 1, k = "tri", v = "nn",  h = 0.5,  b = 0.7, fuzzy = TRUE),
+  list(y = "yf", p = 2, d = 1, k = "epa", v = "hc1", h = c(0.5, 0.6), b = c(0.7, 0.8), fuzzy = TRUE))
 cat("const RDROBUST = [\n")
 for (c in cfgs) {
   args <- list(y = get(c$y), x = x, p = c$p, deriv = c$d, h = c$h, b = c$b, kernel = c$k, vce = c$v)
