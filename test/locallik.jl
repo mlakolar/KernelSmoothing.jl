@@ -30,19 +30,29 @@ end
   kw = EpanechnikovKernel().((X .- 0.3) ./ 0.2)
   @test predict(m0)[1] ≈ sum(kw .* yb) / sum(kw) rtol = 1e-12
   m = fit(LocalLikelihood, X, yb; bandwidth = 0.2, points = [0.1, 0.5, 0.9])
-  ci = confint(m)
+  ci = confint(m; method = Conventional())
   @test all(0 .< ci[:, 1] .< predict(m) .< ci[:, 2] .< 1)
-  @test confint(m; scale = :linear) ≈ hcat(coef(m) .- 1.959963984540054 .* stderror(m), coef(m) .+ 1.959963984540054 .* stderror(m))
+  @test confint(m; scale = :linear, method = Conventional()) ≈
+        hcat(coef(m) .- 1.959963984540054 .* stderror(m), coef(m) .+ 1.959963984540054 .* stderror(m))
+  # the robust bias-corrected intervals, the default, are centred at the bias-corrected
+  # estimates and wider
+  rb = RobustBiasCorrected()
+  @test confint(m; scale = :linear) ≈ hcat(coef(m; method = rb) .- 1.959963984540054 .* stderror(m; method = rb),
+                                          coef(m; method = rb) .+ 1.959963984540054 .* stderror(m; method = rb))
+  @test all(stderror(m; method = rb) .> stderror(m))
+  ci = confint(m)
+  @test all(0 .< ci[:, 1] .< ci[:, 2] .< 1)
   # a bandwidth per point
   @test coef(fit(LocalLikelihood, X, yb; bandwidth = [0.2, 0.3], points = [0.1, 0.5]))[2] ≈
         coef(fit(LocalLikelihood, X, yb; bandwidth = 0.3, points = [0.5]))[1]
   # cross-validation: the one-step leave-one-out fits are close to the refits
   d = SmoothingData(X, RESPONSES["yp"])
   k = EpanechnikovKernel()
+  fp = KernelSmoothing._llfamily(:poisson, nothing, nothing)
   for j in (1, 77, 250)   # positions in the sorted order of the data
     keep = setdiff(I, d.perm[j])
-    η = KernelSmoothing._llfit(SmoothingData(X[keep], RESPONSES["yp"][keep]), k, d.x[j], 0.2, 1, :poisson).eta
-    @test KernelSmoothing._llfit(d, k, d.x[j], 0.2, 1, :poisson; loo = j).eta ≈ η rtol = 0.02
+    η = KernelSmoothing._llsolve(SmoothingData(X[keep], RESPONSES["yp"][keep]), k, d.x[j], 0.2, 1, fp).β[1]
+    @test KernelSmoothing._llloo(d, k, j, 0.2, 1, fp) ≈ η rtol = 0.02
   end
   mc = fit(LocalLikelihood, X, yb)
   @test mc.selection.rule == CrossValidation() && 0.05 < mc.h[1] < 0.5
@@ -56,8 +66,123 @@ end
   @inferred fit(LocalLikelihood, X, yb; bandwidth = 0.2, points = [0.5])
 end
 
+@testset "families agree with glm" begin
+  for c in LOCALLIK_FAMILIES
+    y = c.y == "yg" ? YG : RESPONSES[c.y]
+    m = fit(LocalLikelihood, X, y; family = c.family, link = c.link, degree = c.degree, bandwidth = c.h,
+            points = c.points, weights = c.weighted ? W : nothing,
+            theta = c.family === :negative_binomial ? 2.0 : nothing)
+    # glm stops on the relative change of the deviance, and for links other than the
+    # logit, log of the Poisson and identity its Fisher scoring converges linearly,
+    # which leaves its estimates accurate to about 1e-8
+    tol = c.family === :gaussian ? 1e-10 : 1e-7
+    @test coef(m) ≈ c.eta rtol = tol
+    @test stderror(m) ≈ c.se rtol = tol
+  end
+  # the canonical links
+  m = fit(LocalLikelihood, X, YG; family = :gamma, link = :canonical, bandwidth = 0.25, points = [0.3])
+  @test m.link === :inverse
+  @test coef(m) ≈ [LOCALLIK_FAMILIES[2].eta[2]] rtol = 1e-7
+  # intervals for the mean through a decreasing link keep their order
+  ci = confint(m)
+  @test ci[1, 1] < ci[1, 2]
+  @test confint(m; method = Conventional())[1, :] ≈ sort(1 ./ (coef(m)[1] .+ [-1, 1] .* 1.959963984540054 .* stderror(m)[1]))
+  @test startswith(sprint(show, m), "LocalLikelihood(gamma (inverse link), degree 1")
+  mn = fit(LocalLikelihood, X, RESPONSES["yp"]; family = :negative_binomial, theta = 2, bandwidth = 0.2, points = [0.5])
+  @test occursin("θ = 2.0", sprint(show, mn))
+  # the one-step leave-one-out fits of a link that is not canonical are close to the refits
+  f = KernelSmoothing._llfamily(:gamma, :log, nothing)
+  d = SmoothingData(X, YG)
+  k = EpanechnikovKernel()
+  for j in (1, 77, 250)
+    keep = setdiff(I, d.perm[j])
+    η = KernelSmoothing._llsolve(SmoothingData(X[keep], YG[keep]), k, d.x[j], 0.25, 1, f).β[1]
+    @test KernelSmoothing._llloo(d, k, j, 0.25, 1, f) ≈ η rtol = 0.02
+  end
+  mc = fit(LocalLikelihood, X, YG; family = :gamma)
+  @test 0.05 < mc.h[1] < 0.5
+end
+
+@testset "Gaussian family: local polynomial regression" begin
+  # the estimates, the bias-corrected ones and both standard errors are those of
+  # LocalPolynomialRegression with HC0 residuals, also with a pilot bandwidth b ≠ h
+  pts = [0.05, 0.3, 0.5, 0.8, 0.97]
+  rb = RobustBiasCorrected()
+  for (deg, rho) in ((1, 1), (1, 0.7), (2, 1), (0, 1.5))
+    m = fit(LocalLikelihood, X, YG; family = :gaussian, bandwidth = 0.2, rho, degree = deg, points = pts)
+    r = fit(LocalPolynomialRegression, X, YG; bandwidth = 0.2, rho, degree = deg, points = pts, vce = HCVariance(0),
+            minobs = 0)
+    @test coef(m) ≈ coef(r) rtol = 1e-10
+    @test stderror(m) ≈ stderror(r) rtol = 1e-10
+    @test coef(m; method = rb) ≈ coef(r; method = rb) rtol = 1e-10
+    @test stderror(m; method = rb) ≈ stderror(r; method = rb) rtol = 1e-10
+  end
+  # the rule of thumb is that of regression
+  for deg in (1, 2)
+    m = fit(LocalLikelihood, X, YG; family = :gaussian, bandwidth = RuleOfThumb(), degree = deg, points = [0.5])
+    @test m.h[1] ≈ select_bandwidth(RuleOfThumb(), SmoothingData(X, YG), EpanechnikovKernel(); degree = deg).h rtol = 1e-8
+  end
+  w = fit(LocalLikelihood, X, YG; family = :gaussian, bandwidth = RuleOfThumb(), weights = W, points = [0.5])
+  @test w.h[1] ≈ select_bandwidth(RuleOfThumb(), SmoothingData(X, YG; weights = W), EpanechnikovKernel()).h rtol = 1e-8
+end
+
+@testset "rule of thumb" begin
+  for (fam, y) in ((:logit, RESPONSES["yb"]), (:poisson, RESPONSES["yp"]), (:gamma, YG),
+                   (:inverse_gaussian, YG), (:negative_binomial, RESPONSES["yp"]))
+    m = fit(LocalLikelihood, X, y; family = fam, bandwidth = RuleOfThumb(), points = [0.25, 0.5],
+            theta = fam === :negative_binomial ? 2.0 : nothing)
+    @test m.selection.rule == RuleOfThumb() && 0.03 < m.h[1] < 1
+    @test all(isfinite, coef(m))
+    @test m.selection.details.variance > 0 && m.selection.details.curvature > 0
+  end
+  # a response that does not vary with x: no curvature, and the bandwidth is the range
+  @test fit(LocalLikelihood, X, ones(500); family = :poisson, bandwidth = RuleOfThumb(), points = [0.5]).h[1] ≈
+        maximum(X) - minimum(X)
+end
+
+@testset "local likelihood density" begin
+  # Loader's estimate agrees with locfit
+  for c in LOCFIT_DENSITY
+    m = fit(LocalLikelihoodDensity, XD; degree = c.degree, bandwidth = c.h, points = c.points)
+    # locfit integrates exactly up to degree 2, and numerically for degree 3
+    @test coef(m) ≈ c.density rtol = (c.degree <= 2 ? 1e-8 : 1e-6)
+  end
+  # of order 0, the kernel density estimate
+  m0 = fit(LocalLikelihoodDensity, XD; degree = 0, bandwidth = 0.5, points = [-1.0, 0.3])
+  for (j, x0) in enumerate([-1.0, 0.3])
+    @test coef(m0)[j] ≈ sum(EpanechnikovKernel().((XD .- x0) ./ 0.5)) / (500 * 0.5) rtol = 1e-12
+  end
+  # equal weights change nothing, the intervals are positive and contain the estimates
+  m = fit(LocalLikelihoodDensity, XD; points = [-2.0, 0.0, 1.5])
+  @test coef(fit(LocalLikelihoodDensity, XD; points = [-2.0, 0.0, 1.5], weights = fill(3.0, 500))) ≈ coef(m) rtol = 1e-10
+  ci = confint(m)
+  @test all(0 .< ci[:, 1] .< coef(m) .< ci[:, 2])
+  @test stderror(m) ≈ coef(m) .* m.se
+  # the nearest-neighbour bandwidth holds the fraction span of the sample
+  @test bandwidth(m) ≈ [knn_distance(SmoothingData(XD), x0, 350) for x0 in [-2.0, 0.0, 1.5]]
+  @test nobs(m) == 500
+  @test startswith(sprint(show, m), "LocalLikelihoodDensity(degree 2")
+  # far from the data the window is empty
+  @test isnan(coef(fit(LocalLikelihoodDensity, XD; bandwidth = 0.5, points = [10.0]))[1])
+  @test length(fit(LocalLikelihoodDensity, XD; bandwidth = 0.8).points) == 30
+  @test_throws ArgumentError fit(LocalLikelihoodDensity, XD; kernel = GaussianKernel())
+  @test_throws ArgumentError fit(LocalLikelihoodDensity, XD; span = 0)
+  @test_throws ArgumentError fit(LocalLikelihoodDensity, XD; degree = -1)
+  @test_throws ArgumentError confint(m; level = 2)
+end
+
 @testset "errors" begin
   @test_throws ArgumentError fit(LocalLikelihood, X, RESPONSES["yb"]; family = :gamma, bandwidth = 0.2)
+  @test_throws ArgumentError fit(LocalLikelihood, X, YG; family = :weibull, bandwidth = 0.2)
+  @test_throws ArgumentError fit(LocalLikelihood, X, YG; family = :gamma, link = :logit, bandwidth = 0.2)
+  @test_throws ArgumentError fit(LocalLikelihood, X, RESPONSES["yp"]; family = :negative_binomial, bandwidth = 0.2)
+  @test_throws ArgumentError fit(LocalLikelihood, X, RESPONSES["yp"]; family = :negative_binomial, theta = -1, bandwidth = 0.2)
+  @test_throws ArgumentError fit(LocalLikelihood, X, RESPONSES["yp"]; family = :negative_binomial, link = :canonical,
+                                 theta = 2, bandwidth = 0.2)
+  @test_throws ArgumentError fit(LocalLikelihood, X, RESPONSES["yp"]; family = :poisson, theta = 2, bandwidth = 0.2)
+  @test_throws ArgumentError fit(LocalLikelihood, X, RESPONSES["yb"]; bandwidth = 0.2, rho = 0)
+  @test_throws ArgumentError confint(fit(LocalLikelihood, X, RESPONSES["yb"]; bandwidth = 0.2, points = [0.5]);
+                                     method = Honest(1.0))
   @test_throws ArgumentError fit(LocalLikelihood, X, RESPONSES["yp"]; bandwidth = 0.2)
   @test_throws ArgumentError fit(LocalLikelihood, X, -RESPONSES["yb"]; family = :poisson, bandwidth = 0.2)
   @test_throws ArgumentError fit(LocalLikelihood, X, RESPONSES["yb"]; bandwidth = 0.2, degree = -1)
