@@ -167,8 +167,10 @@ end
 # tolerance does not depend on their units: an index enters the passive set when its
 # gradient is positive, but not if the least-squares solution on the new passive set
 # gives it a nonpositive coefficient, which rounding can cause; an infeasible solution
-# is moved toward until a coefficient reaches zero, and those that do leave.
-function _nnls(A, b; maxiter = 3 * size(A, 2) + 50)
+# is moved toward until a coefficient reaches zero, and those that do leave. (A
+# negative `tol` lets indices with a negative gradient enter, which the guard refuses,
+# for the tests.)
+function _nnls(A, b; maxiter = 3 * size(A, 2) + 50, tol = nothing)
   m, n = size(A)
   nb = LinearAlgebra.norm(b)
   nb > 0 || return zeros(n)
@@ -180,7 +182,7 @@ function _nnls(A, b; maxiter = 3 * size(A, 2) + 50)
   x = zeros(k)
   passive = falses(k)
   rejected = falses(k)   # entering indices refused since x last changed
-  tol = 10 * eps() * max(m, k)
+  tol = tol === nothing ? 10 * eps() * max(m, k) : tol
   w = As' * bs
   converged = false
   for _ in 1:maxiter

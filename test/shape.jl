@@ -81,6 +81,12 @@ end
     @test norm(A * x - b) ≈ best rtol = 1e-10
   end
   @test _nnls(randn(rng, 5, 3), zeros(5)) == zeros(3)
+  # entering indices whose coefficient is not positive are refused: with a negative
+  # tolerance, those with a negative gradient try to enter, and the optimum is the same
+  for _ in 1:5
+    A, b = randn(rng, 10, 6), randn(rng, 10)
+    @test _nnls(A, b; tol = -1.0) ≈ _nnls(A, b) atol = 1e-12
+  end
   @test_logs (:warn, r"iteration limit") _nnls([1.0 0.0; 0.0 1.0; 1.0 1.0], [1.0, 2.0, 3.0]; maxiter = 1)
 end
 
