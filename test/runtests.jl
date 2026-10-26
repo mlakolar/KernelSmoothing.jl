@@ -24,8 +24,10 @@ tests = [
   "rdpower",
   "rdlocrand",
   "lpdensity",
+  "shape",
   "mvkde",
   "boundedkde",
+  "conditional",
   "recipes",
   "building",
   "aqua"
