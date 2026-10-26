@@ -121,7 +121,7 @@ end
 # logit fit are equal. Where μ' = V the steps are Newton's, taken in full as long as
 # they converge, which from the local constant fit they do; otherwise, and when they
 # fail, a step that would lower the likelihood is halved.
-function _llirls(u, y, kw, f, β₀; halving::Bool = !f.canonical)
+function _llirls(u, y, kw, f, β₀; halving::Bool = !f.canonical, maxiter::Integer = 200)
   P = length(β₀)
   # (the comprehension captures β₀, which is never reassigned: a captured variable
   # that is reassigned would be boxed)
@@ -134,7 +134,7 @@ function _llirls(u, y, kw, f, β₀; halving::Bool = !f.canonical)
   S = zeros(2P - 1)
   g = zeros(P)
   δ = zeros(P)
-  for _ in 1:200
+  for _ in 1:maxiter
     _llscore!(S, g, u, y, kw, f, η)
     A = _hankel(S, P)
     C = LinearAlgebra.cholesky!(LinearAlgebra.Symmetric(copy(A)); check = false)

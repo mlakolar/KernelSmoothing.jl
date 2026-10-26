@@ -49,6 +49,9 @@ end
   d = SmoothingData(X, RESPONSES["yp"])
   k = EpanechnikovKernel()
   fp = KernelSmoothing._llfamily(:poisson, nothing, nothing)
+  # without convergence within the iterations, no fit
+  s = KernelSmoothing._llsolve(d, EpanechnikovKernel(), 0.5, 0.2, 1, fp)
+  @test KernelSmoothing._llirls(s.u, s.y, s.kw, fp, [0.0, 0.0]; maxiter = 1) === nothing
   for j in (1, 77, 250)   # positions in the sorted order of the data
     keep = setdiff(I, d.perm[j])
     η = KernelSmoothing._llsolve(SmoothingData(X[keep], RESPONSES["yp"][keep]), k, d.x[j], 0.2, 1, fp).β[1]
