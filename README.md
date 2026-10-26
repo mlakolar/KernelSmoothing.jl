@@ -37,7 +37,11 @@ development.
   residuals), with sandwich standard errors and cross-validated bandwidths.
   Varying-coefficient models are in HighDimensionalModels.jl, on the kernels of this
   package.
-- `fit(LocalLikelihood, x, y; family)`: local logistic and Poisson regression.
+- `fit(LocalLikelihood, x, y; family)`: local likelihood regression for binary, count
+  (Poisson and negative binomial), positive (gamma and inverse Gaussian) and
+  Gaussian responses, with robust bias-corrected intervals and the rule-of-thumb
+  bandwidth of Fan, Heckman and Wand (1995); `fit(LocalLikelihoodDensity, x)`, the
+  local likelihood density estimate of Loader (1996), as R's locfit.
 - `local_polynomial` and `smoother_matrix`: local polynomial estimates and their
   weights at given points and bandwidths, without inference, for smoothing many
   curves and for building other estimators, also for two covariates (covariance
@@ -130,6 +134,12 @@ you use the package, please cite the papers of the methods you use.
   intervals. Armstrong and Kolesár (2018), *Econometrica* 86(2); (2020),
   *Quantitative Economics* 11(1); Kolesár and Rothe (2018), *American Economic
   Review* 108(8).
+- [locfit](https://cran.r-project.org/package=locfit) (Loader): local regression,
+  likelihood and density estimation. Loader (1996), *Annals of Statistics* 24(4);
+  Loader (1999), *Local Regression and Likelihood*, Springer.
+- [MASS](https://cran.r-project.org/package=MASS) (Venables and Ripley): the negative
+  binomial family. Venables and Ripley (2002), *Modern Applied Statistics with S*,
+  Springer.
 - R's `stats` package (R Core Team): `bw.SJ`, the bandwidth of Sheather and Jones
   (1991), *Journal of the Royal Statistical Society, Series B* 53(3), and `glm`,
   against which the local likelihood fits are checked.
