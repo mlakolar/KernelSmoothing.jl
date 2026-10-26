@@ -75,7 +75,8 @@ lpdensity, rdrobust, rddensity and RDHonest to rounding. The default plug-in ban
 these packages where their pilot estimates or their squared bias fail, and
 `compat = true` reproduces them; the
 [documentation](https://mlakolar.github.io/KernelSmoothing.jl/dev/) explains the
-differences.
+differences. The [notes](notes/README.md) report how well the intervals cover in
+simulations, how long each procedure takes, and which settings we recommend.
 
 ```julia
 using KernelSmoothing
