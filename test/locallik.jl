@@ -52,7 +52,9 @@ end
   for j in (1, 77, 250)   # positions in the sorted order of the data
     keep = setdiff(I, d.perm[j])
     η = KernelSmoothing._llsolve(SmoothingData(X[keep], RESPONSES["yp"][keep]), k, d.x[j], 0.2, 1, fp).β[1]
-    @test KernelSmoothing._llloo(d, k, j, 0.2, 1, fp) ≈ η rtol = 0.02
+    full = KernelSmoothing._llsolve(d, k, d.x[j], 0.2, 1, fp).β[1]
+    # the one-step correction is most of the change from the fit with the observation
+    @test abs(KernelSmoothing._llloo(d, k, j, 0.2, 1, fp) - η) < 0.1 * abs(full - η)
   end
   mc = fit(LocalLikelihood, X, yb)
   @test mc.selection.rule == CrossValidation() && 0.05 < mc.h[1] < 0.5
@@ -88,6 +90,14 @@ end
   @test ci[1, 1] < ci[1, 2]
   @test confint(m; method = Conventional())[1, :] ≈ sort(1 ./ (coef(m)[1] .+ [-1, 1] .* 1.959963984540054 .* stderror(m)[1]))
   @test startswith(sprint(show, m), "LocalLikelihood(gamma (inverse link), degree 1")
+  sel = KernelSmoothing._anyselection(KernelSmoothing.BandwidthSelection(0.1))
+  mi = LocalLikelihood(:gamma, :inverse, NaN, EpanechnikovKernel(), 1, sel, 10, [0.5, 0.6, 0.7], fill(0.1, 3),
+                       fill(0.1, 3), [-0.5, 0.3, 2.0], [0.1, 0.5, 0.1], [-0.5, 0.3, 2.0], [0.1, 0.5, 0.1])
+  @test isnan(predict(mi)[1]) && predict(mi)[2:3] ≈ [1 / 0.3, 0.5]
+  ci = confint(mi; method = Conventional())
+  @test all(isnan, ci[1, :])                      # no positive linear predictor
+  @test ci[2, 1] ≈ 1 / (0.3 + 1.959963984540054 * 0.5) && ci[2, 2] == Inf
+  @test ci[3, :] ≈ sort(1 ./ (2.0 .+ [-1, 1] .* 1.959963984540054 .* 0.1))
   mn = fit(LocalLikelihood, X, RESPONSES["yp"]; family = :negative_binomial, theta = 2, bandwidth = 0.2, points = [0.5])
   @test occursin("θ = 2.0", sprint(show, mn))
   # the one-step leave-one-out fits of a link that is not canonical are close to the refits
@@ -97,10 +107,21 @@ end
   for j in (1, 77, 250)
     keep = setdiff(I, d.perm[j])
     η = KernelSmoothing._llsolve(SmoothingData(X[keep], YG[keep]), k, d.x[j], 0.25, 1, f).β[1]
-    @test KernelSmoothing._llloo(d, k, j, 0.25, 1, f) ≈ η rtol = 0.02
+    full = KernelSmoothing._llsolve(d, k, d.x[j], 0.25, 1, f).β[1]
+    @test abs(KernelSmoothing._llloo(d, k, j, 0.25, 1, f) - η) < 0.1 * abs(full - η)
   end
   mc = fit(LocalLikelihood, X, YG; family = :gamma)
   @test 0.05 < mc.h[1] < 0.5
+end
+
+@testset "bias correction against glm" begin
+  for c in LOCALLIK_RBC
+    y = c.y == "yg" ? YG : RESPONSES[c.y]
+    m = fit(LocalLikelihood, X, y; family = c.family, degree = c.degree, bandwidth = c.h, pilot = c.b, points = c.points)
+    tol = c.family === :gamma ? 1e-7 : 1e-10
+    @test coef(m; method = RobustBiasCorrected()) ≈ c.eta_bc rtol = tol
+    @test stderror(m; method = RobustBiasCorrected()) ≈ c.se_rbc rtol = tol
+  end
 end
 
 @testset "Gaussian family: local polynomial regression" begin
@@ -135,6 +156,8 @@ end
     @test all(isfinite, coef(m))
     @test m.selection.details.variance > 0 && m.selection.details.curvature > 0
   end
+  # separated responses have no global fit of the orders the rule needs
+  @test_throws ArgumentError fit(LocalLikelihood, X, Float64.(0.3 .< X .< 0.7); bandwidth = RuleOfThumb())
   # a response that does not vary with x: no curvature, and the bandwidth is the range
   @test fit(LocalLikelihood, X, ones(500); family = :poisson, bandwidth = RuleOfThumb(), points = [0.5]).h[1] ≈
         maximum(X) - minimum(X)
@@ -158,8 +181,22 @@ end
   ci = confint(m)
   @test all(0 .< ci[:, 1] .< coef(m) .< ci[:, 2])
   @test stderror(m) ≈ coef(m) .* m.se
+  # of order 0 with unequal weights, the estimate and its standard error are the KDE's
+  wd = 1.0 .+ mod.(1:500, 3)
+  fk = fit(KDE, XD; bandwidth = 0.5, kernel = EpanechnikovKernel(), weights = wd)
+  m0w = fit(LocalLikelihoodDensity, XD; degree = 0, bandwidth = 0.5, points = [-1.0, 0.3], weights = wd)
+  @test coef(m0w) ≈ pdf.(Ref(fk), [-1.0, 0.3]) rtol = 1e-10
+  @test stderror(m0w) ≈ stderror.(Ref(fk), [-1.0, 0.3]) rtol = 1e-10
+  # the default bandwidth holds the fraction 0.7 of the sample, ⌊0.7 n⌋ observations, as
+  # locfit's: with ⌈0.7 n⌉ = 71 of 101 the estimates differ in the third digit
+  mn = fit(LocalLikelihoodDensity, XD[1:101]; points = LOCFIT_NN.points)
+  @test coef(mn) ≈ LOCFIT_NN.density rtol = 1e-5
+  @test !isapprox(coef(fit(LocalLikelihoodDensity, XD[1:101]; points = LOCFIT_NN.points,
+                           bandwidth = [knn_distance(SmoothingData(XD[1:101]), x0, 71) for x0 in LOCFIT_NN.points])),
+                  LOCFIT_NN.density; rtol = 1e-5)
   # the nearest-neighbour bandwidth holds the fraction span of the sample
   @test bandwidth(m) ≈ [knn_distance(SmoothingData(XD), x0, 350) for x0 in [-2.0, 0.0, 1.5]]
+  @test bandwidth(mn) ≈ [knn_distance(SmoothingData(XD[1:101]), x0, 70) for x0 in LOCFIT_NN.points]
   @test nobs(m) == 500
   @test startswith(sprint(show, m), "LocalLikelihoodDensity(degree 2")
   # far from the data the window is empty

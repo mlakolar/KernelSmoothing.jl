@@ -75,6 +75,9 @@ function _llvar(f::_LLFamily, μ)
     fam === :inverse_gaussian ? μ^3 : μ + μ^2 / f.theta
 end
 
+# the mean at η, NaN where an inverse link has η ≤ 0, which gives no valid mean
+_llmean(f::_LLFamily, η) = isnan(η) || (f.link in (:inverse, :inverse_squared) && η <= 0) ? NaN : _lllinkinv(f, η)
+
 # whether η gives a mean in the range of the family, and whether a mean starts a fit
 _llvalid(f::_LLFamily, η) = isfinite(η) && (f.link in (:inverse, :inverse_squared) ? η > 0 : true) &&
   (μ = _lllinkinv(f, η); isfinite(μ) && (f.family in (:logit, :gaussian) || μ > 0))
@@ -84,8 +87,8 @@ _llstart(f::_LLFamily, ȳ) = f.family === :logit ? 0 < ȳ < 1 : f.family === :ga
 # not depend on η and to the factor 1/φ of the dispersion, which change neither the
 # fits nor the bandwidths: -Inf where η gives no valid mean
 function _llloglik(f::_LLFamily, y, η)
-  _llvalid(f, η) || return -Inf
   fam = f.family
+  isfinite(η) || return -Inf
   if fam === :logit
     return η > 0 ? y * η - η - log1p(exp(-η)) : y * η - log1p(exp(η))
   elseif fam === :poisson
@@ -93,6 +96,7 @@ function _llloglik(f::_LLFamily, y, η)
   elseif fam === :gaussian
     return -(y - η)^2 / 2
   end
+  _llvalid(f, η) || return -Inf
   μ = _lllinkinv(f, η)
   fam === :gamma && return -y / μ - log(μ)
   fam === :inverse_gaussian && return -(y - μ)^2 / (2 * y * μ^2)
@@ -112,54 +116,83 @@ function _llfactors(f::_LLFamily, η)
   return μ, me / v, me^2 / v
 end
 
-# The maximum of the local likelihood ∑ᵢ kwᵢ ℓ(yᵢ; zᵢ'β) by Fisher scoring from β,
-# halving the steps that would lower it, which for a canonical link are Newton's;
-# nothing where it has no maximum, as where all responses of a logit fit are equal
-function _llirls(Z, y, kw, f, β)
-  P = length(β)
-  η = Z * β
-  ll = _llsum(f, y, kw, η)
+# The maximum of the local likelihood ∑ᵢ kwᵢ ℓ(yᵢ; r(uᵢ)'β), r(u) = (1, u, …, u^p), by
+# Fisher scoring from β; nothing where it has no maximum, as where all responses of a
+# logit fit are equal. Where μ' = V the steps are Newton's, taken in full as long as
+# they converge, which from the local constant fit they do; otherwise, and when they
+# fail, a step that would lower the likelihood is halved.
+function _llirls(u, y, kw, f, β₀; halving::Bool = !f.canonical)
+  P = length(β₀)
+  # (the comprehension captures β₀, which is never reassigned: a captured variable
+  # that is reassigned would be boxed)
+  η = [evalpoly(t, β₀) for t in u]
+  β = copy(β₀)
+  ll = halving ? _llsum(f, y, kw, η) : 0.0
   isfinite(ll) || return nothing
-  for _ in 1:100
-    A = zeros(P, P)
-    g = zeros(P)
-    for i in eachindex(y)
-      kw[i] > 0 || continue
-      μ, a, ω = _llfactors(f, η[i])
-      for r in 1:P
-        g[r] += kw[i] * a * (y[i] - μ) * Z[i, r]
-        for c in 1:r
-          A[r, c] += kw[i] * ω * Z[i, r] * Z[i, c]
-        end
-      end
-    end
-    C = LinearAlgebra.cholesky(LinearAlgebra.Symmetric(A, :L); check = false)
+  # the tolerance of the halving, relative to the scale of the likelihood and the weights
+  tol = halving ? 1e-12 * (abs(ll) + sum(kw)) : 0.0
+  S = zeros(2P - 1)
+  g = zeros(P)
+  δ = zeros(P)
+  for _ in 1:200
+    _llscore!(S, g, u, y, kw, f, η)
+    A = _hankel(S, P)
+    C = LinearAlgebra.cholesky!(LinearAlgebra.Symmetric(copy(A)); check = false)
     LinearAlgebra.issuccess(C) && minimum(j -> C.factors[j, j]^2 / A[j, j], 1:P) > 1e-12 || return nothing
-    δ = C \ g
-    t = 1.0
-    accepted = false
-    for _ in 1:40
-      βn = β .+ t .* δ
-      ηn = Z * βn
-      lln = _llsum(f, y, kw, ηn)
-      if lln >= ll - 1e-12 * (1 + abs(ll))
-        β, η, ll = βn, ηn, lln
-        accepted = true
-        break
+    LinearAlgebra.ldiv!(δ, C, g)
+    if halving
+      t = 1.0
+      accepted = false
+      for _ in 1:40
+        βn = β .+ t .* δ
+        ηn = [evalpoly(x, βn) for x in u]
+        lln = _llsum(f, y, kw, ηn)
+        if lln >= ll - tol
+          β, η, ll = βn, ηn, lln
+          accepted = true
+          break
+        end
+        t /= 2
       end
-      t /= 2
+      accepted || return nothing
+    else
+      β .+= δ
+      for i in eachindex(u)
+        η[i] = evalpoly(u[i], β)
+      end
     end
-    accepted && all(isfinite, β) || return nothing
-    maximum(abs, t .* δ) <= 1e-12 * (1 + maximum(abs, β)) && return β, η
+    all(isfinite, β) || return nothing
+    maximum(abs, δ) <= 1e-12 * (1 + maximum(abs, β)) && return β, η
   end
   return nothing
 end
 
-# the information matrix ∑ᵢ kwᵢ ωᵢ zᵢ zᵢ' and the factors a and ω at η
-function _llinformation(Z, kw, f, η)
-  F = [_llfactors(f, e) for e in η]
-  ω = [t[3] for t in F]
-  return Z' * ((kw .* ω) .* Z), [t[1] for t in F], [t[2] for t in F], ω
+# At η, the power sums S[k+1] = ∑ᵢ kwᵢ ωᵢ uᵢ^k, k = 0, …, 2p, whose Hankel matrix is the
+# information ∑ᵢ kwᵢ ωᵢ r(uᵢ) r(uᵢ)', and the score g = ∑ᵢ kwᵢ aᵢ (yᵢ - μᵢ) r(uᵢ)
+function _llscore!(S, g, u, y, kw, f, η)
+  fill!(S, 0.0)
+  fill!(g, 0.0)
+  P = length(g)
+  @inbounds for i in eachindex(y)
+    kw[i] > 0 || continue
+    μ, a, ω = _llfactors(f, η[i])
+    r, w = kw[i] * a * (y[i] - μ), kw[i] * ω
+    z = 1.0
+    for k in eachindex(S)
+      k <= P && (g[k] += r * z)
+      S[k] += w * z
+      z *= u[i]
+    end
+  end
+  return S, g
+end
+
+_hankel(S, P) = [S[i + j - 1] for i in 1:P, j in 1:P]
+
+# the information matrix at η
+function _llinfo(u, y, kw, f, η, P)
+  S, _ = _llscore!(zeros(2P - 1), zeros(P), u, y, kw, f, η)
+  return _hankel(S, P)
 end
 
 """
@@ -188,7 +221,9 @@ standard error accounts for the variability of that estimate (Calonico, Cattaneo
 Farrell 2018), as for [`LocalPolynomialRegression`](@ref): both linearize the two
 local fits around their maxima, with the residuals of the fit of order `p + 1` in
 the robust variance. For `family = :gaussian` they are those of
-`LocalPolynomialRegression` with `vce = HCVariance(0)`.
+`LocalPolynomialRegression` with `vce = HCVariance(0)` and `minobs = 0` (its floor on
+the windows changes the bandwidths). Where only the fit of order `p + 1` has no
+maximum, the bias-corrected estimate and the default intervals are `NaN`.
 
 `coef(m; method)` and `stderror(m; method)` describe the linear predictor at the
 points, conventional by default and with `method = RobustBiasCorrected()` bias
@@ -272,15 +307,21 @@ function _llsolve(d, k, x0, h, p, f)
   isempty(r) && return nothing
   u = [(d.x[i] - x0) / h for i in r]
   kw = [_weight(d.w, i) * k(u[l]) for (l, i) in enumerate(r)]
-  Z = [u[l]^j for l in eachindex(u), j in 0:p]
-  y = d.y[r]
-  ȳ = sum(kw .* y) / sum(kw)
+  y = view(d.y, r)
+  sw = swy = 0.0
+  for l in eachindex(kw)
+    sw += kw[l]
+    swy += kw[l] * y[l]
+  end
+  ȳ = swy / sw
   _llstart(f, ȳ) || return nothing
   β = zeros(p + 1)
   β[1] = _lllink(f, ȳ)
-  res = _llirls(Z, y, kw, f, β)
+  res = _llirls(u, y, kw, f, β)
+  # Newton's method without halving failed: retry with it
+  res === nothing && f.canonical && (res = _llirls(u, y, kw, f, β; halving = true))
   res === nothing && return nothing
-  return (r = r, u = u, kw = kw, Z = Z, y = y, β = res[1], η = res[2])
+  return (r = r, u = u, kw = kw, y = y, β = res[1], η = res[2])
 end
 
 # The estimate of the linear predictor at x0 with its sandwich standard error, and
@@ -295,15 +336,19 @@ end
 function _llpoint(d, k, x0, h, b, p, f)
   s = _llsolve(d, k, x0, h, p, f)
   s === nothing && return (eta = NaN, se = NaN, eta_bc = NaN, se_rbc = NaN)
-  A, μ, a, ω = _llinformation(s.Z, s.kw, f, s.η)
+  A = _llinfo(s.u, s.y, s.kw, f, s.η, p + 1)
+  F = _llfactors.(f, s.η)
+  μ, a, ω = first.(F), getindex.(F, 2), last.(F)
   g = A \ [j == 1 ? 1.0 : 0.0 for j in 1:p+1]
-  ℓ = s.kw .* a .* (s.Z * g)
+  ℓ = s.kw .* a .* evalpoly.(s.u, Ref(g))
   se = sqrt(sum(abs2, ℓ .* (s.y .- μ)))
   q = _llsolve(d, k, x0, b, p + 1, f)
   q === nothing && return (eta = s.β[1], se = se, eta_bc = NaN, se_rbc = NaN)
-  Aq, μq, aq, _ = _llinformation(q.Z, q.kw, f, q.η)
+  Aq = _llinfo(q.u, q.y, q.kw, f, q.η, p + 2)
+  Fq = _llfactors.(f, q.η)
+  μq, aq = first.(Fq), getindex.(Fq, 2)
   c = Aq \ [j == p + 2 ? 1.0 : 0.0 for j in 1:p+2]
-  sb = LinearAlgebra.dot(g, s.Z' * (s.kw .* ω .* s.u .^ (p + 1)))
+  sb = sum(s.kw[l] * ω[l] * s.u[l]^(p + 1) * evalpoly(s.u[l], g) for l in eachindex(s.u))
   ρ = (h / b)^(p + 1)
   # the robust variance over the larger window, which contains the smaller one
   R = min(first(s.r), first(q.r)):max(last(s.r), last(q.r))
@@ -314,7 +359,7 @@ function _llpoint(d, k, x0, h, b, p, f)
     lq = 0.0
     if i in q.r
       l = i - first(q.r) + 1
-      lq = q.kw[l] * aq[l] * LinearAlgebra.dot(view(q.Z, l, :), c)
+      lq = q.kw[l] * aq[l] * evalpoly(q.u[l], c)
       ε = q.y[l] - μq[l]
     else
       η = evalpoly(t / b, q.β)
@@ -330,11 +375,12 @@ end
 function _llloo(d, k, i, h, p, f)
   s = _llsolve(d, k, d.x[i], h, p, f)
   s === nothing && return NaN
-  A, μ, a, ω = _llinformation(s.Z, s.kw, f, s.η)
+  A = _llinfo(s.u, s.y, s.kw, f, s.η, p + 1)
   l = i - first(s.r) + 1
+  μ, a, ω = _llfactors(f, s.η[l])
   a11 = (A \ [j == 1 ? 1.0 : 0.0 for j in 1:p+1])[1]
-  hii = s.kw[l] * ω[l] * a11
-  return s.β[1] - a11 * s.kw[l] * a[l] * (s.y[l] - μ[l]) / (1 - hii)
+  hii = s.kw[l] * ω * a11
+  return s.β[1] - a11 * s.kw[l] * a * (s.y[l] - μ) / (1 - hii)
 end
 
 # The bandwidth that maximizes the leave-one-out log likelihood over a grid spaced
@@ -382,35 +428,44 @@ function _llrot(rule, d, k, p, f)
   z = (d.x .- x̄) ./ sd
   w = d.w === nothing ? ones(nobs(d)) : Vector{Float64}(d.w)
   ȳ = sum(w .* d.y) / sum(w)
-  # the highest order up to p + 3 that the distinct values identify and whose fit has
-  # a maximum, as a logit fit with separated responses has not
-  fitted = nothing
-  P = min(pp + 3, nunique(d) - 1)
-  while fitted === nothing && P >= 0
-    Z = [z[i]^j for i in eachindex(z), j in 0:P]
-    fitted = _llirls(Z, d.y, w, f, [j == 0 ? _lllink(f, ȳ) : 0.0 for j in 0:P])
-    fitted === nothing && (P -= 1)
-  end
-  fitted === nothing && throw(ArgumentError("RuleOfThumb found no global fit of the family"))
-  α = fitted[1]
   n = effective_nobs(d)
   W = d.sumw
+  r = pp + 1
+  zg = range(z[1], z[end]; length = 401)
+  # the highest order from p + 3 down to p + 1 that the distinct values identify and
+  # whose fit has a maximum (which a logit fit with separated responses has not) and a
+  # valid mean over the range of x; with fewer distinct values than p + 2, the
+  # derivative vanishes and the bandwidth is the range
+  Pmax = min(pp + 3, nunique(d) - 1)
+  Pmax < r && return BandwidthSelection(R, rule, (constant = C, variance = NaN, curvature = 0.0, n = n))
+  fitted = nothing
+  P = Pmax
+  while P >= r
+    fitted = _llirls(z, d.y, w, f, [j == 0 ? _lllink(f, ȳ) : 0.0 for j in 0:P]; halving = true)
+    if fitted !== nothing
+      αP = fitted[1]
+      all(t -> _llvalid(f, evalpoly(t, αP)), zg) && break
+    end
+    fitted = nothing
+    P -= 1
+  end
+  fitted === nothing && throw(ArgumentError("RuleOfThumb: no global polynomial fit of the family of order " *
+    "$r to $Pmax has a maximum and a valid mean over the data, as for separated binary responses; use CrossValidation()"))
+  α = fitted[1]
   φ = if f.family in (:gaussian, :gamma, :inverse_gaussian)
     μ = _lllinkinv.(f, fitted[2])
     sum(_weight(d.w, i) * (d.y[i] - μ[i])^2 / _llvar(f, μ[i]) for i in eachindex(μ)) / W * n / max(n - P - 1, 1)
   else
     1.0
   end
-  r = pp + 1
   dr = [sum(α[j + 1] * prod(j-r+1:j) * z[i]^(j - r) for j in r:P; init = 0.0) / sd^r for i in eachindex(z)]
   D = sum(_weight(d.w, i) * dr[i]^2 for i in eachindex(dr)) / W
-  zg = range(z[1], z[end]; length = 401)
+  # V/μ'² = 1/μ' where μ' = V, which stays accurate where the logit's μ rounds to 1
   vals = map(zg) do zt
     ηt = evalpoly(zt, α)
-    _llvalid(f, ηt) ? φ * _llvar(f, _lllinkinv(f, ηt)) / _llmueta(f, ηt)^2 : Inf
+    f.canonical ? φ / _llmueta(f, ηt) : φ * _llvar(f, _lllinkinv(f, ηt)) / _llmueta(f, ηt)^2
   end
   I = sd * step(zg) * (sum(vals) - (first(vals) + last(vals)) / 2)
-  isfinite(I) || throw(ArgumentError("RuleOfThumb: the global fit gives no finite variance"))
   h = D > 0 ? min(C * (I / (n * D))^(1 / (2pp + 3)), R) : R
   return BandwidthSelection(h, rule, (constant = C, variance = I, curvature = D, n = n))
 end
@@ -420,7 +475,7 @@ bandwidth(m::LocalLikelihood) = m.h
 StatsAPI.coef(m::LocalLikelihood; method::InferenceMethod = Conventional()) =
   copy(_usesbc(method) ? m.eta_bc : m.eta)
 stderror(m::LocalLikelihood; method::InferenceMethod = Conventional()) = copy(_usesbc(method) ? m.se_rbc : m.se)
-StatsAPI.predict(m::LocalLikelihood) = _lllinkinv.(_llfamily(m), m.eta)
+StatsAPI.predict(m::LocalLikelihood) = _llmean.(_llfamily(m), m.eta)
 
 _llfamily(m::LocalLikelihood) = _LLFamily(m.family, m.link, m.theta, _llcanonical(m.family, m.link))
 
@@ -444,11 +499,15 @@ function StatsAPI.confint(m::LocalLikelihood; level::Real = 0.95, scale::Symbol 
   lo, hi = η .- z .* se, η .+ z .* se
   if scale === :mean
     f = _llfamily(m)
-    # where an inverse link has η ≤ 0, the mean is unbounded
-    meanof(e) = isnan(e) ? NaN : f.link in (:inverse, :inverse_squared) && e <= 0 ? Inf : _lllinkinv(f, e)
-    μlo, μhi = meanof.(lo), meanof.(hi)
-    # a decreasing link, as the inverse ones, swaps the ends
-    lo, hi = min.(μlo, μhi), max.(μlo, μhi)
+    if f.link in (:inverse, :inverse_squared)
+      # a decreasing link swaps the ends; an end η ≤ 0 is a mean without bound, and an
+      # interval of η without positive values holds no valid mean
+      μlo = [b > 0 ? _lllinkinv(f, b) : NaN for b in hi]
+      μhi = [isnan(a) || isnan(b) || b <= 0 ? NaN : a > 0 ? _lllinkinv(f, a) : Inf for (a, b) in zip(lo, hi)]
+      lo, hi = μlo, μhi
+    else
+      lo, hi = _lllinkinv.(f, lo), _lllinkinv.(f, hi)
+    end
   end
   return hcat(lo, hi)
 end
@@ -512,7 +571,7 @@ function fit(::Type{LocalLikelihoodDensity}, x::AbstractVector; points = nothing
   pts = points === nothing ? [_quantile(d, q) for q in range(0.1, 0.9; length = 30)] : _checkpoints(points)
   h = if bandwidth === nothing
     0 < span <= 1 || throw(ArgumentError("span must be in (0, 1], got $span"))
-    kk = max(1, ceil(Int, span * nobs(d)))
+    kk = max(1, floor(Int, span * nobs(d)))
     [knn_distance(d, x0, kk) for x0 in pts]
   else
     _pointbandwidths(bandwidth, length(pts))
@@ -589,9 +648,13 @@ function _lldensity(d, k, x0, h, p, nodes, wts)
   converged || return nan
   e = exp.(Rn * β)
   A = W * h .* (Rn' * ((wts .* e) .* Rn))
-  Zw = [t[l]^j for l in eachindex(t), j in 0:p]
-  sw2 = d.w === nothing ? Float64(nobs(d)) : sum(abs2, d.w)
-  B = (sw2 / W) .* (Zw' * ((kw .* k.(t)) .* Zw) .- (s * s') ./ W)
+  # ∑ᵢ wᵢ² (ψᵢ - ψ̄)(ψᵢ - ψ̄)' over all observations, with ψᵢ = k(tᵢ) r(tᵢ), zero outside
+  # the window, and ψ̄ = s/W, as for the standard errors of KDE
+  w2 = [_weight(d.w, i)^2 for i in r]
+  ψ = [k(t[l]) * t[l]^j for l in eachindex(t), j in 0:p]
+  m = s ./ W
+  q = ψ' * w2
+  B = ψ' * (w2 .* ψ) .- m * q' .- q * m' .+ (m * m') .* (W^2 / d.neff)
   g = A \ [j == 1 ? 1.0 : 0.0 for j in 1:P]
   return (logf = β[1], se = sqrt(max(LinearAlgebra.dot(g, B * g), 0.0)))
 end

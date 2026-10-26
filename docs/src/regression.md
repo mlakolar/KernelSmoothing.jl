@@ -178,7 +178,7 @@ intervals are robust bias-corrected (Calonico, Cattaneo and Farrell 2018): with
 \omega_i u_i^{p+1} r_p(u_i)`` and ``\hat\gamma`` the fit of order ``p + 1`` with the
 pilot bandwidth ``b``. Linearizing both fits gives the robust standard error, and for
 the Gaussian family the results are those of `LocalPolynomialRegression` with
-`vce = HCVariance(0)`.
+`vce = HCVariance(0)` and `minobs = 0`.
 
 [`CrossValidation`](@ref) maximizes the leave-one-out log likelihood, from one
 Fisher scoring step without each observation, and [`RuleOfThumb`](@ref) is the
