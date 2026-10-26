@@ -1,0 +1,213 @@
+# Tables of the results of the simulation campaign, as Markdown: run from the run
+# directory, which holds results-STUDY.csv, as
+#
+#     julia --project=src/simulations src/simulations/summarize.jl [STUDY ...]
+#
+# Coverage is reported with its Monte Carlo standard error.
+using Statistics
+using Distributions: Normal, quantile
+
+const Z = quantile(Normal(), 0.975)
+
+# a CSV file of numbers and strings as a vector of named rows
+function readcsv(path)
+  lines = readlines(path)
+  header = Symbol.(split(lines[1], ","))
+  rows = map(lines[2:end]) do l
+    vals = map(split(l, ",")) do v
+      t = tryparse(Float64, v)
+      t === nothing ? (v == "true" ? 1.0 : v == "false" ? 0.0 : String(v)) : t
+    end
+    NamedTuple{Tuple(header)}(Tuple(vals))
+  end
+  return rows
+end
+
+groupby(rows, keys) = (g = Dict{Any,Vector{eltype(rows)}}(); for r in rows; push!(get!(g, Tuple(r[k] for k in keys), eltype(rows)[]), r); end; g)
+fmt(x; d = 3) = isnan(x) ? "NaN" : string(round(x; digits = d))
+pct(p, R) = string(fmt(100p; d = 1), " (", fmt(100sqrt(p * (1 - p) / R); d = 1), ")")
+finite(v) = filter(isfinite, v)
+
+cell(v) = v isa AbstractFloat && isfinite(v) && isinteger(v) ? string(Int(v)) : string(v)
+
+function table(header, rows)
+  println("| ", join(header, " | "), " |")
+  println("|", join(fill("---", length(header)), "|"), "|")
+  for r in rows
+    println("| ", join(cell.(r), " | "), " |")
+  end
+  println()
+end
+
+function locallik(rows)
+  println("### Local likelihood: coverage of 95% intervals for the linear predictor (Monte Carlo standard error)\n")
+  out = []
+  for k in sort(collect(keys(groupby(rows, (:design, :n, :bandwidth, :point)))))
+    g = groupby(rows, (:design, :n, :bandwidth, :point))[k]
+    ok = filter(r -> isfinite(r.eta) && isfinite(r.se), g)
+    okb = filter(r -> isfinite(r.eta_bc) && isfinite(r.se_rbc), g)
+    cc = mean(abs(r.eta - r.truth) <= Z * r.se for r in ok)
+    cr = mean(abs(r.eta_bc - r.truth) <= Z * r.se_rbc for r in okb)
+    push!(out, (k..., pct(cc, length(ok)), pct(cr, length(okb)), fmt(mean(2Z * r.se for r in ok)),
+                fmt(mean(2Z * r.se_rbc for r in okb)), fmt(median(r.h for r in g)), length(g) - length(okb)))
+  end
+  table(("design", "n", "bandwidth", "point", "conventional", "robust", "length", "robust length", "median h", "NaN"), out)
+end
+
+function quantreg(rows)
+  println("### Local quantile regression: coverage of 95% pointwise intervals (Monte Carlo standard error)\n")
+  out = []
+  G = groupby(rows, (:design, :n, :point))
+  for k in sort(collect(keys(G)))
+    g = G[k]
+    ok = filter(r -> isfinite(r.estimate) && isfinite(r.se), g)
+    c = mean(abs(r.estimate - r.truth) <= Z * r.se for r in ok)
+    bias = mean(r.estimate - r.truth for r in ok)
+    push!(out, (k..., pct(c, length(ok)), fmt(bias), fmt(std(r.estimate for r in ok)), fmt(mean(r.se for r in ok)),
+                fmt(median(r.h for r in g)), length(g) - length(ok)))
+  end
+  table(("design", "n", "point", "coverage", "bias", "sd", "mean se", "median h", "NaN"), out)
+end
+
+function shape(rows)
+  println("### Shape constraints: mean squared error at the points, and coverage (Monte Carlo standard error)\n")
+  out = []
+  G = groupby(rows, (:design, :n))
+  for k in sort(collect(keys(G)))
+    g = G[k]
+    R = length(g)
+    m(f) = mean(getfield(r, f) for r in g)
+    push!(out, (k..., fmt(1000m(:ise_fit)), fmt(1000m(:ise_rearranged)), fmt(1000m(:ise_constrained)),
+                pct(m(:pointwise_fit), R), pct(m(:pointwise_rearranged), R), pct(m(:band_fit), R),
+                pct(m(:band_rearranged), R), fmt(m(:width_rearranged) / m(:width_fit)), pct(m(:fit_monotone), R)))
+  end
+  table(("design", "n", "MSE × 1000 fit", "rearranged", "constrained", "pointwise fit", "pointwise rearranged",
+         "band fit", "band rearranged", "width ratio", "fit monotone"), out)
+end
+
+function bounded(rows)
+  println("### Densities on [0, 1]: integrated squared error and errors at single points (root mean square)\n")
+  out = []
+  G = groupby(rows, (:design, :n, :method))
+  for k in sort(collect(keys(G)))
+    g = G[k]
+    ok = filter(r -> isfinite(r.ise), g)
+    rms(f) = fmt(sqrt(mean(getfield(r, f)^2 for r in ok)))
+    push!(out, (k..., fmt(1000mean(r.ise for r in ok)), rms(Symbol("error_0.001")), rms(Symbol("error_0.05")),
+                rms(Symbol("error_0.5")), rms(Symbol("error_0.999")), fmt(mean(r.seconds for r in g); d = 4),
+                length(g) - length(ok)))
+  end
+  table(("design", "n", "method", "ISE × 1000", "at 0.001", "at 0.05", "at 0.5", "at 0.999", "seconds", "failed"), out)
+end
+
+function rdlocrand(rows)
+  println("### Local randomization: rejection rates at the 5% level (Monte Carlo standard error)\n")
+  out = []
+  G = groupby(rows, (:design, :n, :statistic))
+  for k in sort(collect(keys(G)))
+    g = G[k]
+    R = length(g)
+    push!(out, (k..., pct(mean(r.pvalue <= 0.05 for r in g), R), pct(mean(r.asymptotic <= 0.05 for r in g), R),
+                fmt(mean(r.ncontrol for r in g); d = 1), fmt(mean(r.ntreated for r in g); d = 1)))
+  end
+  table(("design", "n", "statistic", "randomization", "asymptotic", "controls", "treated"), out)
+end
+
+# the studies with rows (design, n, rep, method, point, truth, estimate, se, h), and
+# the bands, whose rows carry the coverage, the mean width and the critical value in
+# the columns truth, estimate and se
+function intervals(title; bysize = true)
+  return function (rows)
+    # the sample size of the unbalanced cluster designs varies between replications
+    bysize || (rows = [merge(r, (n = 0.0,)) for r in rows])
+    println("### ", title, ": coverage of 95% intervals (Monte Carlo standard error)\n")
+    out = []
+    pw = filter(r -> !startswith(r.method, "band"), rows)
+    G = groupby(pw, (:design, :n, :method, :point))
+    for k in sort(collect(keys(G)))
+      g = G[k]
+      ok = filter(r -> isfinite(r.estimate) && isfinite(r.se), g)
+      c = mean(abs(r.estimate - r.truth) <= Z * r.se for r in ok)
+      push!(out, (k..., pct(c, length(ok)), fmt(mean(2Z * r.se for r in ok)), fmt(median(r.h for r in g)),
+                  length(g) - length(ok)))
+    end
+    table(("design", "n", "method", "point", "coverage", "length", "median h", "NaN"), out)
+    bands = filter(r -> startswith(r.method, "band"), rows)
+    isempty(bands) && return
+    println("Uniform bands on a grid of 21 points\n")
+    out = []
+    G = groupby(bands, (:design, :n, :method))
+    for k in sort(collect(keys(G)))
+      g = G[k]
+      push!(out, (k..., pct(mean(r.truth for r in g), length(g)), fmt(mean(r.estimate for r in g)),
+                  fmt(mean(r.se for r in g))))
+    end
+    table(("design", "n", "method", "coverage", "mean width", "critical value"), out)
+  end
+end
+
+function honest(rows)
+  println("### Honest intervals: coverage of 95% intervals (Monte Carlo standard error)\n")
+  out = []
+  G = groupby(rows, (:design, :n, :method, :point))
+  for k in sort(collect(keys(G)))
+    g = G[k]
+    ok = filter(r -> isfinite(r.lower) && isfinite(r.upper), g)
+    push!(out, (k..., pct(mean(r.lower <= r.truth <= r.upper for r in ok), length(ok)),
+                fmt(mean(r.upper - r.lower for r in ok)), fmt(median(r.h for r in g)), length(g) - length(ok)))
+  end
+  table(("design", "n", "method", "point", "coverage", "length", "median h", "NaN"), out)
+end
+
+function rd(rows)
+  println("### Regression discontinuity: coverage of 95% intervals for the jump (Monte Carlo standard error)\n")
+  out = []
+  G = groupby(rows, (:design, :n, :method))
+  for k in sort(collect(keys(G)))
+    g = G[k]
+    ok = filter(r -> isfinite(r.estimate) && isfinite(r.se), g)
+    push!(out, (k..., pct(mean(abs(r.estimate - r.truth) <= Z * r.se for r in ok), length(ok)),
+                fmt(mean(r.estimate - r.truth for r in ok); d = 4), fmt(mean(2Z * r.se for r in ok)),
+                fmt(median(r.hleft for r in g)), fmt(median(r.hright for r in g)), length(g) - length(ok)))
+  end
+  table(("design", "n", "method", "coverage", "bias", "length", "median h left", "median h right", "NaN"), out)
+end
+
+function rddensity(rows)
+  println("### Manipulation test: rejection rates at the 5% level (Monte Carlo standard error)\n")
+  out = []
+  G = groupby(rows, (:design, :n))
+  for k in sort(collect(keys(G)))
+    g = G[k]
+    ok = filter(r -> isfinite(r.pvalue), g)
+    push!(out, (k..., pct(mean(r.pvalue <= 0.05 for r in ok), length(ok)), fmt(median(r.hleft for r in g)),
+                fmt(median(r.hright for r in g)), length(g) - length(ok)))
+  end
+  table(("design", "n", "rejection", "median h left", "median h right", "NaN"), out)
+end
+
+function mvkde(rows)
+  println("### Bivariate densities: integrated squared error of the bandwidth matrices\n")
+  out = []
+  G = groupby(rows, (:design, :n, :rule))
+  for k in sort(collect(keys(G)))
+    g = G[k]
+    ok = filter(r -> isfinite(r.ise), g)
+    push!(out, (k..., fmt(1000mean(r.ise for r in ok)), fmt(1000median(r.ise for r in ok)),
+                fmt(mean(r.seconds for r in g); d = 4), length(g) - length(ok)))
+  end
+  table(("design", "n", "rule", "mean ISE × 1000", "median ISE × 1000", "seconds", "failed"), out)
+end
+
+const STUDIES = Dict("locallik" => locallik, "quantreg" => quantreg, "shape" => shape, "bounded" => bounded,
+                     "rdlocrand" => rdlocrand, "regression" => intervals("Local linear regression"),
+                     "density" => intervals("Kernel density estimation"),
+                     "cluster" => intervals("Cluster-robust variances"; bysize = false), "honest" => honest, "rd" => rd,
+                     "rddensity" => rddensity, "lpdboundary" => intervals("Local polynomial density at a boundary"),
+                     "mvkde" => mvkde, "partiallylinear" => intervals("Partially linear model (point = coefficient)"))
+
+for s in (isempty(ARGS) ? sort(collect(keys(STUDIES))) : ARGS)
+  f = "results-$s.csv"
+  isfile(f) || continue
+  STUDIES[s](readcsv(f))
+end
