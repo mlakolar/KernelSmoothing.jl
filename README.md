@@ -42,6 +42,9 @@ development.
   `y` given `x` (local constant and local linear), with likelihood and least-squares
   cross-validation, as R's np; `fit(LocalQuantileRegression, x, y; tau)`: local
   polynomial quantile regression with exact local fits, as quantreg's `lprq`.
+- `rearrange(m)` and `constrain(m, shape)`: monotone estimates and bands by
+  rearrangement (Chernozhukov, Fernández-Val and Galichon 2009), and projections of
+  the estimates onto monotone, convex or concave sequences.
 - `local_polynomial` and `smoother_matrix`: local polynomial estimates and their
   weights at given points and bandwidths, without inference, for smoothing many
   curves and for building other estimators, also for two covariates (covariance

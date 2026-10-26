@@ -13,6 +13,7 @@ makedocs(;
     "Local polynomial regression" => "regression.md",
     "Conditional densities and quantiles" => "conditional.md",
     "Regression discontinuity" => "rd.md",
+    "Shape constraints" => "shape.md",
     "Bandwidth selection" => "bandwidths.md",
     "Kernels" => "kernels.md",
     "Prepared data" => "data.md",

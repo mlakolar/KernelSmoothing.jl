@@ -56,7 +56,8 @@ export
   kernel_weights, regression_points, bandwidth_grid, grid_minimize, sandwich, supt_critical,
   MultivariateKDE, marginal, cov, MatrixSelector, NormalScaleMatrix, PlugInMatrix, SCVMatrix, LSCVMatrix,
   BoundedKDE, BoundaryMethod, Reflection, BetaKernels, GammaKernels, Transformed,
-  ConditionalDensity, ConditionalCV, conditional, LocalQuantileRegression, YuJones
+  ConditionalDensity, ConditionalCV, conditional, LocalQuantileRegression, YuJones,
+  rearrange, Rearranged, constrain, ShapeConstrained, shape_projection
 
 include("polynomials.jl")
 include("kernels.jl")
@@ -85,6 +86,7 @@ include("bandwidthmatrices.jl")
 include("bounded.jl")
 include("conditional.jl")
 include("quantreg.jl")
+include("shape.jl")
 include("building.jl")
 include("precompile.jl")
 

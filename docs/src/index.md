@@ -19,6 +19,8 @@ It provides:
   its derivatives, with conventional, robust bias-corrected and honest intervals,
   covariances between points and uniform bands;
 - [conditional densities and local polynomial quantile regression](@ref conditional-page);
+- [shape constraints](@ref shape-page): rearranged estimates and bands, and
+  projections onto monotone and convex sequences;
 - [regression discontinuity](@ref rd-page) estimates for sharp, fuzzy and kink
   designs, with covariates, and the manipulation test of the density at the cutoff;
 - [bandwidth selectors](@ref bandwidths-page): rules of thumb, Sheather and Jones,

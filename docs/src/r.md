@@ -33,6 +33,8 @@ in the next section.
 | RDHonest, local linear regression | `confint(m; method = Honest(M))` of `LocalPolynomialRegression` | 4 | 1e-10 |
 | R 4.5, `stats::bw.SJ` | `SheatherJones(compat = true)` | 13 samples | 1e-10 to 1e-12 |
 | R 4.5, `stats::glm` with kernel prior weights | `fit(LocalLikelihood, x, y; family, bandwidth)` | 6 | 1e-10 |
+| coneproj 1.23, `coneA` with and without weights; R 4.5, `isoreg` | `shape_projection(values, points; shape, weights)` | 8 shapes | 1e-9 |
+| cgam (`incr`) and scam (`bs = "mpi"`), constrained spline fits | `constrain(fit(LocalPolynomialRegression, x, y), :increasing)` | 1 | within 0.05 of cgam's step function and 0.03 of scam's fit, for a sample with noise of 0.2; a different smoother |
 | ks 1.15.3, `kde` with `binned = FALSE` | `pdf(fit(MultivariateKDE, x; bandwidth, weights), points)` | d = 2, 3, with and without weights | 1e-12 |
 | ks, `Hns`, `Hns.diag` (d = 2), `kfe`, `scv.mat`, `lscv.mat` | `NormalScaleMatrix`, the estimates of the functionals and the criteria | d = 2, 3 | 1e-12; `Hns.diag` to 1e-7 |
 | ks, `Hpi` and `Hpi.diag` with `pilot = "samse"`, `binned = FALSE` | `PlugInMatrix(; stages, compat = true)` | d = 2, 3, one and two stages | 5e-4, the accuracy of R's numerical minimization |
