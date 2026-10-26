@@ -57,7 +57,10 @@ export
   MultivariateKDE, marginal, cov, MatrixSelector, NormalScaleMatrix, PlugInMatrix, SCVMatrix, LSCVMatrix,
   BoundedKDE, BoundaryMethod, Reflection, BetaKernels, GammaKernels, Transformed,
   ConditionalDensity, ConditionalCV, conditional, LocalQuantileRegression, YuJones,
-  rearrange, Rearranged, constrain, ShapeConstrained, shape_projection
+  rearrange, Rearranged, constrain, ShapeConstrained, shape_projection,
+  MultipleCutoffs, CumulativeCutoffs,
+  rd_power, rd_samplesize,
+  LocalRandomization
 
 include("polynomials.jl")
 include("kernels.jl")
@@ -80,6 +83,9 @@ include("rdhonest.jl")
 include("semiparametric.jl")
 include("locallik.jl")
 include("rddensity.jl")
+include("rdmulti.jl")
+include("rdpower.jl")
+include("rdlocrand.jl")
 # (not named *kde.jl or *bandwidths.jl: the Pages of @autodocs match by suffix)
 include("multivariate.jl")
 include("bandwidthmatrices.jl")
