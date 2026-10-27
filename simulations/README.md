@@ -26,6 +26,7 @@ seed.
   | `bounded.jl` | error of density estimates on [0, 1]: `BoundedKDE` (#61) against `KDE` and `LocalPolynomialDensity` |
   | `rdlocrand.jl` | size and power of the randomization tests of `LocalRandomization` (#64) |
   | `mvbinning.jl` | binning error of full and diagonal PI, SCV and LSCV matrices (#86), against exact or fine-grid references, with Gaussian-overlap ISE |
+  | `partiallylinear.jl` | coverage of HC0 and HC1 coefficient intervals for `PartiallyLinear` (#96), comparing response, smallest and separate CV bandwidths with an oracle using the true conditional means |
 
 - `maketasks.sh`: writes the task list of the campaign, one line
   `STUDY DESIGN N FIRSTREP NREPS` per task.
@@ -55,6 +56,69 @@ A single task also runs on a laptop:
 ```
 julia --project=src/simulations src/simulations/shape.jl flat 200 1 10 out.csv
 ```
+
+## Partially linear coefficient coverage
+
+`partiallylinear.jl` uses study code 14. Keep `sine`, `sine-heteroskedastic` and
+`logistic` in their original positions so their seeds and data reproduce. All
+designs have u uniform on [0, 1], x₁ = u + v₁, β = [1, -0.5] and independent
+standard normal v₁, v₂ and ε. The original designs have x₂ = sin(2πu) + v₂ and
+g(u) = sin(2πu), except for the steep logistic design. Errors have σ = 0.5,
+except for `sine-heteroskedastic`, where σ = 0.2 + 0.6u.
+
+Four custom designs are appended. `quadratic` changes E[x₂ | u] to u².
+`cancellation` changes g(u) to 0.5 sin(2πu), so E[y | u] = u. `g-zero` sets g to
+zero. `linear-means` changes E[x₂ | u] to -u. The appended designs have σ = 0.5
+and otherwise retain the sine design. These are custom designs, not a published
+replication.
+
+Each replication compares `response`, `smallest`, `each` and `oracle`. The first
+three use `CrossValidation()` with the corresponding `bandwidth_mode`. HC1 reuses
+the full effective bandwidth vector from HC0. The oracle subtracts the true
+conditional means of y and X, then uses OLS with HC0 and HC1 sandwiches. Every
+method, VCE and coefficient has a row, including failures. A failed HC1 refit
+retains its successful HC0 result. The CSV columns are `design,n,rep,method,vce,`
+`coefficient,truth,estimate,se,h_y,h_1,h_2,cv_boundary,error`; VCE is `hc0` or `hc1`.
+Bandwidths are the effective values, ordered y, x₁, x₂. `cv_boundary` is true if
+any returned selection's `details.atbound` is true, before imposing a common
+bandwidth. Every returned selection is checked, including covariate selections
+whose bandwidths are replaced under `response` or `smallest`.
+Unknown flags and oracle bandwidths and flags are NaN. Exception messages replace
+commas, quotes and line breaks so they remain single unquoted CSV fields.
+
+The default tasks request n = 200 and 1000 with replications 1–2000, in chunks of
+1000. At the preliminary estimate of 0.1–0.2 seconds per replication at n = 1000,
+a task takes a few minutes; check this with the two-replication n = 1000 canary.
+Use a separate output directory for the canary: saved-task names include the
+first replication but omit the chunk length, so a canary output could otherwise
+cause the first full task to be skipped.
+
+For confirmation on fresh seeds, generate the optional task list:
+
+```sh
+PARTIALLYLINEAR_CONFIRMATION=1 bash simulations/maketasks.sh CONFIRMATION_DIR partiallylinear
+```
+
+The directory must already exist. This also writes
+`tasks-partiallylinear-confirmation.txt`, containing replications 2001–4000 for
+every design and n, with the same chunk size. The normal task lists stay the
+same. Run the confirmation list in a separate output directory, selecting it
+with `TASKS=tasks-partiallylinear-confirmation.txt`, so the combined results do
+not mix the original and confirmation replications. No seed offset is needed:
+`seed` includes the replication index.
+
+`summarize.jl partiallylinear` reads `results-partiallylinear.csv` in the current
+directory, including a confirmation file with that name. An explicit file is
+also accepted as `summarize.jl partiallylinear=PATH.csv`. Both runs use the same
+schema and summary. Tables report attempts, failures and the common valid set
+across all four methods, separately for each design, n, VCE and coefficient.
+Coverage, its Monte Carlo SE, paired coverage differences against `response`,
+bias, SD, mean and RMS SE, and mean interval length all use this common set.
+Bandwidth medians use all finite attempted bandwidths. The boundary percentage
+uses attempts with a known CV flag and reports that denominator. Empty valid
+sets produce NaN summaries; missing methods have zero attempts. SD and paired
+Monte Carlo SE are NaN with fewer than two common valid replications. Files in
+the old schema must be regenerated before using this summary.
 
 ## Binning error of bandwidth matrices
 

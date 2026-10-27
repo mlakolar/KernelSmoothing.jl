@@ -132,9 +132,21 @@ Pages = ["locpoly.jl", "surface.jl"]
 
 [`PartiallyLinear`](@ref) fits `y = x'β + g(u) + ε` by the double residuals of
 Robinson (1988): the regression of `y` on `X` after removing from both their local
-polynomial smooths in `u`, which removes `g` without estimating it first, so that
-`β̂` is `√n`-consistent with sandwich standard errors; `ĝ` is then the smooth of
-`y - x'β̂`.
+polynomial smooths in `u`. With `bandwidth = CrossValidation()`,
+`bandwidth_mode = :response` uses the bandwidth chosen for `y` for every smooth,
+`:smallest` uses the smallest chosen for `y` and the columns of `X` throughout,
+and `:each` uses each smooth's own bandwidth. A positive finite number sets one
+bandwidth for all smooths; a vector sets one for `y`, then each column of `X` in
+order. Numeric bandwidths are copied as `Float64`, and `bandwidth_mode` is
+validated but ignored for them. `m.bandwidths` records the effective bandwidths,
+and `m.selections` the cross-validation selections (`nothing` for numeric input).
+`m.selection` remains the selection for `y`. The smooth part `ĝ` smooths
+`y - x'β̂` with the effective bandwidth for `y`, returned by `bandwidth(m)`.
+
+The `√n` consistency theorem of Robinson (1988) assumes a common,
+non-data-driven bandwidth with trimming. The sandwich intervals are a first-order
+approximation whose small-sample accuracy depends on how well the covariates'
+conditional means are smoothed.
 
 Varying-coefficient models, with or without penalties, are in [HighDimensionalModels.jl](https://github.com/mlakolar/HighDimensionalModels.jl),
 which uses the kernels of this package.
