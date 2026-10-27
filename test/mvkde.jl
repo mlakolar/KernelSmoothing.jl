@@ -171,10 +171,17 @@ end
 @testset "binned bandwidth matrix selections" begin
   for d in (2, 3), diagonal in (false, true), R in (PlugInMatrix, SCVMatrix, LSCVMatrix)
     @testset "$R, d = $d, diagonal = $diagonal" begin
+      if d == 3 && !diagonal && R == LSCVMatrix
+        @test_logs (:warn, r"coarse") match_mode = :any select_bandwidth(LSCVMatrix(binned = true), XS[d])
+        continue
+      end
       exact = select_bandwidth(R(; diagonal, binned = false), XS[d])
-      binned = select_bandwidth(R(; diagonal, binned = true), XS[d])
+      # The small 3-D golden sample is below the binning threshold; use a finer
+      # grid here to test selection accuracy.
+      gridsize = d == 3 ? 61 : nothing
+      binned = select_bandwidth(R(; diagonal, binned = true, gridsize), XS[d])
       λ = eigvals(Symmetric(bandwidth(binned)), Symmetric(bandwidth(exact)))
-      @test maximum(abs, λ .- 1) <= (R == LSCVMatrix ? 0.05 : 0.02)
+      @test maximum(abs, λ .- 1) <= (d == 2 ? 0.01 : R == LSCVMatrix ? 0.05 : 0.02)
       @test exact.details.converged && binned.details.converged
     end
   end

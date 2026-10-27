@@ -1,5 +1,8 @@
 ## Binned pair sums for bandwidth matrices
 
+# The binning-error study of #86 calibrates this resolution threshold.
+const _MINRESOLUTION = 1.0
+
 function _checkgridsize(gridsize)
   gridsize === nothing && return nothing
   gridsize >= 3 || throw(ArgumentError("gridsize must be at least 3, got $gridsize"))
@@ -231,7 +234,7 @@ function _binningdetails(b::_MatrixBins, H, pilot = nothing)
   δ = maximum(b.spacing)
   resolution = (selected = sqrt(LinearAlgebra.eigmin(LinearAlgebra.Symmetric(H))) / δ,
                 pilot = pilot === nothing ? nothing : pilot / δ)
-  if resolution.selected < 1 || (resolution.pilot !== nothing && resolution.pilot < 1)
+  if resolution.selected < _MINRESOLUTION || (resolution.pilot !== nothing && resolution.pilot < _MINRESOLUTION)
     @warn "the binning grid is coarse relative to the bandwidth or pilot; increase gridsize or use binned = false" resolution
   end
   return (binned = true, gridsize = b.gridsize, spacing = b.spacing, resolution = resolution)
