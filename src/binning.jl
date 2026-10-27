@@ -9,10 +9,10 @@ function _checkgridsize(gridsize)
   return Int(gridsize)
 end
 
-function _usebinning(binned, p, n)
+function _usebinning(binned, p, n; default_dims = (2, 3))
   binned === true && !(p in (2, 3)) &&
     throw(ArgumentError("binned bandwidth matrix selection needs 2 or 3 coordinates, got $p"))
-  return binned === nothing ? (p == 2 && n > 500 || p == 3 && n > 1000) : binned
+  return binned === nothing ? (p in default_dims && (p == 2 && n > 500 || p == 3 && n > 1000)) : binned
 end
 
 # One grid on the transformed observations, shared by all the pilots and criteria.
@@ -26,9 +26,9 @@ struct _MatrixBins{D,L<:Union{Nothing,Vector{Float64}}}
   loo::L
 end
 
-function _matrixbins(y, d::_MvData, binned, gridsize; loo = false)
+function _matrixbins(y, d::_MvData, binned, gridsize; loo = false, default_dims = (2, 3))
   p = size(y, 1)
-  _usebinning(binned, p, nobs(d)) || return nothing
+  _usebinning(binned, p, nobs(d); default_dims) || return nothing
   M = gridsize === nothing ? (p == 2 ? 151 : 31) : gridsize
   return _MatrixBins(y, d.w, d.sumw, M; loo)
 end

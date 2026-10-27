@@ -21,11 +21,17 @@ identity in the transformed coordinates.
 The criteria are sums over pairs of observations. In two and three dimensions,
 the plug-in and cross-validation rules can approximate these sums by linear
 binning on one grid in the transformed coordinates. This is the default above
-500 observations in two dimensions and 1000 in three, counting only positive
-weights. `binned = false` uses exact sums, which take a time of order `n²`. Both
+500 observations in two dimensions and, for plug-in and smoothed cross-validation,
+1000 in three, counting only positive weights. Least-squares cross-validation
+uses exact sums by default in three dimensions (see [`LSCVMatrix`](@ref)).
+`binned = false` uses exact sums, which take a time of order `n²`. Both
 forms of the sums run in parallel when Julia runs with several threads.
 """
 abstract type MatrixSelector <: BandwidthSelector end
+
+_binning_dimensions(::MatrixSelector) = (2, 3)
+_matrixbins(rule::MatrixSelector, y, d::_MvData; loo = false) =
+  _matrixbins(y, d, rule.binned, rule.gridsize; loo, default_dims = _binning_dimensions(rule))
 
 select_bandwidth(rule::MatrixSelector, x::Union{AbstractMatrix,Tuple{Vararg{AbstractVector}}}; weights = nothing) =
   _selectmatrix(rule, _mvdata(x, weights))
@@ -307,14 +313,14 @@ end
 # the minimum locates θ to about √reltol.
 function _minimizematrix(fg, H0, diagonal; maxiter = 500, reltol = 1e-12)
   p = size(H0, 1)
-  # a trial matrix that is singular to working precision is rejected as a step to an
-  # infinite criterion
+  # a trial matrix that is singular to working precision or puts the criterion
+  # outside its domain is rejected as a step to an infinite criterion
   function fgθ(t)
     local Ht, Lt = _hfromtheta(t, p, diagonal)
     local ft, Gt = try
       fg(Ht)
     catch e
-      e isa Union{LinearAlgebra.PosDefException,LinearAlgebra.SingularException} || rethrow()
+      e isa Union{LinearAlgebra.PosDefException,LinearAlgebra.SingularException,DomainError} || rethrow()
       Inf, fill(NaN, p, p)
     end
     local gt = _thetagradient(Gt, Ht, Lt, diagonal)
@@ -473,7 +479,7 @@ PlugInMatrix(; diagonal::Bool = false, stages::Integer = 2, pre::Symbol = diagon
 function _selectmatrix(rule::PlugInMatrix, d::_MvData)
   A, y, Σ = _pretransform(d, rule.pre)
   p, n = _dimension(d), d.neff
-  bins = _matrixbins(y, d, rule.binned, rule.gridsize)
+  bins = _matrixbins(rule, y, d)
   psi, pilots = _psichain(y, d, Σ, rule.stages, rule.compat, bins)
   T = _psitensor(psi[4], p)
   c0 = (4π)^(-p / 2) / n
@@ -573,9 +579,14 @@ it. The exact criterion does not depend on the pre-transformation.
 
 `binned = true` approximates the pair sums by linear binning in two or three
 dimensions, with the smeared self-pairs removed and the exact diagonal kept.
-With `binned = nothing`, it is used above 500 observations with positive weight
-in two dimensions and 1000 in three. `gridsize` is the number of nodes per axis,
-at least 3, defaulting to 151 in two dimensions and 31 in three. `binned = false`
+With `binned = nothing`, it is used only in two dimensions, above 500 observations
+with positive weight; three dimensions use exact sums by default. A binned LSCV
+criterion can develop a spurious minimum as `H → 0` when observations share grid
+cells. In three dimensions the LSCV bandwidth is often below one default grid
+spacing; a hybrid fix is tracked in issue #101.
+
+`gridsize` is the number of nodes per axis, at least 3, defaulting to 151 in two
+dimensions and 31 in three. `binned = false`
 uses exact sums and ignores `gridsize`. The details record `binned`, `gridsize`,
 `spacing` and `resolution`, whose `selected` value is the smallest kernel standard
 deviation in units of the largest grid spacing in the transformed coordinates.
@@ -593,12 +604,14 @@ end
 LSCVMatrix(; diagonal::Bool = false, binned::Union{Nothing,Bool} = nothing, gridsize::Union{Nothing,Integer} = nothing) =
   LSCVMatrix(diagonal, binned, gridsize)
 
+_binning_dimensions(::LSCVMatrix) = (2,)
+
 function _selectmatrix(rule::LSCVMatrix, d::_MvData)
   count(i -> _weight(d.w, i) > 0, 1:nobs(d)) >= 2 ||
     throw(ArgumentError("least-squares cross-validation needs at least two observations"))
   A, y, Σ = _pretransform(d, rule.diagonal ? :scale : :sphere)
   p, n, W = _dimension(d), d.neff, d.sumw
-  bins = _matrixbins(y, d, rule.binned, rule.gridsize; loo = true)
+  bins = _matrixbins(rule, y, d; loo = true)
   Hy, crit, iter, converged = _minimizematrix(H -> _lscvcriterion(y, d.w, W, n, H, bins), _normalscale(Σ, n, rule.diagonal),
                                               rule.diagonal)
   details = (criterion = crit * abs(LinearAlgebra.det(A)), iterations = iter, converged = converged)
@@ -670,7 +683,7 @@ SCVMatrix(; diagonal::Bool = false, stages::Integer = 2, pre::Symbol = diagonal 
 function _selectmatrix(rule::SCVMatrix, d::_MvData)
   A, y, Σ = _pretransform(d, rule.pre)
   p, n, W = _dimension(d), d.neff, d.sumw
-  bins = _matrixbins(y, d, rule.binned, rule.gridsize)
+  bins = _matrixbins(rule, y, d)
   # Θ̂₆ needs the functionals of order 6 estimated, with a pilot from the normal
   # reference of order 8; for one stage, the functionals of order 4 come from the
   # normal reference of order 6

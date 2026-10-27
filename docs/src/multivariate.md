@@ -94,17 +94,24 @@ and on an estimate of ``\Theta_6 = \int (D^2)^3 f(x)\, f(x)\, dx``.
 
 ## Binned bandwidth selection
 
-The plug-in, smoothed cross-validation and least-squares cross-validation rules
-approximate their pair sums by linear binning by default above 500 observations
-in two dimensions and 1000 in three. These thresholds count observations with
-positive weight, rather than the effective sample size. The default grid has
-151 nodes per axis in two dimensions and 31 in three. `binned = true` forces
+The plug-in and smoothed cross-validation rules approximate their pair sums by
+linear binning by default above 500 observations in two dimensions and 1000 in
+three. Least-squares cross-validation bins by default only in two dimensions,
+above 500 observations, and uses exact sums by default in three dimensions.
+These thresholds count observations with positive weight, rather than the
+effective sample size. The default grid has 151 nodes per axis in two dimensions
+and 31 in three. `binned = true` forces
 binning, and `gridsize` chooses the number of nodes per axis, at least 3:
 
 ```julia
 select_bandwidth(PlugInMatrix(binned = true, gridsize = 201), x)
 select_bandwidth(SCVMatrix(binned = false), x)   # exact pair sums
 ```
+
+A binned LSCV criterion can develop a spurious minimum as ``H \to 0`` when
+observations share grid cells. In three dimensions its bandwidth is often below
+one default grid spacing; a hybrid fix is tracked in issue #101, and
+`LSCVMatrix(binned = true)` remains available explicitly.
 
 Each selection builds one grid spanning the transformed observations and reuses
 it through the pilot chain and criterion minimization. Multilinear weights put

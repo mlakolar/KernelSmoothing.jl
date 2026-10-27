@@ -290,7 +290,7 @@ end
   fgbad(H) = H[1, 1] > 2.5 ? throw(LinearAlgebra.PosDefException(1)) : ((H[1, 1] - 3)^2, fill(2 * (H[1, 1] - 3), 1, 1))
   Hb, _, _, convb = _minimizematrix(fgbad, fill(1.0, 1, 1), true)
   @test convb && 2.4 < Hb[1, 1] <= 2.5
-  @test_throws DomainError _minimizematrix(H -> throw(DomainError(H)), fill(1.0, 1, 1), true)
+  @test_throws ArgumentError _minimizematrix(H -> throw(DomainError(H)), fill(1.0, 1, 1), true)
   # at a kink the quasi-Newton step stops lowering the criterion: the search restarts
   # from the gradient once, then stops at the kink
   Hk, _, _, convk = _minimizematrix(H -> (abs(H[1, 1] - 2), fill(sign(H[1, 1] - 2), 1, 1)), fill(0.5, 1, 1), true)

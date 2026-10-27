@@ -167,6 +167,42 @@ end
     end
   end
 
+  @testset "default binning by rule" begin
+    # Use the selection's cache and details without minimizing exact sums at large n.
+    for (D, n) in ((2, 500), (2, 501), (3, 1000), (3, 1001)), diagonal in (false, true)
+      x = D == 2 ? X2 : X3
+      data = _mvdata(repeat(x[:, 1:10], 1, cld(n, 10))[:, 1:n], nothing)
+      H = 100.0 .* Matrix(1.0I, D, D)
+      for R in (PlugInMatrix, SCVMatrix, LSCVMatrix), binned in (nothing, false, true)
+        rule = R(; diagonal, binned, gridsize = 3)
+        bins = _matrixbins(rule, data.x, data; loo = R == LSCVMatrix)
+        details = _binningdetails(bins, H)
+        expected = binned === nothing ? (D == 2 && n > 500 || D == 3 && n > 1000 && R != LSCVMatrix) : binned
+        @test details.binned == expected
+        @test details.gridsize === (expected ? 3 : nothing)
+      end
+    end
+  end
+
+  @testset "matrix line search domain errors" begin
+    for diagonal in (false, true)
+      rejected = Ref(0)
+      fg = H -> begin
+        D = det(H)
+        if D < 0.04
+          rejected[] += 1
+          throw(DomainError(D, "the trial determinant is too small"))
+        end
+        tr(H), Matrix(1.0I, 2, 2)
+      end
+      H, f, _, _ = KernelSmoothing._minimizematrix(fg, Matrix(1.0I, 2, 2), diagonal)
+      @test rejected[] > 0
+      @test all(isfinite, H) && isposdef(H)
+      @test isfinite(f) && det(H) >= 0.04
+    end
+    @test_throws ArgumentError KernelSmoothing._minimizematrix(H -> throw(DomainError(H)), fill(1.0, 1, 1), true)
+  end
+
   @testset "defaults, validation and details" begin
     for (D, threshold) in ((2, 500), (3, 1000))
       @test !_usebinning(nothing, D, threshold)
