@@ -150,29 +150,42 @@ end
     # the plug-in matrices: ks stops its minimization early, at a matrix whose criterion
     # is above the minimum by a fraction of its tolerance
     for (stages, ref) in ((1, d == 2 ? HPI1_2 : HPI1_3), (2, d == 2 ? HPI2_2 : HPI2_3))
-      sel = select_bandwidth(PlugInMatrix(; stages, compat = true), x)
+      sel = select_bandwidth(PlugInMatrix(; stages, compat = true, binned = false), x)
       @test rel(bandwidth(sel), ref) < 5e-4
       @test sel.details.converged
     end
-    @test rel(bandwidth(select_bandwidth(PlugInMatrix(; diagonal = true, compat = true), x)), d == 2 ? HPIDIAG2 : HPIDIAG3) < 2e-4
-    @test rel(bandwidth(select_bandwidth(LSCVMatrix(; diagonal = true), x)), d == 2 ? HLSCVDIAG2 : HLSCVDIAG3) < 2e-3
+    @test rel(bandwidth(select_bandwidth(PlugInMatrix(; diagonal = true, compat = true, binned = false), x)), d == 2 ? HPIDIAG2 : HPIDIAG3) < 2e-4
+    @test rel(bandwidth(select_bandwidth(LSCVMatrix(; diagonal = true, binned = false), x)), d == 2 ? HLSCVDIAG2 : HLSCVDIAG3) < 2e-3
   end
   @test rel(bandwidth(select_bandwidth(NormalScaleMatrix(diagonal = true), X2)), HNSDIAG2) < 1e-7
   # LSCV in two dimensions: our minimum is at least as low as ks's
-  sel = select_bandwidth(LSCVMatrix(), X2)
+  sel = select_bandwidth(LSCVMatrix(binned = false), X2)
   @test rel(bandwidth(sel), HLSCV2) < 2e-3
   @test sel.details.criterion <= LSCVMIN2[1] + 1e-12
   # in three dimensions ks stops its minimization at a higher criterion
-  @test select_bandwidth(LSCVMatrix(), X3).details.criterion < LSCVMIN3[1]
+  @test select_bandwidth(LSCVMatrix(binned = false), X3).details.criterion < LSCVMIN3[1]
   # the smoothed cross-validation of ks uses a different pilot
-  @test rel(bandwidth(select_bandwidth(SCVMatrix(), X2)), HSCV2) < 0.05
+  @test rel(bandwidth(select_bandwidth(SCVMatrix(binned = false), X2)), HSCV2) < 0.05
+end
+
+@testset "binned bandwidth matrix selections" begin
+  for d in (2, 3), diagonal in (false, true), R in (PlugInMatrix, SCVMatrix, LSCVMatrix)
+    @testset "$R, d = $d, diagonal = $diagonal" begin
+      exact = select_bandwidth(R(; diagonal, binned = false), XS[d])
+      binned = select_bandwidth(R(; diagonal, binned = true), XS[d])
+      λ = eigvals(Symmetric(bandwidth(binned)), Symmetric(bandwidth(exact)))
+      @test maximum(abs, λ .- 1) <= (R == LSCVMatrix ? 0.05 : 0.02)
+      @test exact.details.converged && binned.details.converged
+    end
+  end
 end
 
 @testset "bandwidth matrix selectors" begin
   x = X2
   n = size(x, 2)
-  for rule in (NormalScaleMatrix(), PlugInMatrix(), SCVMatrix(), LSCVMatrix(), NormalScaleMatrix(diagonal = true),
-               PlugInMatrix(diagonal = true), SCVMatrix(diagonal = true, stages = 1), LSCVMatrix(diagonal = true))
+  for rule in (NormalScaleMatrix(), PlugInMatrix(binned = false), SCVMatrix(binned = false), LSCVMatrix(binned = false),
+               NormalScaleMatrix(diagonal = true), PlugInMatrix(diagonal = true, binned = false),
+               SCVMatrix(diagonal = true, stages = 1, binned = false), LSCVMatrix(diagonal = true, binned = false))
     H = bandwidth(select_bandwidth(rule, x))
     @test isposdef(H) && H == H'
     rule.diagonal && @test isdiag(H)

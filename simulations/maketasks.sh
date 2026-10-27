@@ -6,16 +6,18 @@
 set -euo pipefail
 out=${1:-.}
 shift || true
-studies=" ${*:-locallik quantreg shape bounded rdlocrand regression density cluster honest rd rddensity lpdboundary mvkde partiallylinear} "
+studies=" ${*:-locallik quantreg shape bounded rdlocrand regression density cluster honest rd rddensity lpdboundary mvkde partiallylinear mvbinning} "
 : > "$out/tasks.txt"
 : > "$out/tasks-quick.txt"
-add() {   # study, designs, sample sizes, replications, replications per task
+add() {   # study, designs, sample sizes, replications, replications per task, optional canary
   local study=$1 designs=$2 ns=$3 reps=$4 per=$5
   [[ $studies == *" $study "* ]] || return 0
   for d in $designs; do for n in $ns; do
     for ((first = 1; first <= reps; first += per)); do echo "$study $d $n $first $per" >> "$out/tasks.txt"; done
   done; done
-  echo "$study ${designs%% *} ${ns%% *} 1 2" >> "$out/tasks-quick.txt"
+  if [[ ${6:-yes} == yes ]]; then
+    echo "$study ${designs%% *} ${ns%% *} 1 2" >> "$out/tasks-quick.txt"
+  fi
 }
 add locallik "logit-sine poisson-sine gamma-sine negbin-sine" "500 2000" 2000 100
 add quantreg "sine-het-0.25 sine-het-0.5 sine-het-0.75 sine-t3-0.25 sine-t3-0.5 sine-t3-0.75 qy2-0.2 qy2-0.5 qy2-0.8" "500 2000" 2000 250
@@ -32,4 +34,16 @@ add lpdboundary "exponential beta13" "500 2000 10000" 2000 250
 add mvkde "correlated bimodal skewed" "200" 500 25
 add mvkde "correlated bimodal skewed" "1000" 200 10
 add partiallylinear "sine sine-heteroskedastic logistic" "200 1000" 2000 500
+# Exact 2-D SCV took 106 s at n = 10⁴ (notes/timings.md). Allow one replication
+# per task there and above; 3-D has no measured baseline. Check its canary before
+# running the full list. Two replications at 10³ assume roughly quadratic scaling.
+add mvbinning "correlated bimodal skewed trivariate" "1000" 100 2 no
+add mvbinning "correlated bimodal skewed trivariate" "10000" 50 1 no
+add mvbinning "correlated bimodal skewed trivariate" "100000" 10 1 no
+add mvbinning "bimodal-g51 bimodal-g101 bimodal-g151 bimodal-g301 trivariate-g21 trivariate-g31 trivariate-g51" "10000" 50 1 no
+if [[ $studies == *" mvbinning "* ]]; then
+  # Match the full task size: the resume key uses FIRSTREP but not NREPS.
+  echo "mvbinning bimodal 1000 1 2" >> "$out/tasks-quick.txt"
+  echo "mvbinning trivariate 1000 1 2" >> "$out/tasks-quick.txt"
+fi
 wc -l "$out/tasks.txt" "$out/tasks-quick.txt"

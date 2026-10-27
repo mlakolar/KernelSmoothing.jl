@@ -235,12 +235,46 @@ function mvkde(rows)
   table(("design", "n", "rule", "mean ISE × 1000", "median ISE × 1000", "seconds", "failed"), out)
 end
 
+function mvbinning(rows)
+  println("### Binning error of bandwidth matrices\n")
+  println("Metrics use finite, converged pairs; time medians include all finite attempt times.\n")
+  println("ISE is omitted at n = 100000, whose reference is a finer binned grid.\n")
+  stats(v) = isempty(v) ? (NaN, NaN, NaN) : (median(v), quantile(v, 0.9), maximum(v))
+  med(v) = isempty(v) ? NaN : median(v)
+  valid(r) = r.finite_bin == 1 && r.finite_ref == 1 && r.converged_bin == 1 && r.converged_ref == 1 &&
+             all(isfinite, (r.seconds_bin, r.seconds_ref, r.iterations_bin, r.iterations_ref, r.max_eigen_error)) &&
+             (r.n > 10_000 || (all(isfinite, (r.ise_bin, r.ise_ref, r.ise_ratio)) && r.ise_bin >= 0 && r.ise_ref > 0))
+  matrices, errors = [], []
+  G = groupby(rows, (:design, :d, :n, :gridsize, :rule, :diagonal, :reference))
+  for k in sort(collect(keys(G)))
+    g = G[k]
+    ok = filter(valid, g)
+    key = (k[1:5]..., k[6] == 1, k[7])
+    eigen = stats([r.max_eigen_error for r in ok])
+    push!(matrices, (key..., length(g), length(g) - length(ok), length(ok), fmt.(eigen; d = 6)...,
+                     fmt(med(finite([r.seconds_bin for r in g])); d = 4),
+                     fmt(med(finite([r.seconds_ref for r in g])); d = 4)))
+    ise = filter(r -> r.n <= 10_000, ok)
+    ratios = [r.ise_ratio for r in ise]
+    push!(errors, (key..., length(ise), fmt.(stats(ratios); d = 6)...,
+                   fmt.(stats(abs.(ratios .- 1)); d = 6)...))
+  end
+  println("Matrix errors and selection times\n")
+  table(("design", "d", "n", "grid", "rule", "diagonal", "reference", "attempted", "failed", "valid pairs",
+         "eigen median", "eigen p90", "eigen max", "bin seconds", "ref seconds"), matrices)
+  println("Paired ISE ratios\n")
+  table(("design", "d", "n", "grid", "rule", "diagonal", "reference", "ISE pairs",
+         "ratio median", "ratio p90", "ratio max", "abs(ratio − 1) median", "abs(ratio − 1) p90",
+         "abs(ratio − 1) max"), errors)
+end
+
 const STUDIES = Dict("locallik" => locallik, "quantreg" => quantreg, "shape" => shape, "bounded" => bounded,
                      "rdlocrand" => rdlocrand, "regression" => intervals("Local linear regression"),
                      "density" => intervals("Kernel density estimation"),
                      "cluster" => intervals("Cluster-robust variances"; bysize = false), "honest" => honest, "rd" => rd,
                      "rddensity" => rddensity, "lpdboundary" => intervals("Local polynomial density at a boundary"),
-                     "mvkde" => mvkde, "partiallylinear" => intervals("Partially linear model (point = coefficient)"))
+                     "mvkde" => mvkde, "mvbinning" => mvbinning,
+                     "partiallylinear" => intervals("Partially linear model (point = coefficient)"))
 
 for s in (isempty(ARGS) ? sort(collect(keys(STUDIES))) : ARGS)
   f = "results-$s.csv"

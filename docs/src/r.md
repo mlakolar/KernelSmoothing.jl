@@ -42,8 +42,8 @@ in the next section.
 | cgam (`incr`) and scam (`bs = "mpi"`), constrained spline fits | `constrain(fit(LocalPolynomialRegression, x, y), :increasing)` | 1 | within 0.05 of cgam's step function and 0.03 of scam's fit, for a sample with noise of 0.2; a different smoother |
 | ks 1.15.3, `kde` with `binned = FALSE` | `pdf(fit(MultivariateKDE, x; bandwidth, weights), points)` | d = 2, 3, with and without weights | 1e-12 |
 | ks, `Hns`, `Hns.diag` (d = 2), `kfe`, `scv.mat`, `lscv.mat` | `NormalScaleMatrix`, the estimates of the functionals and the criteria | d = 2, 3 | 1e-12; `Hns.diag` to 1e-7 |
-| ks, `Hpi` and `Hpi.diag` with `pilot = "samse"`, `binned = FALSE` | `PlugInMatrix(; stages, compat = true)` | d = 2, 3, one and two stages | 5e-4, the accuracy of R's numerical minimization |
-| ks, `Hlscv` and `Hlscv.diag` with `binned = FALSE` | `LSCVMatrix()` | d = 2 (full), 2 and 3 (diagonal) | 2e-3, with a criterion at least as low as R's |
+| ks, `Hpi` and `Hpi.diag` with `pilot = "samse"`, `binned = FALSE` | `PlugInMatrix(; stages, compat = true, binned = false)` | d = 2, 3, one and two stages | 5e-4, the accuracy of R's numerical minimization |
+| ks, `Hlscv` and `Hlscv.diag` with `binned = FALSE` | `LSCVMatrix(binned = false)` | d = 2 (full), 2 and 3 (diagonal) | 2e-3, with a criterion at least as low as R's |
 | evmix 2.12, `dbckden` and `pbckden` with `bcmethod = "reflect"`, `"beta1"`, `"beta2"`, `"gamma1"`, `"gamma2"`, `"logtrans"` | `fit(BoundedKDE, x; support, method, kernel, bandwidth)` | 7 | densities to 1e-12 before normalization; after it, and distribution functions, to 1e-9 to 1e-6, the accuracy of R's numerical integration |
 | np 0.70.5, `npcdens` at given bandwidths | `pdf(fit(ConditionalDensity, x, y; bandwidth), y, x)` | 2 | 1e-12; np orders the bandwidths (y, x) |
 | np, `npcdensbw(bwmethod = "cv.ml")` | `ConditionalCV()` | 1 | 1e-3, the accuracy of R's numerical minimization, with a criterion at least as low |
@@ -160,7 +160,14 @@ reproduces the R package where the keyword exists.
     the pilot `"dscalar"` of Chacón and Duong (2010); [`PlugInMatrix`](@ref) uses the
     SAMSE pilot of Duong and Hazelton (2003) in every dimension, which is ks's default
     for ``d = 2``. Furthermore, ks bins the data by default above 500 observations in
-    two dimensions and above 1000 in three; our selectors sum over the pairs exactly.
+    two dimensions and above 1000 in three, with `bgridsize = 151` and `31`,
+    respectively. Our selectors use the same thresholds and grid sizes, counting
+    observations with positive weight; `binned = false` restores exact sums.
+    Both bin linearly, but ks subtracts ``F(0)`` for each observation's self-pair,
+    leaving part of its smeared contribution. We remove each observation's full
+    smeared self-correlation and keep the exact diagonal terms. Thus binned
+    results can differ even at the same pilot. `compat` affects pilot ordering
+    independently of binning.
 18. [`SCVMatrix`](@ref) agrees with ks's `Hscv` in its criterion, to rounding at a
     given pilot, but its pilot follows Theorem 4 of Duong (2004), from which ks's
     differs, by about 5% for the samples of the tests; the selected matrices
