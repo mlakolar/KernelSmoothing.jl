@@ -49,7 +49,7 @@ function result_rows!(rows, a, rep, method, vce, b, se, h, boundary, error = "")
   for j in eachindex(β)
     message = isempty(error) && !(isfinite(b[j]) && isfinite(se[j]) && se[j] >= 0) ?
               "non-finite estimate or invalid standard error" : error
-    push!(rows, (a.design, a.n, rep, method, vce, j, β[j], b[j], se[j], h..., boundary, message))
+    push!(rows, (a.design, a.n, rep, method, vce, j, β[j], b[j], se[j], h..., boundary..., message))
   end
 end
 
@@ -61,12 +61,12 @@ function main()
     rng = Xoshiro(seed(14, code, a.n, rep))
     u, X, y, mean_X, mean_y = design_data(rng, a.design, a.n)
     for mode in (:response, :smallest, :each)
-      h, boundary = fill(NaN, 3), NaN
+      h, boundary = fill(NaN, 3), fill(NaN, 3)
       try
         m0 = fit(PartiallyLinear, u, X, y; bandwidth = CrossValidation(), bandwidth_mode = mode, vce = HCVariance(0))
         h = copy(m0.bandwidths)
         # Check every returned selection, before a common bandwidth is imposed.
-        boundary = any(s -> s !== nothing && s.details.atbound, m0.selections)
+        boundary = m0.selections === nothing ? fill(NaN, 3) : [s.details.atbound for s in m0.selections]
         result_rows!(rows, a, rep, string(mode), "hc0", coef(m0), stderror(m0), h, boundary)
       catch err
         for vce in ("hc0", "hc1")
@@ -84,16 +84,16 @@ function main()
     try
       oracle = oracle_fit(X, y, mean_X, mean_y)
       for (vce, V) in (("hc0", oracle.vcov0), ("hc1", oracle.vcov1))
-        result_rows!(rows, a, rep, "oracle", vce, oracle.estimate, sqrt.(max.(diag(V), 0.0)), fill(NaN, 3), NaN)
+        result_rows!(rows, a, rep, "oracle", vce, oracle.estimate, sqrt.(max.(diag(V), 0.0)), fill(NaN, 3), fill(NaN, 3))
       end
     catch err
       for vce in ("hc0", "hc1")
-        result_rows!(rows, a, rep, "oracle", vce, fill(NaN, 2), fill(NaN, 2), fill(NaN, 3), NaN, error_message(err))
+        result_rows!(rows, a, rep, "oracle", vce, fill(NaN, 2), fill(NaN, 2), fill(NaN, 3), fill(NaN, 3), error_message(err))
       end
     end
   end
   writerows(a.out, ("design", "n", "rep", "method", "vce", "coefficient", "truth", "estimate", "se",
-                   "h_y", "h_1", "h_2", "cv_boundary", "error"), rows)
+                   "h_y", "h_1", "h_2", "cv_boundary_y", "cv_boundary_1", "cv_boundary_2", "error"), rows)
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__

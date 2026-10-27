@@ -78,13 +78,14 @@ the full effective bandwidth vector from HC0. The oracle subtracts the true
 conditional means of y and X, then uses OLS with HC0 and HC1 sandwiches. Every
 method, VCE and coefficient has a row, including failures. A failed HC1 refit
 retains its successful HC0 result. The CSV columns are `design,n,rep,method,vce,`
-`coefficient,truth,estimate,se,h_y,h_1,h_2,cv_boundary,error`; VCE is `hc0` or `hc1`.
-Bandwidths are the effective values, ordered y, x₁, x₂. `cv_boundary` is true if
-any returned selection's `details.atbound` is true, before imposing a common
-bandwidth. Every returned selection is checked, including covariate selections
-whose bandwidths are replaced under `response` or `smallest`.
-Unknown flags and oracle bandwidths and flags are NaN. Exception messages replace
-commas, quotes and line breaks so they remain single unquoted CSV fields.
+`coefficient,truth,estimate,se,h_y,h_1,h_2,cv_boundary_y,cv_boundary_1,cv_boundary_2,error`;
+VCE is `hc0` or `hc1`. Bandwidths are the effective values, ordered y, x₁, x₂.
+Each boundary flag is its selection's `details.atbound`, before imposing a common
+bandwidth, including covariate selections whose bandwidths are replaced under
+`response` or `smallest`. HC1 retains the flags from the HC0 selections.
+Unknown flags, flags for numeric bandwidths, and oracle bandwidths and flags are
+NaN. Exception messages replace commas, quotes and line breaks so they remain
+single unquoted CSV fields.
 
 The default tasks request n = 200 and 1000 with replications 1–2000, in chunks of
 1000. At the preliminary estimate of 0.1–0.2 seconds per replication at n = 1000,
@@ -114,9 +115,10 @@ schema and summary. Tables report attempts, failures and the common valid set
 across all four methods, separately for each design, n, VCE and coefficient.
 Coverage, its Monte Carlo SE, paired coverage differences against `response`,
 bias, SD, mean and RMS SE, and mean interval length all use this common set.
-Bandwidth medians use all finite attempted bandwidths. The boundary percentage
-uses attempts with a known CV flag and reports that denominator. Empty valid
-sets produce NaN summaries; missing methods have zero attempts. SD and paired
+Bandwidth medians use all finite attempted bandwidths. Boundary percentages are
+reported separately for y, x₁ and x₂. They use attempts with known CV flags for all
+three smooths and report that shared denominator. Empty valid sets produce NaN
+summaries; missing methods have zero attempts. SD and paired
 Monte Carlo SE are NaN with fewer than two common valid replications. Files in
 the old schema must be regenerated before using this summary.
 

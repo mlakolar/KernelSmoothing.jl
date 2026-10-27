@@ -273,7 +273,7 @@ function partiallylinear(rows)
   println("Coverage, calibration and lengths use the common valid replications across response, smallest, each and oracle, per design, n, VCE and coefficient.\n")
   println("Coverage is in percent; paired differences against response are in percentage points (Monte Carlo SE).\n")
   println("Failures include error messages, non-finite values and negative standard errors. Missing methods have zero attempts and no common valid replications.\n")
-  println("Bandwidth medians use all finite attempted values. Boundary percentages use attempts with a known CV flag; oracle flags and bandwidths are NaN.\n")
+  println("Bandwidth medians use all finite attempted values. Boundary percentages use attempts with known CV flags for all three smooths; oracle flags and bandwidths are NaN.\n")
   println("SDs and paired Monte Carlo SEs need at least two common valid replications.\n")
   methods = ("response", "smallest", "each", "oracle")
   valid(r) = r.error == "" && all(isfinite, (r.truth, r.estimate, r.se)) && r.se >= 0
@@ -299,12 +299,13 @@ function partiallylinear(rows)
       key = (k[1], k[2], method, k[3], k[4])
       push!(coverage, (key..., length(g), count(r -> !valid(r), g), R, pct(avg(cc), R), paired))
       se = [r.se for r in ok]
-      boundary = finite([r.cv_boundary for r in g])
+      boundary = filter(r -> all(isfinite, (r.cv_boundary_y, r.cv_boundary_1, r.cv_boundary_2)), g)
       push!(calibration, (key..., fmt(avg([r.estimate - r.truth for r in ok])),
                           fmt(sd([r.estimate for r in ok])), fmt(avg(se)), fmt(sqrt(avg(se.^2))),
                           fmt(2Z * avg(se)), fmt(med(finite([r.h_y for r in g]))),
                           fmt(med(finite([r.h_1 for r in g]))), fmt(med(finite([r.h_2 for r in g]))),
-                          length(boundary), fmt(100avg(boundary); d = 1)))
+                          length(boundary),
+                          (fmt(100avg([r[f] for r in boundary]); d = 1) for f in (:cv_boundary_y, :cv_boundary_1, :cv_boundary_2))...))
     end
   end
   println("Coverage\n")
@@ -312,7 +313,7 @@ function partiallylinear(rows)
          "coverage (MC SE)", "coverage − response (MC SE)"), coverage)
   println("Calibration, length and bandwidths\n")
   table(("design", "n", "method", "VCE", "coefficient", "bias", "SD", "mean se", "RMS se", "mean length",
-         "median h_y", "median h_1", "median h_2", "CV known", "boundary %"), calibration)
+         "median h_y", "median h_1", "median h_2", "CV known", "boundary y %", "boundary 1 %", "boundary 2 %"), calibration)
 end
 
 const STUDIES = Dict("locallik" => locallik, "quantreg" => quantreg, "shape" => shape, "bounded" => bounded,

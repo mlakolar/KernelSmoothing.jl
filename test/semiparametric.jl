@@ -193,7 +193,9 @@ end
   @test_throws ArgumentError fit(PartiallyLinear, U, X2, Y; bandwidth = MSEOptimal())
   @test_throws ArgumentError fit(PartiallyLinear, U, X2, Y; bandwidth = NormalReference())
   for h in ([0.1], [0.1, 0.2, 0.3])
-    @test_throws DimensionMismatch fit(PartiallyLinear, U, X2, Y; bandwidth = h)
+    @test_throws DimensionMismatch(
+      "bandwidth has $(length(h)) entries for 1 + size(X, 2) = 2 smooths (y first, then the columns of X)") fit(
+      PartiallyLinear, U, X2, Y; bandwidth = h)
   end
   for h in (0.0, -0.1, NaN, Inf)
     @test_throws ArgumentError fit(PartiallyLinear, U, X2, Y; bandwidth = h)

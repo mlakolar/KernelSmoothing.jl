@@ -61,7 +61,9 @@ of `u`. `bandwidth` is a positive finite number for all smooths, a vector of
 [`CrossValidation`](@ref). With cross-validation, `bandwidth_mode = :response`
 uses the bandwidth chosen for `y` throughout, `:smallest` uses the smallest chosen
 for `y` and the columns of `X` throughout, and `:each` uses each smooth's own
-bandwidth. Numeric bandwidths are copied and converted to `Float64`;
+bandwidth. The `:response` mode also cross-validates the covariates to populate
+`selections`, roughly tripling the fit time compared with cross-validating only
+`y`. Numeric bandwidths are copied and converted to `Float64`;
 `bandwidth_mode` is validated but ignored for them. `ĝ` uses the effective
 bandwidth of the smooth of `y`. `points` are those of the smooth part, by default
 as for [`LocalPolynomialRegression`](@ref).
@@ -92,6 +94,10 @@ function fit(::Type{PartiallyLinear}, u::AbstractVector, X::AbstractVecOrMat, y:
     bandwidth_mode === :response && fill!(hs, hs[1])
     (sels[1], hs, sels)
   elseif bandwidth isa Union{Real,AbstractVector{<:Real}}
+    if bandwidth isa AbstractVector
+      length(bandwidth) == q + 1 || throw(DimensionMismatch(
+        "bandwidth has $(length(bandwidth)) entries for 1 + size(X, 2) = $(q + 1) smooths (y first, then the columns of X)"))
+    end
     hs = bandwidth isa Real ? fill(_bandwidths(bandwidth, 1), q + 1) : _bandwidths(bandwidth, q + 1)
     (_anyselection(BandwidthSelection(hs[1], nothing, NamedTuple())), hs, nothing)
   else
