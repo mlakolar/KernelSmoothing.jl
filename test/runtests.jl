@@ -27,6 +27,7 @@ tests = [
   "shape",
   "binning",
   "mvkde",
+  "mvkde_ties",
   "boundedkde",
   "conditional",
   "recipes",

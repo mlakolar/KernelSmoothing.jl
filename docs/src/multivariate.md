@@ -78,7 +78,22 @@ reference values of order 8, and uses them for the pilot of order 4.
 - \frac{2}{W} \sum_i \frac{w_i}{W - w_i} \sum_{j \neq i} w_j\, \phi_H(x_i - x_j),
 ```
 
-an unbiased estimate of the integrated squared error minus ``\int f^2``.
+an unbiased estimate of the integrated squared error minus ``\int f^2``. Tied or
+rounded data can give spuriously small bandwidths. The rule warns when any
+observation duplicates an earlier one or a coordinate's tie fraction,
+``1 - \text{distinct}/n``, exceeds 10%. The details record `duplicates` and
+the per-coordinate `ties` in the original coordinates after zero-weight
+observations are dropped. These counts are unweighted and treat `-0.0` as `0.0`.
+Consider [`SCVMatrix`](@ref) or [`PlugInMatrix`](@ref) for such data.
+
+The criterion can have no proper minimum when observations coincide or share
+binning cells. A degenerate selection emits a separate warning and reports
+`details.collapsed = true` and `details.converged = false`. The check uses both
+extreme eigenvalues relative to the starting normal-scale matrix, recorded in
+`details.eigenratio`, with limits ``10^{-8}`` and ``10^8``. It also checks that
+the selected and returned matrices are finite and the returned matrix is positive
+definite. The matrix and criterion are returned unchanged. Use [`SCVMatrix`](@ref),
+[`PlugInMatrix`](@ref) or `binned = false` if a collapse is reported.
 
 **Smoothed cross-validation.** [`SCVMatrix`](@ref) (Hall, Marron and Park 1992;
 Duong and Hazelton 2005) minimizes
@@ -110,7 +125,7 @@ select_bandwidth(SCVMatrix(binned = false), x)   # exact pair sums
 ```
 
 A binned LSCV criterion can develop a spurious minimum as ``H \to 0`` when
-observations share grid cells; a hybrid fix is tracked in issue #101.
+observations share grid cells; use `binned = false` in this case.
 `LSCVMatrix(binned = true)` remains available explicitly.
 
 Each selection builds one grid spanning the transformed observations and reuses
