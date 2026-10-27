@@ -230,46 +230,77 @@ flat within it, and check the balance of covariates there; the window selection 
 rdlocrand's `rdwinselect` and its polynomial adjustment are not implemented yet (#95). With
 a window that is not small, prefer `RegressionDiscontinuity`.
 
-## Local quantile regression (#62)
+## Local quantile regression (#62, #94)
 
-**Question.** Do the pointwise intervals of `LocalQuantileRegression`, which ignore the
-bias of the estimate, cover with the default bandwidth of Yu and Jones (1998)?
+**Question.** Do the conventional and robust bias-corrected (RBC) pointwise intervals
+of `LocalQuantileRegression` cover with the default bandwidth of Yu and Jones (1998),
+and what does the bias correction cost in interval length?
 
-**Design.** x is uniform on [0, 1] and y = sin(2πx) + σ(x) ε, with heteroskedastic
-normal errors, σ(x) = 0.5 + x, or with σ = 0.5 and t₃ errors. We estimate the
-quartiles and the median at 0.1, 0.25, 0.5, 0.75 and 0.9, for n = 500 and 2000, with
-2000 replications (`simulations/quantreg.jl`).
+**Design.** The sine designs have x uniform on [0, 1] and
+y = sin(2πx) + σ(x) ε, with heteroskedastic normal errors, σ(x) = 0.5 + x
+(`sine-het`), or with σ = 0.5 and t₃ errors (`sine-t3`). We estimate the
+quartiles and the median at 0.1, 0.25, 0.5, 0.75 and 0.9.
+The `qy2` design has x uniform on [-1, 1], normal errors, and
+Q(τ | x) = 0.5 + x + x² + sin(πx − 1) + (x + 1.25) Φ⁻¹(τ).
+It adapts Qu and Yoon (2019, Section 8, equation (21), Model 2) and is used here
+for pointwise checks only. We estimate τ ∈ {0.2, 0.5, 0.8} at −0.8:0.4:0.8.
+Each design uses the default local linear fit and bandwidth, for n = 500 and 2000,
+with 2000 replications per design and sample size (`simulations/quantreg.jl`).
 
-**Results.** Coverage of the 95% intervals at the five points, in percent (Monte Carlo
-standard error 0.4 to 0.9):
+**Results.** Coverage of the 95% pointwise intervals, in percent. Each point cell
+gives conventional / RBC coverage. Monte Carlo standard errors range from 0.4 to
+1.0 percentage points. Coverage, calibration and length comparisons use the common
+valid replications at each point; median h uses all attempted replications.
 
 | design | τ | n | 0.1 | 0.25 | 0.5 | 0.75 | 0.9 | median h |
 |---|---|---|---|---|---|---|---|---|
-| heteroskedastic normal | 0.25 | 500 | 92.4 | 82.8 | 95.1 | 86.6 | 93.6 | 0.153 |
-| heteroskedastic normal | 0.25 | 2000 | 89.8 | 82.7 | 94.8 | 89.6 | 94.0 | 0.114 |
-| heteroskedastic normal | 0.5 | 500 | 92.4 | 82.2 | 95.4 | 89.0 | 94.4 | 0.148 |
-| heteroskedastic normal | 0.5 | 2000 | 88.8 | 81.8 | 95.6 | 88.9 | 93.2 | 0.111 |
-| heteroskedastic normal | 0.75 | 500 | 91.4 | 79.6 | 94.8 | 89.4 | 93.8 | 0.155 |
-| heteroskedastic normal | 0.75 | 2000 | 88.9 | 80.2 | 94.9 | 89.8 | 95.0 | 0.116 |
-| t₃ | 0.25 | 500 | 95.0 | 84.4 | 95.5 | 82.5 | 93.0 | 0.139 |
-| t₃ | 0.25 | 2000 | 93.4 | 82.8 | 96.8 | 84.6 | 90.8 | 0.105 |
-| t₃ | 0.5 | 500 | 92.2 | 80.0 | 96.2 | 78.2 | 94.2 | 0.135 |
-| t₃ | 0.5 | 2000 | 91.0 | 80.9 | 96.2 | 78.8 | 89.4 | 0.102 |
-| t₃ | 0.75 | 500 | 93.4 | 83.7 | 95.9 | 82.8 | 94.4 | 0.141 |
-| t₃ | 0.75 | 2000 | 92.1 | 84.2 | 96.0 | 83.0 | 93.2 | 0.105 |
+| heteroskedastic normal | 0.25 | 500 | 92.4 / 95.4 | 82.8 / 96.4 | 95.1 / 95.2 | 86.6 / 94.0 | 93.6 / 95.2 | 0.153 |
+| heteroskedastic normal | 0.25 | 2000 | 89.8 / 94.8 | 82.7 / 95.4 | 94.8 / 95.6 | 89.6 / 94.6 | 94.0 / 95.2 | 0.114 |
+| heteroskedastic normal | 0.5 | 500 | 92.4 / 95.3 | 82.2 / 95.9 | 95.4 / 96.4 | 89.0 / 95.0 | 94.4 / 95.4 | 0.148 |
+| heteroskedastic normal | 0.5 | 2000 | 88.8 / 94.8 | 81.8 / 95.6 | 95.6 / 95.6 | 88.9 / 95.0 | 93.2 / 94.8 | 0.111 |
+| heteroskedastic normal | 0.75 | 500 | 91.4 / 94.0 | 79.6 / 95.1 | 94.8 / 95.0 | 89.4 / 94.6 | 93.8 / 95.0 | 0.155 |
+| heteroskedastic normal | 0.75 | 2000 | 88.9 / 95.1 | 80.2 / 94.8 | 94.9 / 95.0 | 89.8 / 94.8 | 95.0 / 94.8 | 0.116 |
+| t₃ | 0.25 | 500 | 95.0 / 95.7 | 84.4 / 96.9 | 95.5 / 95.9 | 82.5 / 95.2 | 93.0 / 95.5 | 0.139 |
+| t₃ | 0.25 | 2000 | 93.4 / 96.5 | 82.8 / 95.5 | 96.8 / 95.8 | 84.6 / 96.1 | 90.8 / 95.6 | 0.105 |
+| t₃ | 0.5 | 500 | 92.2 / 96.0 | 80.0 / 96.0 | 96.2 / 96.1 | 78.2 / 96.0 | 94.2 / 96.8 | 0.135 |
+| t₃ | 0.5 | 2000 | 91.0 / 95.6 | 80.9 / 95.4 | 96.2 / 96.4 | 78.8 / 96.1 | 89.4 / 95.6 | 0.102 |
+| t₃ | 0.75 | 500 | 93.4 / 96.3 | 83.7 / 96.0 | 95.9 / 96.2 | 82.8 / 96.8 | 94.4 / 95.8 | 0.141 |
+| t₃ | 0.75 | 2000 | 92.1 / 94.8 | 84.2 / 95.6 | 96.0 / 96.2 | 83.0 / 96.3 | 93.2 / 95.4 | 0.105 |
 
-The intervals cover at the nominal level at 0.5, where the sine is straight, and lose
-up to six points at the outer points. However, at 0.25 and 0.75, where the sine has
-its extremes, they cover only 78% to 90% of the time, and they change little with n
-(by at most three points). The standard errors are accurate: their mean is within
-about 10% of the standard deviation of the estimates at every point. The
-undercoverage comes from the bias of the local linear fit at a peak, 0.5 to 1.0
-standard errors at 0.25 and 0.75 at both sample sizes, which the intervals ignore by
-construction.
+For the Qu–Yoon adaptation:
 
-**Recommendations.** Read the intervals as intervals for the smoothed quantile, not
-for the quantile itself, where the function curves. Where coverage matters, use a
-bandwidth smaller than the default, which reduces the bias relative to the standard
-error. A robust bias correction for local quantile regression, as for local
-polynomial regression, should reduce the problem (#94).
+| design | τ | n | -0.8 | -0.4 | 0 | 0.4 | 0.8 | median h |
+|---|---|---|---|---|---|---|---|---|
+| qy2 | 0.2 | 500 | 95.8 / 94.5 | 79.6 / 94.6 | 83.7 / 94.9 | 94.0 / 94.7 | 93.6 / 94.8 | 0.347 |
+| qy2 | 0.2 | 2000 | 94.8 / 95.4 | 76.9 / 94.5 | 85.4 / 94.6 | 95.1 / 95.1 | 94.4 / 95.2 | 0.260 |
+| qy2 | 0.5 | 500 | 96.0 / 95.2 | 76.8 / 96.7 | 85.4 / 96.2 | 95.1 / 94.5 | 95.3 / 95.6 | 0.334 |
+| qy2 | 0.5 | 2000 | 94.0 / 95.3 | 77.2 / 95.3 | 86.2 / 95.6 | 94.2 / 95.2 | 93.1 / 95.0 | 0.249 |
+| qy2 | 0.8 | 500 | 95.9 / 95.4 | 75.3 / 96.0 | 84.9 / 95.7 | 94.8 / 94.8 | 92.5 / 93.6 | 0.346 |
+| qy2 | 0.8 | 2000 | 94.2 / 94.6 | 77.0 / 96.6 | 85.4 / 95.6 | 94.6 / 95.2 | 93.8 / 95.2 | 0.261 |
 
+The pre-registered criterion required RBC coverage within [92.5%, 97.5%] at every
+point of every design at n = 2000. It held: RBC coverage ranged from 94.5% to 96.6%.
+At n = 500, which was not gated, RBC coverage ranged from 93.6% to 96.9%.
+
+Bias correction reduces the bias at the sine peaks and improves coverage there.
+For example, with t₃ errors, τ = 0.5 and n = 2000, bias/SD changes from −0.902 to
+0.018 at x = 0.25, and from 0.934 to 0.024 at x = 0.75. The robust standard errors
+are well calibrated in these designs: RMS `se_rbc` / SD of the corrected estimate
+ranges from 0.957 to 1.133. The intervals are longer: the ratio of mean lengths,
+RBC / conventional, ranges from 1.34 to 1.45, with a median of 1.44.
+Both methods have non-finite results at the same 4 replication-points out of 180000.
+
+These results come from commit `f31b591`. To reproduce them, run
+`julia --project=simulations simulations/quantreg.jl DESIGN N FIRSTREP NREPS OUT`
+for the designs and sample sizes above. `DESIGN` is the design code followed by
+`-τ`; follow the argument convention in the
+[simulation instructions](../simulations/README.md). Combine the outputs into
+`results-quantreg.csv` and run
+`julia --project=simulations simulations/summarize.jl quantreg`.
+
+**Recommendations.** Use the default `confint` (RBC) where the quantile function may
+curve. The conventional intervals, available with `method = Conventional()`, are
+intervals for the smoothed quantile; inference for the quantile itself requires
+negligible smoothing bias. Validity of the correction is claimed only for odd
+`degree - derivative`, including the default `degree = derivative + 1`, under the
+pointwise inference assumptions in the [documentation](../docs/src/conditional.md).

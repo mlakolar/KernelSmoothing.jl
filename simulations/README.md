@@ -21,7 +21,7 @@ seed.
   | script | study |
   |---|---|
   | `locallik.jl` | coverage of the conventional and robust bias-corrected intervals of `LocalLikelihood` (#65), with cross-validated and rule-of-thumb bandwidths |
-  | `quantreg.jl` | coverage of the pointwise intervals of `LocalQuantileRegression` (#62) |
+  | `quantreg.jl` | coverage of conventional and robust bias-corrected pointwise intervals of `LocalQuantileRegression` (#62, #94), including an adaptation of Qu and Yoon (2019, Section 8, equation (21), Model 2) for pointwise checks |
   | `shape.jl` | error and coverage with and without `rearrange` and `constrain` (#63) |
   | `bounded.jl` | error of density estimates on [0, 1]: `BoundedKDE` (#61) against `KDE` and `LocalPolynomialDensity` |
   | `rdlocrand.jl` | size and power of the randomization tests of `LocalRandomization` (#64) |

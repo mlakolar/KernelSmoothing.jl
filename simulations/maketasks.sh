@@ -18,7 +18,7 @@ add() {   # study, designs, sample sizes, replications, replications per task
   echo "$study ${designs%% *} ${ns%% *} 1 2" >> "$out/tasks-quick.txt"
 }
 add locallik "logit-sine poisson-sine gamma-sine negbin-sine" "500 2000" 2000 100
-add quantreg "sine-het-0.25 sine-het-0.5 sine-het-0.75 sine-t3-0.25 sine-t3-0.5 sine-t3-0.75" "500 2000" 2000 250
+add quantreg "sine-het-0.25 sine-het-0.5 sine-het-0.75 sine-t3-0.25 sine-t3-0.5 sine-t3-0.75 qy2-0.2 qy2-0.5 qy2-0.8" "500 2000" 2000 250
 add shape "logistic flat sine" "200 1000" 2000 250
 add bounded "beta13 beta22 uniform" "200 1000" 1000 100
 add rdlocrand "null-flat null-slope alt-flat alt-slope" "500 2000" 2000 250

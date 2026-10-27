@@ -29,9 +29,11 @@ designs of the notes; they are not guarantees.
   about the nominal level at n = 500 and conservatively at n = 2000, and they are 6%
   to 15% shorter than the robust intervals; a bound that is too small by half brings
   coverage down to 86% to 88%. ([RD](rd-honest.md))
-- **The intervals of `LocalQuantileRegression` ignore the bias**. Where the quantile
-  function curves, read them as intervals for the smoothed quantile, or use a smaller
-  bandwidth; a bias correction is proposed in #94. ([estimators of #60–#65](new-estimators.md))
+- **Use the default `confint` (RBC) for `LocalQuantileRegression`** where the quantile
+  function may curve. At n = 2000 it covers at 94.5% to 96.6% in these designs
+  (93.6% to 96.9% at n = 500), at the cost of intervals about 1.4 times as long as
+  the conventional ones.
+  ([estimators of #60–#65](new-estimators.md))
 - **`LocalRandomization` needs a window in which the outcome is flat**. A slope in the
   window makes the tests reject far too often (#95).
   ([estimators of #60–#65](new-estimators.md))
