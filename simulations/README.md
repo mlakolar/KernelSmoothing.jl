@@ -70,9 +70,11 @@ At n = 10000, `bimodal-g51`, `bimodal-g101`, `bimodal-g151`, `bimodal-g301` and
 These names reuse the seed of the base target, pairing the samples across grids
 and with the default-grid study. Keep the base list in order when adding designs.
 
-All six selectors explicitly use binning, including at n = 1000 in 3-D, where the
-automatic threshold initially selects exact sums. The grid is otherwise the
-selector default unless the design specifies it. The reference is exact through
+All six selectors explicitly use binning. Automatic selection bins only 2-D PI
+and SCV above 500 observations; LSCV and all 3-D rules default to exact sums.
+The grid is otherwise the selector's opt-in default, currently 151 in 2-D and 51
+in 3-D, unless the design specifies it. Rows record the grid actually used,
+including 31 in earlier 3-D runs. The reference is exact through
 n = 10000; at n = 100000 it uses binning at 301 nodes per axis in 2-D or 61 in 3-D.
 The generalized eigenvalue error is `maximum(abs.(eigvals(H_bin, H_ref) .- 1))`.
 ISE is the exact Gaussian-overlap identity through n = 10000, including the

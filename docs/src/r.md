@@ -159,16 +159,17 @@ reproduces the R package where the keyword exists.
 17. For ``d \geq 3``, ks's plug-in and smoothed cross-validation matrices default to
     the pilot `"dscalar"` of Chacón and Duong (2010); [`PlugInMatrix`](@ref) uses the
     SAMSE pilot of Duong and Hazelton (2003) in every dimension, which is ks's default
-    for ``d = 2``. Furthermore, ks bins the data by default above 500 observations in
-    two dimensions and above 1000 in three, with `bgridsize = 151` and `31`,
-    respectively. Our plug-in and smoothed cross-validation selectors use the same
-    thresholds and grid sizes, counting observations with positive weight;
-    `binned = false` restores exact sums. ks also bins `Hlscv` by default in three
-    dimensions, whereas [`LSCVMatrix`](@ref) bins by default only in two dimensions,
-    above 500 observations. A binned LSCV criterion can develop a spurious minimum
-    as ``H \to 0`` when observations share grid cells. In three dimensions its
-    bandwidth is often below one default grid spacing; a hybrid fix is tracked in
-    issue #101, and `binned = true` remains available explicitly.
+    for ``d = 2``. Furthermore, ks bins all three selectors (`Hpi`, `Hscv` and
+    `Hlscv`) by default above 500 observations in two dimensions and above 1000 in
+    three, with `bgridsize = 151` and `31`, respectively. This package bins only
+    the plug-in and smoothed cross-validation selectors by default, in two
+    dimensions above 500 observations with positive weight. All selectors use
+    exact sums by default in three dimensions because binning at practical grid
+    sizes misses the 2% selection-error target. [`LSCVMatrix`](@ref) always uses
+    exact sums by default because its binned criterion can develop a spurious
+    minimum as ``H \to 0`` when observations share grid cells (issue #101).
+    `binned = true` remains available in two and three dimensions, with default
+    grid sizes of 151 and 51, respectively; `binned = false` restores exact sums.
     Both bin linearly, but ks subtracts ``F(0)`` for each observation's self-pair,
     leaving part of its smeared contribution. We remove each observation's full
     smeared self-correlation and keep the exact diagonal terms. Thus binned

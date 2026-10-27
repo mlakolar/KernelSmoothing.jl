@@ -176,8 +176,8 @@ end
         continue
       end
       exact = select_bandwidth(R(; diagonal, binned = false), XS[d])
-      # The small 3-D golden sample is below the binning threshold; use a finer
-      # grid here to test selection accuracy.
+      # Three-dimensional binning is opt-in; the small golden sample needs a
+      # finer grid here to test selection accuracy.
       gridsize = d == 3 ? 61 : nothing
       binned = select_bandwidth(R(; diagonal, binned = true, gridsize), XS[d])
       λ = eigvals(Symmetric(bandwidth(binned)), Symmetric(bandwidth(exact)))

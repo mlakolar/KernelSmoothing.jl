@@ -9,10 +9,10 @@ function _checkgridsize(gridsize)
   return Int(gridsize)
 end
 
-function _usebinning(binned, p, n; default_dims = (2, 3))
+function _usebinning(binned, p, n; default_dims = (2,))
   binned === true && !(p in (2, 3)) &&
     throw(ArgumentError("binned bandwidth matrix selection needs 2 or 3 coordinates, got $p"))
-  return binned === nothing ? (p in default_dims && (p == 2 && n > 500 || p == 3 && n > 1000)) : binned
+  return binned === nothing ? (p in default_dims && n > 500) : binned
 end
 
 # One grid on the transformed observations, shared by all the pilots and criteria.
@@ -26,10 +26,10 @@ struct _MatrixBins{D,L<:Union{Nothing,Vector{Float64}}}
   loo::L
 end
 
-function _matrixbins(y, d::_MvData, binned, gridsize; loo = false, default_dims = (2, 3))
+function _matrixbins(y, d::_MvData, binned, gridsize; loo = false, default_dims = (2,))
   p = size(y, 1)
   _usebinning(binned, p, nobs(d); default_dims) || return nothing
-  M = gridsize === nothing ? (p == 2 ? 151 : 31) : gridsize
+  M = gridsize === nothing ? (p == 2 ? 151 : 51) : gridsize
   return _MatrixBins(y, d.w, d.sumw, M; loo)
 end
 
@@ -232,7 +232,7 @@ _binningdetails(::Nothing, H, pilot = nothing) =
 
 function _binningdetails(b::_MatrixBins, H, pilot = nothing)
   δ = maximum(b.spacing)
-  resolution = (selected = sqrt(LinearAlgebra.eigmin(LinearAlgebra.Symmetric(H))) / δ,
+  resolution = (selected = sqrt(max(0.0, LinearAlgebra.eigmin(LinearAlgebra.Symmetric(H)))) / δ,
                 pilot = pilot === nothing ? nothing : pilot / δ)
   if resolution.selected < _MINRESOLUTION || (resolution.pilot !== nothing && resolution.pilot < _MINRESOLUTION)
     @warn "the binning grid is coarse relative to the bandwidth or pilot; increase gridsize or use binned = false" resolution

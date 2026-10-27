@@ -24,6 +24,8 @@ const TARGETS = Dict(
   "trivariate" => MixtureModel([mv([-1.0, 0.0, 0.0], [0.25 0.0 0.0; 0.0 0.25 0.0; 0.0 0.0 0.25]),
                                mv([1.0, 0.0, 0.0], [1.0 0.5 0.5; 0.5 1.0 0.5; 0.5 0.5 1.0])], [0.5, 0.5]))
 const RULES = [("PI", PlugInMatrix), ("SCV", SCVMatrix), ("LSCV", LSCVMatrix)]
+# Failed-row fallback only, mirroring the package's opt-in grid defaults.
+const DEFAULT_BIN_GRIDSIZES = Dict(2 => 151, 3 => 51)
 
 function design_settings(design, n)
   designcode(DESIGNS, design)
@@ -157,7 +159,7 @@ function main()
       ratio = isfinite(ise_bin) && isfinite(ise_ref) && ise_ref > 0 ? ise_bin / ise_ref : NaN
       # If default selection throws before returning details, retain its planned
       # grid in the failed row. Successful rows always use the reported grid.
-      grid = something(bin.gridsize, settings.gridsize, d == 2 ? 151 : 31)
+      grid = something(bin.gridsize, settings.gridsize, DEFAULT_BIN_GRIDSIZES[d])
       push!(rows, (a.design, d, a.n, rep, name, diagonal, grid, reference, something(ref.gridsize, NaN),
                    bin.seconds, ref.seconds, bin.iterations, ref.iterations, bin.converged, ref.converged,
                    bin.finite, ref.finite, error, ise_bin, ise_ref, ratio))

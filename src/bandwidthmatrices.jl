@@ -20,16 +20,19 @@ identity in the transformed coordinates.
 
 The criteria are sums over pairs of observations. In two and three dimensions,
 the plug-in and cross-validation rules can approximate these sums by linear
-binning on one grid in the transformed coordinates. This is the default above
-500 observations in two dimensions and, for plug-in and smoothed cross-validation,
-1000 in three, counting only positive weights. Least-squares cross-validation
-uses exact sums by default in three dimensions (see [`LSCVMatrix`](@ref)).
+binning on one grid in the transformed coordinates. Only the plug-in and smoothed
+cross-validation rules bin by default, in two dimensions above 500 observations
+with positive weight. All rules use exact sums by default in three dimensions:
+binning at practical grid sizes misses the 2% selection-error target.
+Least-squares cross-validation uses exact sums by default in every dimension
+because its binned criterion can develop a spurious minimum as `H → 0` when
+observations share grid cells (issue #101).
 `binned = false` uses exact sums, which take a time of order `n²`. Both
 forms of the sums run in parallel when Julia runs with several threads.
 """
 abstract type MatrixSelector <: BandwidthSelector end
 
-_binning_dimensions(::MatrixSelector) = (2, 3)
+_binning_dimensions(::MatrixSelector) = (2,)
 _matrixbins(rule::MatrixSelector, y, d::_MvData; loo = false) =
   _matrixbins(y, d, rule.binned, rule.gridsize; loo, default_dims = _binning_dimensions(rule))
 
@@ -447,9 +450,11 @@ independent of binning.
 
 `binned = true` approximates the pair sums, including those of every pilot, by
 linear binning in two or three dimensions. With `binned = nothing`, it is used
-above 500 observations with positive weight in two dimensions and 1000 in three.
+only above 500 observations with positive weight in two dimensions. Three
+dimensions use exact sums by default because binning at practical grid sizes
+misses the 2% selection-error target.
 `gridsize` is the number of nodes per axis, at least 3, defaulting to 151 in two
-dimensions and 31 in three. `binned = false` uses exact sums and ignores
+dimensions and 51 in three. `binned = false` uses exact sums and ignores
 `gridsize`. The smeared self-pairs are removed and the exact diagonal terms kept.
 
 The bandwidths converge to the optimal ones at the relative rate `n^(-2/(d+6))`.
@@ -579,14 +584,12 @@ it. The exact criterion does not depend on the pre-transformation.
 
 `binned = true` approximates the pair sums by linear binning in two or three
 dimensions, with the smeared self-pairs removed and the exact diagonal kept.
-With `binned = nothing`, it is used only in two dimensions, above 500 observations
-with positive weight; three dimensions use exact sums by default. A binned LSCV
+With `binned = nothing`, exact sums are used in every dimension. A binned LSCV
 criterion can develop a spurious minimum as `H → 0` when observations share grid
-cells. In three dimensions the LSCV bandwidth is often below one default grid
-spacing; a hybrid fix is tracked in issue #101.
+cells; a hybrid fix is tracked in issue #101.
 
 `gridsize` is the number of nodes per axis, at least 3, defaulting to 151 in two
-dimensions and 31 in three. `binned = false`
+dimensions and 51 in three. `binned = false`
 uses exact sums and ignores `gridsize`. The details record `binned`, `gridsize`,
 `spacing` and `resolution`, whose `selected` value is the smallest kernel standard
 deviation in units of the largest grid spacing in the transformed coordinates.
@@ -604,7 +607,7 @@ end
 LSCVMatrix(; diagonal::Bool = false, binned::Union{Nothing,Bool} = nothing, gridsize::Union{Nothing,Integer} = nothing) =
   LSCVMatrix(diagonal, binned, gridsize)
 
-_binning_dimensions(::LSCVMatrix) = (2,)
+_binning_dimensions(::LSCVMatrix) = ()
 
 function _selectmatrix(rule::LSCVMatrix, d::_MvData)
   count(i -> _weight(d.w, i) > 0, 1:nobs(d)) >= 2 ||
@@ -655,9 +658,11 @@ that the plug-in rule makes.
 
 `binned = true` approximates all the pair sums, including the internal plug-in
 selection and pilots, by linear binning in two or three dimensions. With
-`binned = nothing`, it is used above 500 observations with positive weight in
-two dimensions and 1000 in three. `gridsize` is the number of nodes per axis, at
-least 3, defaulting to 151 in two dimensions and 31 in three. `binned = false`
+`binned = nothing`, it is used only above 500 observations with positive weight
+in two dimensions. Three dimensions use exact sums by default because binning
+at practical grid sizes misses the 2% selection-error target. `gridsize` is the
+number of nodes per axis, at least 3, defaulting to 151 in two dimensions and 51
+in three. `binned = false`
 uses exact sums and ignores `gridsize`. The smeared self-pairs are removed and
 the exact diagonal terms kept. The details record `binned`, `gridsize`, `spacing`
 and `resolution`, the smallest selected kernel standard deviation and the pilot

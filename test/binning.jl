@@ -169,7 +169,7 @@ end
 
   @testset "default binning by rule" begin
     # Use the selection's cache and details without minimizing exact sums at large n.
-    for (D, n) in ((2, 500), (2, 501), (3, 1000), (3, 1001)), diagonal in (false, true)
+    for (D, n) in ((2, 500), (2, 501), (3, 1001)), diagonal in (false, true)
       x = D == 2 ? X2 : X3
       data = _mvdata(repeat(x[:, 1:10], 1, cld(n, 10))[:, 1:n], nothing)
       H = 100.0 .* Matrix(1.0I, D, D)
@@ -177,7 +177,7 @@ end
         rule = R(; diagonal, binned, gridsize = 3)
         bins = _matrixbins(rule, data.x, data; loo = R == LSCVMatrix)
         details = _binningdetails(bins, H)
-        expected = binned === nothing ? (D == 2 && n > 500 || D == 3 && n > 1000 && R != LSCVMatrix) : binned
+        expected = binned === nothing ? (D == 2 && n > 500 && R != LSCVMatrix) : binned
         @test details.binned == expected
         @test details.gridsize === (expected ? 3 : nothing)
       end
@@ -203,23 +203,31 @@ end
     @test_throws ArgumentError KernelSmoothing._minimizematrix(H -> throw(DomainError(H)), fill(1.0, 1, 1), true)
   end
 
+  @testset "collapsed matrix resolution" begin
+    bins = _MatrixBins([0.0 2.0; 0.0 2.0], nothing, 2.0, 3)
+    for H in ([1.0 0.0; 0.0 0.0], [1.0 0.0; 0.0 -2e-15])
+      details = @test_logs (:warn, r"coarse") _binningdetails(bins, H)
+      @test details.resolution.selected == 0.0
+    end
+  end
+
   @testset "defaults, validation and details" begin
-    for (D, threshold) in ((2, 500), (3, 1000))
-      @test !_usebinning(nothing, D, threshold)
-      @test _usebinning(nothing, D, threshold + 1)
-      @test !_usebinning(false, D, threshold + 1)
-      @test _usebinning(true, D, threshold)
-      x = repeat((D == 2 ? X2 : X3)[:, 1:10], 1, threshold ÷ 10 + 1)[:, 1:threshold+1]
+    for (D, n) in ((2, 501), (3, 1001))
+      @test !_usebinning(nothing, D, n - 1)
+      @test _usebinning(nothing, D, n) == (D == 2)
+      @test !_usebinning(false, D, n)
+      @test _usebinning(true, D, n)
+      x = repeat((D == 2 ? X2 : X3)[:, 1:10], 1, cld(n, 10))[:, 1:n]
       # A zero weight is dropped; the effective sample size does not set the threshold.
-      w = [100.0; ones(threshold - 1); 0.0]
+      w = [100.0; ones(n - 2); 0.0]
       d = _mvdata(x, w)
       @test _matrixbins(d.x, d, nothing, 3) === nothing
       w[end] = 1.0
       d = _mvdata(x, w)
-      @test _matrixbins(d.x, d, nothing, 3) isa _MatrixBins
+      @test (_matrixbins(d.x, d, nothing, 3) !== nothing) == (D == 2)
       d = _mvdata(x[:, 1:10], nothing)
       b = _matrixbins(d.x, d, true, nothing)
-      @test b.gridsize == (D == 2 ? 151 : 31)
+      @test b.gridsize == (D == 2 ? 151 : 51)
     end
     for D in (1, 4)
       @test !_usebinning(nothing, D, 2000)

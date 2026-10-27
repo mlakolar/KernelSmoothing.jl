@@ -9,8 +9,9 @@
 # times within a budget; a first call taking 60 seconds is retained without a rerun
 # (and includes compilation). Matrix entries are the lower triangle, by columns,
 # padded with NaN for d = 2. Failures remain in the CSV, with their error messages.
-# In 3-D, LSCV uses binned = true explicitly to avoid timing its exact default
-# at n = 10⁵ (#101).
+# Only 2-D PI and SCV use their binned defaults; 2-D LSCV and all 3-D rules
+# explicitly use binned = true with the opt-in grid (151 in 2-D, 51 in 3-D).
+# Exact rows are limited to n = 10⁴.
 using KernelSmoothing
 using Distributions
 using Random
@@ -83,7 +84,7 @@ function timings(dir, out)
       X = read_sample(sample_path(dir, d, n), d, n)
       for (name, constructor) in RULES, exact in (false, true)
         exact && n > 10_000 && continue
-        settings = exact ? "exact" : d == 3 && name == "LSCV" ? "binned" : "default"
+        settings = exact ? "exact" : d == 2 && name in ("PI", "SCV") ? "default" : "binned"
         row = try
           rule = settings == "default" ? constructor() : constructor(binned = settings == "binned")
           s, seconds, runs = timeit(() -> select_bandwidth(rule, X))
