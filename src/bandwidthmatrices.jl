@@ -18,10 +18,23 @@ and transform the matrix back. The plug-in and smoothed cross-validation rules
 depend on this choice through their pilot bandwidths, which are multiples of the
 identity in the transformed coordinates.
 
-The criteria are sums over all pairs of observations, which take a time of order
-`n²` and run in parallel when Julia runs with several threads.
+The criteria are sums over pairs of observations. In two and three dimensions,
+the plug-in and cross-validation rules can approximate these sums by linear
+binning on one grid in the transformed coordinates. Only the plug-in and smoothed
+cross-validation rules bin by default, in two dimensions above 500 observations
+with positive weight. All rules use exact sums by default in three dimensions:
+binning at practical grid sizes misses the 2% selection-error target.
+Least-squares cross-validation uses exact sums by default in every dimension
+because its binned criterion can develop a spurious minimum as `H → 0` when
+observations share grid cells (issue #101).
+`binned = false` uses exact sums, which take a time of order `n²`. Both
+forms of the sums run in parallel when Julia runs with several threads.
 """
 abstract type MatrixSelector <: BandwidthSelector end
+
+_binning_dimensions(::MatrixSelector) = (2,)
+_matrixbins(rule::MatrixSelector, y, d::_MvData; loo = false) =
+  _matrixbins(y, d, rule.binned, rule.gridsize; loo, default_dims = _binning_dimensions(rule))
 
 select_bandwidth(rule::MatrixSelector, x::Union{AbstractMatrix,Tuple{Vararg{AbstractVector}}}; weights = nothing) =
   _selectmatrix(rule, _mvdata(x, weights))
@@ -131,15 +144,19 @@ end
 # (the columns of R, all of the same even order j), the pairs i = j included. With
 # u = (yᵢ - yⱼ) / g, ∂ʳφ_{g²I} = (2π)^(-p/2) g^(-p-j) ∏ₐ He_{rₐ}(uₐ) exp(-|u|²/2) for
 # even j. Returns a dictionary from the multi-indices to the estimates.
-function _psihat(y::Matrix{Float64}, w, sumw, neff, g::Float64, R::Matrix{Int})
+function _psihat(y::Matrix{Float64}, w, sumw, neff, g::Float64, R::Matrix{Int}, bins = nothing)
   p, n = size(y)
   j = sum(view(R, :, 1))
   m = size(R, 2)
   # the terms i = j: ∑ wᵢ² ∂ʳφ(0) / (∑ wᵢ)² = ∂ʳφ(0) / neff
   diag0 = [prod(_hermite0(R[a, k]) for a in 1:p) for k in 1:m]
-  ntasks = _pairtasks(n)
-  parts = _fetchall([Threads.@spawn _psipairs(y, w, g, R, j, t, ntasks) for t in 1:ntasks], Vector{Float64})
-  s = reduce(+, parts)
+  s = if bins === nothing
+    ntasks = _pairtasks(n)
+    parts = _fetchall([Threads.@spawn _psipairs(y, w, g, R, j, t, ntasks) for t in 1:ntasks], Vector{Float64})
+    reduce(+, parts)
+  else
+    _psibins(bins, g, R, j)
+  end
   c = (2π)^(-p / 2) * g^(-p - j)
   v = c .* (diag0 ./ neff .+ 2 .* s ./ sumw^2)
   return Dict(R[:, k] => v[k] for k in 1:m)
@@ -233,7 +250,7 @@ end
 # SAMSE pilot of the next lower order from the functionals above it, estimates the
 # functionals of that order with it and passes them on. Returns the estimates of
 # each order and the pilot of each order.
-function _psichain(y, d::_MvData, Σ, stages::Int, compat::Bool)
+function _psichain(y, d::_MvData, Σ, stages::Int, compat::Bool, bins = nothing)
   p = size(y, 1)
   top = 4 + 2 * stages
   psi = Dict{Int,Dict{Vector{Int},Float64}}(top => _psinormal(Σ, _multiindices(p, top)))
@@ -243,7 +260,7 @@ function _psichain(y, d::_MvData, Σ, stages::Int, compat::Bool)
     above = psi[j + 2]
     compat && j + 2 < top && (above = _ksorder(above, _multiindices(p, j + 2)))
     pilots[j] = _samse(R, above, d.neff)
-    psi[j] = _psihat(y, d.w, d.sumw, d.neff, pilots[j], R)
+    psi[j] = _psihat(y, d.w, d.sumw, d.neff, pilots[j], R, bins)
   end
   return psi, pilots
 end
@@ -299,14 +316,14 @@ end
 # the minimum locates θ to about √reltol.
 function _minimizematrix(fg, H0, diagonal; maxiter = 500, reltol = 1e-12)
   p = size(H0, 1)
-  # a trial matrix that is singular to working precision is rejected as a step to an
-  # infinite criterion
+  # a trial matrix that is singular to working precision or puts the criterion
+  # outside its domain is rejected as a step to an infinite criterion
   function fgθ(t)
     local Ht, Lt = _hfromtheta(t, p, diagonal)
     local ft, Gt = try
       fg(Ht)
     catch e
-      e isa Union{LinearAlgebra.PosDefException,LinearAlgebra.SingularException} || rethrow()
+      e isa Union{LinearAlgebra.PosDefException,LinearAlgebra.SingularException,DomainError} || rethrow()
       Inf, fill(NaN, p, p)
     end
     local gt = _thetagradient(Gt, Ht, Lt, diagonal)
@@ -406,7 +423,8 @@ function _picriterion(H, T, c0)
 end
 
 """
-    PlugInMatrix(; diagonal = false, stages = 2, pre = diagonal ? :scale : :sphere, compat = false)
+    PlugInMatrix(; diagonal = false, stages = 2, pre = diagonal ? :scale : :sphere,
+                   compat = false, binned = nothing, gridsize = nothing)
 
 The plug-in bandwidth matrix of Wand and Jones (1994) and Duong and Hazelton
 (2003): the minimizer of the estimated asymptotic mean integrated squared error,
@@ -426,37 +444,55 @@ sum of the squared asymptotic biases of the estimates whose indices are all even
 way from normal-reference functionals of order 8, and with `stages = 1` they come
 from the normal reference. `compat = true` reads the estimates of order 6 in the
 order in which the R package ks reads them, which matches `ks::Hpi(pilot =
-"samse", binned = FALSE)` exactly (see [Comparison with R](@ref)); it changes
-nothing for `stages = 1`.
+"samse", binned = FALSE)` to its minimization accuracy when `binned = false`
+(see [Comparison with R](@ref)); it changes nothing for `stages = 1` and is
+independent of binning.
+
+`binned = true` approximates the pair sums, including those of every pilot, by
+linear binning in two or three dimensions. With `binned = nothing`, it is used
+only above 500 observations with positive weight in two dimensions. Three
+dimensions use exact sums by default because binning at practical grid sizes
+misses the 2% selection-error target.
+`gridsize` is the number of nodes per axis, at least 3, defaulting to 151 in two
+dimensions and 51 in three. `binned = false` uses exact sums and ignores
+`gridsize`. The smeared self-pairs are removed and the exact diagonal terms kept.
 
 The bandwidths converge to the optimal ones at the relative rate `n^(-2/(d+6))`.
 The details record the pilots by order, the minimized criterion and the number of
-iterations.
+iterations, and `binned`, `gridsize`, `spacing` and `resolution`. The resolution
+gives the smallest selected kernel standard deviation and the smallest pilot in
+units of the largest grid spacing in the transformed coordinates; a value below
+1 warns to increase `gridsize` or use `binned = false`.
 """
 struct PlugInMatrix <: MatrixSelector
   diagonal::Bool
   stages::Int
   pre::Symbol
   compat::Bool
+  binned::Union{Nothing,Bool}
+  gridsize::Union{Nothing,Int}
 
-  PlugInMatrix(diagonal::Bool, stages::Integer, pre::Symbol, compat::Bool) =
-    new(diagonal, _checkstages(stages), _checkpre(pre, diagonal), compat)
+  PlugInMatrix(diagonal::Bool, stages::Integer, pre::Symbol, compat::Bool,
+               binned::Union{Nothing,Bool} = nothing, gridsize::Union{Nothing,Integer} = nothing) =
+    new(diagonal, _checkstages(stages), _checkpre(pre, diagonal), compat, binned, _checkgridsize(gridsize))
 end
 
 PlugInMatrix(; diagonal::Bool = false, stages::Integer = 2, pre::Symbol = diagonal ? :scale : :sphere,
-             compat::Bool = false) = PlugInMatrix(diagonal, stages, pre, compat)
+             compat::Bool = false, binned::Union{Nothing,Bool} = nothing, gridsize::Union{Nothing,Integer} = nothing) =
+  PlugInMatrix(diagonal, stages, pre, compat, binned, gridsize)
 
 function _selectmatrix(rule::PlugInMatrix, d::_MvData)
   A, y, Σ = _pretransform(d, rule.pre)
   p, n = _dimension(d), d.neff
-  psi, pilots = _psichain(y, d, Σ, rule.stages, rule.compat)
+  bins = _matrixbins(rule, y, d)
+  psi, pilots = _psichain(y, d, Σ, rule.stages, rule.compat, bins)
   T = _psitensor(psi[4], p)
   c0 = (4π)^(-p / 2) / n
   Hy, crit, iter, converged = _minimizematrix(H -> _picriterion(H, T, c0), _normalscale(Σ, n, rule.diagonal),
                                               rule.diagonal)
   # the criteria in the original coordinates: integrated squared errors scale with |A|
-  return BandwidthSelection(_backtransform(A, Hy), rule, (pilots = pilots, criterion = crit * abs(LinearAlgebra.det(A)),
-                                                          iterations = iter, converged = converged))
+  details = (pilots = pilots, criterion = crit * abs(LinearAlgebra.det(A)), iterations = iter, converged = converged)
+  return BandwidthSelection(_backtransform(A, Hy), rule, merge(details, _binningdetails(bins, Hy, minimum(values(pilots)))))
 end
 
 ## Cross-validation
@@ -464,7 +500,8 @@ end
 # ∑ over the pairs i < j of cᵢⱼ φ_Σ(yᵢ - yⱼ) and ∑ cᵢⱼ φ_Σ(yᵢ - yⱼ) (yᵢ - yⱼ)(yᵢ - yⱼ)ᵀ for
 # each covariance matrix Σ of Ss, with cᵢⱼ = wᵢ wⱼ, or for loo = true the weights of
 # the leave-one-out sums, wᵢ wⱼ (1 / (W - wᵢ) + 1 / (W - wⱼ)) / W
-function _gausspairs(y, w, W, Ss::Vector{Matrix{Float64}}, loo::Vector{Bool}, grad::Bool)
+function _gausspairs(y, w, W, Ss::Vector{Matrix{Float64}}, loo::Vector{Bool}, grad::Bool, bins = nothing)
+  bins === nothing || return _gaussbins(bins, Ss, loo, grad)
   p, n = size(y)
   K = length(Ss)
   Rinv = [inv(LinearAlgebra.cholesky(LinearAlgebra.Symmetric(S)).L) for S in Ss]
@@ -529,7 +566,7 @@ function _gaussgradient(S, s, M)
 end
 
 """
-    LSCVMatrix(; diagonal = false)
+    LSCVMatrix(; diagonal = false, binned = nothing, gridsize = nothing)
 
 The least-squares cross-validation bandwidth matrix (Rudemo 1982, Bowman 1984, and
 Duong and Hazelton 2005 for matrices): the minimizer of an unbiased estimate of the
@@ -543,29 +580,51 @@ where `W = ∑ wᵢ` and `f̂₋ᵢ` leaves observation `i` out; with equal weig
 and adapts to densities far from normal, but its bandwidths vary much more from
 sample to sample than plug-in ones, and the criterion can have several local
 minima: the search starts from the normal scale matrix and finds a minimum near
-it. The criterion does not depend on the pre-transformation.
+it. The exact criterion does not depend on the pre-transformation.
+
+`binned = true` approximates the pair sums by linear binning in two or three
+dimensions, with the smeared self-pairs removed and the exact diagonal kept.
+With `binned = nothing`, exact sums are used in every dimension. A binned LSCV
+criterion can develop a spurious minimum as `H → 0` when observations share grid
+cells; a hybrid fix is tracked in issue #101.
+
+`gridsize` is the number of nodes per axis, at least 3, defaulting to 151 in two
+dimensions and 51 in three. `binned = false`
+uses exact sums and ignores `gridsize`. The details record `binned`, `gridsize`,
+`spacing` and `resolution`, whose `selected` value is the smallest kernel standard
+deviation in units of the largest grid spacing in the transformed coordinates.
+A value below 1 warns to increase `gridsize` or use `binned = false`.
 """
 struct LSCVMatrix <: MatrixSelector
   diagonal::Bool
+  binned::Union{Nothing,Bool}
+  gridsize::Union{Nothing,Int}
+
+  LSCVMatrix(diagonal::Bool, binned::Union{Nothing,Bool} = nothing, gridsize::Union{Nothing,Integer} = nothing) =
+    new(diagonal, binned, _checkgridsize(gridsize))
 end
 
-LSCVMatrix(; diagonal::Bool = false) = LSCVMatrix(diagonal)
+LSCVMatrix(; diagonal::Bool = false, binned::Union{Nothing,Bool} = nothing, gridsize::Union{Nothing,Integer} = nothing) =
+  LSCVMatrix(diagonal, binned, gridsize)
+
+_binning_dimensions(::LSCVMatrix) = ()
 
 function _selectmatrix(rule::LSCVMatrix, d::_MvData)
   count(i -> _weight(d.w, i) > 0, 1:nobs(d)) >= 2 ||
     throw(ArgumentError("least-squares cross-validation needs at least two observations"))
   A, y, Σ = _pretransform(d, rule.diagonal ? :scale : :sphere)
   p, n, W = _dimension(d), d.neff, d.sumw
-  Hy, crit, iter, converged = _minimizematrix(H -> _lscvcriterion(y, d.w, W, n, H), _normalscale(Σ, n, rule.diagonal),
+  bins = _matrixbins(rule, y, d; loo = true)
+  Hy, crit, iter, converged = _minimizematrix(H -> _lscvcriterion(y, d.w, W, n, H, bins), _normalscale(Σ, n, rule.diagonal),
                                               rule.diagonal)
-  return BandwidthSelection(_backtransform(A, Hy), rule,
-                            (criterion = crit * abs(LinearAlgebra.det(A)), iterations = iter, converged = converged))
+  details = (criterion = crit * abs(LinearAlgebra.det(A)), iterations = iter, converged = converged)
+  return BandwidthSelection(_backtransform(A, Hy), rule, merge(details, _binningdetails(bins, Hy)))
 end
 
 # the criterion of LSCVMatrix and its gradient in the entries of H
-function _lscvcriterion(y, w, W, n, H)
+function _lscvcriterion(y, w, W, n, H, bins = nothing)
   p = size(H, 1)
-  s, M = _gausspairs(y, w, W, [2 .* H, H], [false, true], true)
+  s, M = _gausspairs(y, w, W, [2 .* H, H], [false, true], true, bins)
   D = 1 / sqrt(LinearAlgebra.det(2 .* H))
   f = (2π)^(-p / 2) * D / n + 2 * s[1] / W^2 - 2 * s[2]
   G = -((2π)^(-p / 2) * D / (2n)) .* inv(H) .+ (2 / W^2) .* 2 .* _gaussgradient(2 .* H, s[1], M[1]) .-
@@ -574,7 +633,8 @@ function _lscvcriterion(y, w, W, n, H)
 end
 
 """
-    SCVMatrix(; diagonal = false, stages = 2, pre = diagonal ? :scale : :sphere)
+    SCVMatrix(; diagonal = false, stages = 2, pre = diagonal ? :scale : :sphere,
+                binned = nothing, gridsize = nothing)
 
 The smoothed cross-validation bandwidth matrix (Hall, Marron and Park 1992, and
 Duong and Hazelton 2005 for matrices): the minimizer of
@@ -595,42 +655,61 @@ same `stages`, and `Θ̂₆` the matrix with entries `∑_k ∑_l ψ̂_{eₐ+e_b
 with the plug-in pilot of order 6. The criterion is less variable than that of
 [`LSCVMatrix`](@ref) and does not need the asymptotic approximation of the bias
 that the plug-in rule makes.
+
+`binned = true` approximates all the pair sums, including the internal plug-in
+selection and pilots, by linear binning in two or three dimensions. With
+`binned = nothing`, it is used only above 500 observations with positive weight
+in two dimensions. Three dimensions use exact sums by default because binning
+at practical grid sizes misses the 2% selection-error target. `gridsize` is the
+number of nodes per axis, at least 3, defaulting to 151 in two dimensions and 51
+in three. `binned = false`
+uses exact sums and ignores `gridsize`. The smeared self-pairs are removed and
+the exact diagonal terms kept. The details record `binned`, `gridsize`, `spacing`
+and `resolution`, the smallest selected kernel standard deviation and the pilot
+`g` in units of the largest grid spacing in the transformed coordinates. A value
+below 1 warns to increase `gridsize` or use `binned = false`.
 """
 struct SCVMatrix <: MatrixSelector
   diagonal::Bool
   stages::Int
   pre::Symbol
+  binned::Union{Nothing,Bool}
+  gridsize::Union{Nothing,Int}
 
-  SCVMatrix(diagonal::Bool, stages::Integer, pre::Symbol) = new(diagonal, _checkstages(stages), _checkpre(pre, diagonal))
+  SCVMatrix(diagonal::Bool, stages::Integer, pre::Symbol,
+            binned::Union{Nothing,Bool} = nothing, gridsize::Union{Nothing,Integer} = nothing) =
+    new(diagonal, _checkstages(stages), _checkpre(pre, diagonal), binned, _checkgridsize(gridsize))
 end
 
-SCVMatrix(; diagonal::Bool = false, stages::Integer = 2, pre::Symbol = diagonal ? :scale : :sphere) =
-  SCVMatrix(diagonal, stages, pre)
+SCVMatrix(; diagonal::Bool = false, stages::Integer = 2, pre::Symbol = diagonal ? :scale : :sphere,
+          binned::Union{Nothing,Bool} = nothing, gridsize::Union{Nothing,Integer} = nothing) =
+  SCVMatrix(diagonal, stages, pre, binned, gridsize)
 
 function _selectmatrix(rule::SCVMatrix, d::_MvData)
   A, y, Σ = _pretransform(d, rule.pre)
   p, n, W = _dimension(d), d.neff, d.sumw
+  bins = _matrixbins(rule, y, d)
   # Θ̂₆ needs the functionals of order 6 estimated, with a pilot from the normal
   # reference of order 8; for one stage, the functionals of order 4 come from the
   # normal reference of order 6
   psi, pilots = if rule.stages == 2
-    _psichain(y, d, Σ, 2, false)
+    _psichain(y, d, Σ, 2, false, bins)
   else
     R4, R6 = _multiindices(p, 4), _multiindices(p, 6)
     g6 = _samse(R6, _psinormal(Σ, _multiindices(p, 8)), n)
     g4 = _samse(R4, _psinormal(Σ, R6), n)
-    Dict(6 => _psihat(y, d.w, d.sumw, n, g6, R6), 4 => _psihat(y, d.w, d.sumw, n, g4, R4)), Dict(6 => g6, 4 => g4)
+    Dict(6 => _psihat(y, d.w, W, n, g6, R6, bins), 4 => _psihat(y, d.w, W, n, g4, R4, bins)), Dict(6 => g6, 4 => g4)
   end
   T = _psitensor(psi[4], p)
   Hpi = _minimizematrix(H -> _picriterion(H, T, (4π)^(-p / 2) / n), _normalscale(Σ, n, rule.diagonal), rule.diagonal)[1]
   g = _scvpilot(_theta6(psi[6], p), Hpi, n)
   G = g^2 .* Matrix{Float64}(LinearAlgebra.I, p, p)
-  s0, _ = _gausspairs(y, d.w, W, [2 .* G], [false], false)
+  s0, _ = _gausspairs(y, d.w, W, [2 .* G], [false], false, bins)
   const0 = (2π)^(-p / 2) / sqrt(LinearAlgebra.det(2 .* G)) / n + 2 * s0[1] / W^2
-  Hy, crit, iter, converged = _minimizematrix(H -> _scvcriterion(y, d.w, W, n, H, G, const0),
+  Hy, crit, iter, converged = _minimizematrix(H -> _scvcriterion(y, d.w, W, n, H, G, const0, bins),
                                               _normalscale(Σ, n, rule.diagonal), rule.diagonal)
-  return BandwidthSelection(_backtransform(A, Hy), rule,
-                            (pilot = g, criterion = crit * abs(LinearAlgebra.det(A)), iterations = iter, converged = converged))
+  details = (pilot = g, criterion = crit * abs(LinearAlgebra.det(A)), iterations = iter, converged = converged)
+  return BandwidthSelection(_backtransform(A, Hy), rule, merge(details, _binningdetails(bins, Hy, g)))
 end
 
 # Θ₆ with entries ∑_k ∑_l ψ_{eₐ+e_b+2e_k+2e_l}
@@ -663,10 +742,10 @@ end
 
 # the criterion of SCVMatrix for the pilot G and its gradient in the entries of H;
 # const0 is the part that does not depend on H
-function _scvcriterion(y, w, W, n, H, G, const0)
+function _scvcriterion(y, w, W, n, H, G, const0, bins = nothing)
   p = size(H, 1)
   S1, S2 = 2 .* H .+ 2 .* G, H .+ 2 .* G
-  s, M = _gausspairs(y, w, W, [S1, S2], [false, false], true)
+  s, M = _gausspairs(y, w, W, [S1, S2], [false, false], true, bins)
   D = 1 / sqrt(LinearAlgebra.det(H))
   # the terms i = j: (φ_{2H+2G} - 2 φ_{H+2G})(0) / neff
   d1 = (2π)^(-p / 2) / sqrt(LinearAlgebra.det(S1))

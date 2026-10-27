@@ -2,7 +2,9 @@
 # matrices of MultivariateKDE (#60): normal scale, plug-in, smoothed cross-validation
 # and least-squares cross-validation, full and diagonal, for a correlated normal, a
 # bimodal mixture and a skewed mixture, in the spirit of the bivariate targets of Wand
-# and Jones (1993). The integral is the trapezoid rule on a 101 × 101 grid.
+# and Jones (1993). The integral is the trapezoid rule on a 101 × 101 grid. Keep
+# binned = false so that the historical study uses exact selection above the new
+# binning thresholds as well.
 include(joinpath(@__DIR__, "common.jl"))
 
 const DESIGNS = ["correlated", "bimodal", "skewed"]
@@ -12,10 +14,10 @@ const TARGETS = Dict(
   "bimodal" => MixtureModel([mv([-1.0, 0.0], [0.25 0.0; 0.0 0.25]), mv([1.0, 0.0], [0.25 0.0; 0.0 0.25])], [0.5, 0.5]),
   "skewed" => MixtureModel([mv([0.0, 0.0], [1.0 0.0; 0.0 1.0]), mv([0.5, 0.5], [0.16 0.0; 0.0 0.16]),
                             mv([1.0, 1.0], [0.04 0.0; 0.0 0.04])], [0.2, 0.2, 0.6]))
-const RULES = [("normal-scale", NormalScaleMatrix()), ("plugin", PlugInMatrix()), ("scv", SCVMatrix()),
-               ("lscv", LSCVMatrix()), ("normal-scale-diag", NormalScaleMatrix(diagonal = true)),
-               ("plugin-diag", PlugInMatrix(diagonal = true)), ("scv-diag", SCVMatrix(diagonal = true)),
-               ("lscv-diag", LSCVMatrix(diagonal = true))]
+const RULES = [("normal-scale", NormalScaleMatrix()), ("plugin", PlugInMatrix(binned = false)), ("scv", SCVMatrix(binned = false)),
+               ("lscv", LSCVMatrix(binned = false)), ("normal-scale-diag", NormalScaleMatrix(diagonal = true)),
+               ("plugin-diag", PlugInMatrix(diagonal = true, binned = false)), ("scv-diag", SCVMatrix(diagonal = true, binned = false)),
+               ("lscv-diag", LSCVMatrix(diagonal = true, binned = false))]
 const G = collect(range(-3.5, 3.5; length = 101))
 
 function main()

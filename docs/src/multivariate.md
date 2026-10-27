@@ -92,9 +92,58 @@ with the pilot ``G = g^2 I`` of Duong (2004, Theorem 4), which minimizes the
 squared asymptotic bias of the selected matrix and depends on the plug-in matrix
 and on an estimate of ``\Theta_6 = \int (D^2)^3 f(x)\, f(x)\, dx``.
 
-The criteria are double sums over the pairs of observations, so that a criterion
-costs a time of order ``n^2``; the sums run in parallel when Julia runs with
-several threads.
+## Binned bandwidth selection
+
+Only the plug-in and smoothed cross-validation rules approximate their pair sums
+by linear binning by default, in two dimensions above 500 observations with
+positive weight. This threshold counts observations, rather than the effective
+sample size. All rules use exact sums by default in three dimensions because
+binning at practical grid sizes misses the 2% selection-error target.
+Least-squares cross-validation uses exact sums by default in every dimension.
+`binned = true` forces binning in two or three dimensions, and `gridsize` chooses
+the number of nodes per axis, at least 3. It defaults to 151 in two dimensions
+and 51 in three:
+
+```julia
+select_bandwidth(PlugInMatrix(binned = true, gridsize = 201), x)
+select_bandwidth(SCVMatrix(binned = false), x)   # exact pair sums
+```
+
+A binned LSCV criterion can develop a spurious minimum as ``H \to 0`` when
+observations share grid cells; a hybrid fix is tracked in issue #101.
+`LSCVMatrix(binned = true)` remains available explicitly.
+
+Each selection builds one grid spanning the transformed observations and reuses
+it through the pilot chain and criterion minimization. Multilinear weights put
+each observation on its surrounding grid nodes. A zero-padded FFT computes the
+lag correlations; all lags enter the criterion, and the analytic gradients are
+the exact gradients of this binned criterion. Binning and the FFT are serial;
+the lag sums run in parallel, with a fixed summation order independent of the
+number of threads.
+
+Binning spreads an observation's self-pairs over the neighbouring lags. We remove
+this contribution separately for each observation, so that the binned sums
+approximate only pairs ``i \ne j``. The diagonal terms stay exact. Distinct
+observations at the same location still contribute to the pair sums. The total
+weight, squared weights, effective sample size and covariance come from the
+original data. Unequal weights in LSCV use cross-correlations with the
+leave-one-out weights.
+
+The selection's `details` record `binned`, `gridsize`, `spacing` and `resolution`.
+The spacing is in the transformed coordinates. `resolution.selected` is the
+smallest kernel standard deviation of the selected matrix in these coordinates,
+divided by the largest grid spacing. `resolution.pilot` is the same ratio for the
+pilot standard deviation, the smallest pilot for PI, or `nothing` for LSCV.
+A ratio below 1 warns that the grid is coarse relative to the bandwidth or pilot.
+Increase `gridsize` or set `binned = false`; outliers that stretch the grid can
+make a finer grid necessary.
+
+`binned = false` restores exact sums, which cost a time of order ``n^2`` and also
+run in parallel. In exact mode the grid is ignored and its diagnostics are
+`nothing`. Binning is available only in two and three dimensions, for both full
+and diagonal matrices. `compat` controls the plug-in pilot ordering independently
+of binning. The density evaluation by `pdf` always uses the original observations
+exactly.
 
 ## Example
 

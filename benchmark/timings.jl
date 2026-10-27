@@ -52,11 +52,15 @@ function cases()
     ("fit(BoundedKDE, x; support = (0, 1))", 10^6, (x, y, b, X2) -> fit(BoundedKDE, x; support = (0, 1))),
     ("fit(BoundedKDE, x; support = (0, 1), method = BetaKernels())", 10^4,
      (x, y, b, X2) -> fit(BoundedKDE, x; support = (0, 1), method = BetaKernels())),
-    ("fit(MultivariateKDE, X2)", 10^5, (x, y, b, X2) -> fit(MultivariateKDE, X2)),   # exact sums: O(n²)
+    ("fit(MultivariateKDE, X2)", 10^5, (x, y, b, X2) -> fit(MultivariateKDE, X2)),
+    ("fit(MultivariateKDE, X2; bandwidth = PlugInMatrix(binned = false))", 10^4,
+     (x, y, b, X2) -> fit(MultivariateKDE, X2; bandwidth = PlugInMatrix(binned = false))),
     ("fit(MultivariateKDE, X2; bandwidth = PlugInMatrix())", 10^4,
      (x, y, b, X2) -> fit(MultivariateKDE, X2; bandwidth = PlugInMatrix())),
     ("fit(MultivariateKDE, X2; bandwidth = SCVMatrix())", 10^4,
      (x, y, b, X2) -> fit(MultivariateKDE, X2; bandwidth = SCVMatrix())),
+    ("fit(MultivariateKDE, X2; bandwidth = SCVMatrix(binned = false))", 10^4,
+     (x, y, b, X2) -> fit(MultivariateKDE, X2; bandwidth = SCVMatrix(binned = false))),
     ("fit(PartiallyLinear, x, z, y)", 10^5, (x, y, b, X2) -> fit(PartiallyLinear, x, reshape(X2[2, :], :, 1), y)),
   ]
 end
