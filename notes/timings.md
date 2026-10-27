@@ -12,8 +12,9 @@ P(b = 1 | x) = 1/(1 + exp(-2 sin(2πx))), and a second coordinate 0.5x + 0.3 ε 
 bivariate estimates, for n = 10³, 10⁴, 10⁵ and 10⁶. Each call runs once to compile and
 is then timed at least three times within a budget of a few seconds, or once when it
 takes more than 20 seconds; we report the minimum. Each call has a fixed largest
-sample size. The times are on one and eight threads, with Julia 1.13.2
-(`benchmark/timings.jl`, run `20261026T0105Z-ks-timings`). The estimates of regression and of densities at points
+sample size. The times are on one core and on eight cores of
+an AMD EPYC 7513 node of Discovery, with Julia 1.13.2 (`benchmark/timings.jl`, run
+`20261026T0105Z-ks-timings`). The estimates of regression and of densities at points
 use the package's default of 30 points (19 for `LocalPolynomialDensity`).
 
 ## Results
@@ -205,7 +206,7 @@ For the density estimates, which are fast, the selection takes 63% to 79% of the
 and the sorting of the data about 20%. For regression discontinuity the estimate at
 the chosen bandwidths includes the preparation of the data, so that the parts add up
 to more than the total; there, the sorting takes 22% to 41% of the time. These
-timings come from a separate run from the main table.
+timings ran on the development allocation, a different node from the main table.
 
 ## Recommendations
 
