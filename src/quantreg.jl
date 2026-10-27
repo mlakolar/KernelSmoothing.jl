@@ -167,8 +167,8 @@ struct LocalQuantileRegression{D<:SmoothingData,K<:AbstractKernel,S<:BandwidthSe
   points::Vector{Float64}
   h::Float64
   b::Float64
-  coefficients::Matrix{Float64}   # β̂ at each point, one row per point
-  pilot_coefficients::Matrix{Float64}   # unscaled coefficients of order p + 1
+  coefficients::Matrix{Float64}         # β̂ at each point, one row per point
+  pilot_coefficients::Matrix{Float64}   # β̂ of the pilot fit of order p + 1 with bandwidth b, one row per point
   selection::S
 end
 

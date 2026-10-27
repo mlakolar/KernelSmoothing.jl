@@ -55,10 +55,13 @@ function locallik(rows)
 end
 
 function quantreg(rows)
-  println("### Local quantile regression: coverage of 95% pointwise intervals (Monte Carlo standard error)\n")
-  println("Coverage, SE calibration and length comparisons use the common valid set of both methods. Coverage and its paired difference are in percent and percentage points, respectively.\n")
-  println("Length ratios are RBC / conventional; zero conventional denominators give NaN. SDs and the paired Monte Carlo SE need at least two valid replications.\n")
-  out = []
+  println("### Local quantile regression: 95% pointwise intervals\n")
+  println("Coverage, calibration and length comparisons use the common valid set.\n")
+  println("Coverage is in percent; differences are in percentage points (Monte Carlo SE).\n")
+  println("Bandwidth medians use all attempted replications.\n")
+  println("Length ratios are RBC / conventional. Undefined ratios are NaN.\n")
+  println("SDs and the paired Monte Carlo SE need at least two valid replications.\n")
+  coverage, calibration = [], []
   valid(r) = isfinite(r.estimate) && isfinite(r.se)
   valid_bc(r) = isfinite(r.estimate_bc) && isfinite(r.se_rbc)
   avg(v) = isempty(v) ? NaN : mean(v)
@@ -74,19 +77,32 @@ function quantreg(rows)
     paired = string(fmt(100avg(delta); d = 1), " (", fmt(100sd(delta) / sqrt(R); d = 1), ")")
     se = [r.se for r in ok]
     se_rbc = [r.se_rbc for r in ok]
+    sd_est = sd([r.estimate for r in ok])
+    sd_bc = sd([r.estimate_bc for r in ok])
+    bias = avg([r.estimate - r.truth for r in ok])
+    bias_bc = avg([r.estimate_bc - r.truth for r in ok])
+    bias_sd = sd_est == 0 ? NaN : bias / sd_est
+    bias_sd_bc = sd_bc == 0 ? NaN : bias_bc / sd_bc
     ratio = R == 0 || avg(se) == 0 ? NaN : avg(se_rbc) / avg(se)
     ratios = R == 0 || any(iszero, se) ? NaN : avg(se_rbc ./ se)
     design, τs = rsplit(k[1], "-"; limit = 2)
-    push!(out, (design, k[2], parse(Float64, τs), k[3], length(g), count(r -> !valid(r), g),
-                count(r -> !valid_bc(r), g), R, pct(avg(cc), R), pct(avg(cr), R), paired,
-                fmt(sd([r.estimate for r in ok])), fmt(avg(se)), fmt(sqrt(avg(se.^2))),
-                fmt(sd([r.estimate_bc for r in ok])), fmt(avg(se_rbc)), fmt(sqrt(avg(se_rbc.^2))),
-                fmt(ratio), fmt(ratios)))
+    key = (design, k[2], parse(Float64, τs), k[3])
+    push!(coverage, (key..., length(g), count(r -> !valid(r), g), count(r -> !valid_bc(r), g), R,
+                     pct(avg(cc), R), pct(avg(cr), R), paired,
+                     fmt(median(r.h for r in g)), fmt(median(r.b for r in g))))
+    push!(calibration, (key..., fmt(bias), fmt(bias_sd), fmt(bias_bc), fmt(bias_sd_bc),
+                        fmt(sd_est), fmt(avg(se)), fmt(sqrt(avg(se.^2))),
+                        fmt(sd_bc), fmt(avg(se_rbc)), fmt(sqrt(avg(se_rbc.^2))),
+                        fmt(ratio), fmt(ratios)))
   end
+  println("Coverage\n")
   table(("design", "n", "τ", "point", "attempted", "failed conventional", "failed RBC", "common valid",
          "conventional coverage (MC SE)", "RBC coverage (MC SE)", "RBC − conventional (MC SE)",
+         "median h", "median b"), coverage)
+  println("Calibration and length\n")
+  table(("design", "n", "τ", "point", "conventional bias", "conventional bias/SD", "RBC bias", "RBC bias/SD",
          "conventional SD", "conventional mean se", "conventional RMS se", "RBC SD", "RBC mean se", "RBC RMS se",
-         "ratio of mean lengths", "mean paired length ratio"), out)
+         "ratio of mean lengths", "mean paired length ratio"), calibration)
 end
 
 function shape(rows)
