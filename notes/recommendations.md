@@ -51,8 +51,12 @@ designs of the notes; they are not guarantees.
 - **On a bounded support**, use `BoundedKDE` with reflection when the density is
   positive at the boundary, and the plain `KDE` when it vanishes there.
   ([estimators of #60–#65](new-estimators.md))
-- **In two dimensions, keep the default plug-in bandwidth matrix.** Use a full matrix
-  for correlated coordinates. ([multivariate densities](multivariate.md))
+- **Keep the default plug-in bandwidth matrix.** Use a full matrix for correlated
+  coordinates. PI and SCV bin by default in 2-D above 500 observations with positive
+  weight, with 151 points per axis. All selectors stay exact by default in 3-D.
+  Use `binned = true` in 3-D only with the default grid of 51 or finer, and check
+  `details.resolution`. Keep LSCV exact until the near-field correction of #101.
+  ([multivariate densities](multivariate.md))
 
 ## Speed
 

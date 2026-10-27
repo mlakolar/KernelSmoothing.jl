@@ -21,6 +21,6 @@ The [recommendations](recommendations.md) collect the advice of all notes on one
 | [Cluster-robust variances](clusters.md) | `ClusterVariance` |
 | [Regression discontinuity and honest intervals](rd-honest.md) | `RegressionDiscontinuity`, `Honest`, `FLCIOptimal` |
 | [Densities at a boundary and the manipulation test](boundary-manipulation.md) | `LocalPolynomialDensity`, `DensityDiscontinuity` |
-| [Multivariate densities](multivariate.md) | `MultivariateKDE` and its bandwidth matrices |
+| [Multivariate densities](multivariate.md) | `MultivariateKDE`, its bandwidth matrices, and binning errors and defaults (#86) |
 | [The partially linear model](partially-linear.md) | `PartiallyLinear` |
-| [Timings](timings.md) | the default call of every estimator, on one and eight threads, against other Julia packages and the R counterparts |
+| [Timings](timings.md) | the default call of every estimator, on one and eight threads, against other Julia packages and the R counterparts; binned matrix selectors on one and four threads (#86) |

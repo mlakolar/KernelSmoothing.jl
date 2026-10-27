@@ -56,3 +56,119 @@ worker runs.
   are close to normal.
 - Use a full matrix when the coordinates are correlated, and consider a diagonal one
   for a mixture of spherical components.
+
+## Binned selection (#86)
+
+### Question
+
+How much does linear binning change the selected bandwidth matrix and the density
+error? Can it replace exact pair sums for PI and SCV, and is it suitable for LSCV?
+
+### Design
+
+We use the three bivariate targets above and the trivariate mixture
+0.5 N((−1, 0, 0), 0.5² I) + 0.5 N((1, 0, 0), Σ), where Σ has unit variances and
+correlation 0.5 between each pair of coordinates. Samples have n = 10³, 10⁴ and
+10⁵. Each target has 100, 50 and 10 Monte Carlo replications, respectively. Each
+sample uses PI, SCV and LSCV with full and diagonal matrices. Grid sweeps at
+n = 10⁴ reuse the same samples across resolutions, with 50 replications per grid.
+There are 990 sample-and-grid replications and six rules per replication
+(`simulations/mvbinning.jl`, commit `066994e`). The base grids of this study have
+151 points per axis in 2-D and 31 in 3-D. The latter differs from the final opt-in
+default of 51; the binned sums are unchanged.
+
+The reference selection is exact for n ≤ 10⁴. At n = 10⁵ it uses a finer binned
+grid, with 301 points per axis in 2-D and 61 in 3-D. Matrix error is max |λ − 1|,
+where λ ranges over the eigenvalues of H_ref⁻¹ H_binned. The ISE ratio is
+ISE(H_binned) / ISE(H_ref), evaluated exactly by Gaussian overlap identities,
+including self-pairs, for n ≤ 10⁴. ISE is not evaluated at n = 10⁵.
+Absolute ISE change below means |ISE ratio − 1|.
+
+Medians and 90th percentiles (p90) are empirical Monte Carlo summaries of finite,
+converged pairs. Percentiles use linear interpolation between adjacent ordered
+values. All errors below are percentages. Each table cell gives full / diagonal
+matrices. PI and SCV have no failed pairs in these designs. Failed LSCV selections
+are excluded from quantiles, so a reported quantile alone does not establish
+reliability. These are binning errors relative to the reference selection, not
+errors relative to an optimal bandwidth.
+
+### Results
+
+At n = 10⁴:
+
+| target | grid per axis | rule | matrix error, median | matrix error, p90 | absolute ISE change, p90 |
+|---|---|---|---|---|---|
+| correlated (2-D) | 151 | PI | 0.06 / 0.13 | 0.12 / 0.27 | 0.042 / 0.075 |
+| correlated (2-D) | 151 | SCV | 0.05 / 0.12 | 0.08 / 0.19 | 0.023 / 0.041 |
+| bimodal (2-D) | 151 | PI | 0.14 / 0.13 | 0.24 / 0.22 | 0.059 / 0.047 |
+| bimodal (2-D) | 151 | SCV | 0.10 / 0.10 | 0.11 / 0.11 | 0.033 / 0.031 |
+| skewed (2-D) | 151 | PI | 1.21 / 0.87 | 1.40 / 1.01 | 0.442 / 0.327 |
+| skewed (2-D) | 151 | SCV | 1.19 / 0.86 | 1.38 / 1.00 | 0.553 / 0.423 |
+| trivariate (3-D) | 21 | PI | 20.44 / 35.03 | 34.91 / 46.97 | 9.727 / 16.734 |
+| trivariate (3-D) | 21 | SCV | 10.76 / 9.17 | 11.62 / 10.93 | 5.111 / 4.500 |
+| trivariate (3-D) | 31 | PI | 5.05 / 4.29 | 5.63 / 5.24 | 1.032 / 0.814 |
+| trivariate (3-D) | 31 | SCV | 5.09 / 4.30 | 5.59 / 5.06 | 2.336 / 2.202 |
+| trivariate (3-D) | 51 | PI | 1.85 / 1.59 | 2.14 / 1.98 | 0.425 / 0.327 |
+| trivariate (3-D) | 51 | SCV | 1.82 / 1.55 | 2.03 / 1.79 | 0.823 / 0.755 |
+
+The pre-registered gate requires p90 matrix error ≤ 2% and p90 absolute ISE change
+≤ 1% for PI and SCV at n = 10⁴, for each target and matrix form. Both rules pass
+in 2-D at 151 points per axis. The skewed target has the largest errors. In 3-D,
+31 points fail the gate. At 51 points, both diagonal rules pass, but full PI and
+SCV still miss the matrix-error target, at 2.14% and 2.03%.
+
+The 2-D grid sweep on the bimodal target at n = 10⁴ is:
+
+| target | grid per axis | rule | matrix error, median | matrix error, p90 | absolute ISE change, p90 |
+|---|---|---|---|---|---|
+| bimodal | 51 | PI | 1.22 / 1.10 | 1.98 / 1.77 | 0.432 / 0.458 |
+| bimodal | 51 | SCV | 0.92 / 0.90 | 1.04 / 1.00 | 0.298 / 0.298 |
+| bimodal | 101 | PI | 0.33 / 0.29 | 0.47 / 0.53 | 0.109 / 0.110 |
+| bimodal | 101 | SCV | 0.23 / 0.22 | 0.26 / 0.26 | 0.073 / 0.074 |
+| bimodal | 151 | PI | 0.14 / 0.13 | 0.24 / 0.22 | 0.059 / 0.047 |
+| bimodal | 151 | SCV | 0.10 / 0.10 | 0.11 / 0.11 | 0.033 / 0.031 |
+| bimodal | 301 | PI | 0.04 / 0.03 | 0.06 / 0.05 | 0.015 / 0.013 |
+| bimodal | 301 | SCV | 0.03 / 0.03 | 0.03 / 0.03 | 0.008 / 0.008 |
+
+Even 51 points pass the gate for this target. The finer grid of 151 provides more
+margin and also passes for the skewed target. This supports automatic binning for
+`PlugInMatrix` and `SCVMatrix` in 2-D above 500 observations with positive weight,
+with 151 points per axis. The threshold does not use the effective sample size.
+All selectors remain exact by default in 3-D. `LSCVMatrix` remains exact by default
+in every dimension. `binned = true` opts into binning in 2-D or 3-D, with default
+grids of 151 or 51 points per axis, respectively; `binned = false` forces exact
+sums. These defaults apply to both full and diagonal matrices.
+
+At n = 10⁵, all 2-D PI and SCV matrix errors are within 1.5% of the 301-point
+reference. In 3-D at 31 points, PI has median errors of 51% (full) and 63%
+(diagonal), reaching 79% against the 61-point reference. SCV has p90 errors of
+4.4% (full) and 61% (diagonal). Agreement with a finer grid at this size does not
+measure agreement with exact selection.
+
+LSCV is less stable. In 2-D at 151 points, the correlated and bimodal targets have
+median matrix errors of 0.3% to 1.4% at n = 10³–10⁴, with p90 errors of 2.6% to
+9.6%. For the skewed target, full LSCV has p90 errors of 40% to 43% and collapses
+at n = 10⁵. Only two of ten full selections there are finite and converged; the
+diagonal selections have 100% matrix error. In 3-D, grids of 21 and 31 points
+collapse at n = 10⁴. A grid of 51 avoids this collapse at that size, but its p90
+matrix error is still 28% (full) and 16% (diagonal).
+
+When observations share grid cells, binned LSCV can develop a spurious minimum as
+H → 0, even with exact self-pair corrections. Issue #101 tracks a hybrid criterion
+that keeps near-field pairs exact.
+
+The problem also occurs in ks. On the shared n = 10⁴ benchmark samples
+(`benchmark/binned.jl` and `benchmark/binned.R`, commit `1d86543`), its binned
+`Hlscv` differs from exact LSCV by 7.0% in 2-D and 650% in 3-D. The 3-D result is
+degenerate, with eigenvalue ratios 0.0, 3.5 and 7.5. The package's binned 2-D LSCV
+differs by 0.59% on the same sample. These are single-sample comparisons.
+
+### Recommendations
+
+- Rely on the defaults: binned PI and SCV in 2-D above 500 observations with
+  positive weight, exact selection in 3-D, and exact LSCV in every dimension.
+- Use `binned = true` in 3-D only with the default grid of 51 points per axis or
+  finer, and check `details.resolution`. Its selected and pilot values measure
+  kernel standard deviations in units of grid spacing. A value below 1 calls for
+  a finer grid or exact sums. This diagnostic does not guarantee the error gate.
+- Do not use binned LSCV until the near-field correction of #101 is available.

@@ -12,9 +12,8 @@ P(b = 1 | x) = 1/(1 + exp(-2 sin(2πx))), and a second coordinate 0.5x + 0.3 ε 
 bivariate estimates, for n = 10³, 10⁴, 10⁵ and 10⁶. Each call runs once to compile and
 is then timed at least three times within a budget of a few seconds, or once when it
 takes more than 20 seconds; we report the minimum. Each call has a fixed largest
-sample size. The times are on one core and on eight cores of
-an AMD EPYC 7513 node of Discovery, with Julia 1.13.2 (`benchmark/timings.jl`, run
-`20261026T0105Z-ks-timings`). The estimates of regression and of densities at points
+sample size. The times are on one and eight threads, with Julia 1.13.2
+(`benchmark/timings.jl`, run `20261026T0105Z-ks-timings`). The estimates of regression and of densities at points
 use the package's default of 30 points (19 for `LocalPolynomialDensity`).
 
 ## Results
@@ -42,10 +41,13 @@ Seconds, on one thread / on eight threads:
 | `fit(ConditionalDensity, x, y)` | 1.8 / 1.2 | 182 / 120 |  |  |
 | `fit(BoundedKDE, x; support = (0, 1))` | 0.0016 / 0.0016 | 0.003 / 0.0031 | 0.023 / 0.023 | 0.32 / 0.28 |
 | `fit(BoundedKDE, x; support = (0, 1), method = BetaKernels())` | 0.68 / 0.68 | 33 / 30 |  |  |
-| `fit(MultivariateKDE, X2)` | 0.055 / 0.0075 | 5.5 / 0.7 | 548 / 69 |  |
-| `fit(MultivariateKDE, X2; bandwidth = PlugInMatrix())` | 0.055 / 0.0075 | 5.5 / 0.7 |  |  |
-| `fit(MultivariateKDE, X2; bandwidth = SCVMatrix())` | 0.53 / 0.1 | 106 / 14 |  |  |
+| `fit(MultivariateKDE, X2; bandwidth = PlugInMatrix(binned = false))` | 0.055 / 0.0075 | 5.5 / 0.7 | 548 / 69 |  |
+| `fit(MultivariateKDE, X2; bandwidth = SCVMatrix(binned = false))` | 0.53 / 0.1 | 106 / 14 |  |  |
 | `fit(PartiallyLinear, x, z, y)` | 0.013 / 0.0079 | 0.13 / 0.065 | 1.4 / 0.38 |  |
+
+The multivariate rows retain exact selection with `binned = false`. The current
+2-D PI and SCV defaults bin above 500 observations with positive weight. Their
+selection times are reported separately below; the default fits were not retimed.
 
 Note that preparing the data (`SmoothingData`, which sorts it) takes 0.05 seconds at
 n = 10⁶, which is negligible for regression but most of the time of the density
@@ -57,7 +59,7 @@ with its plug-in bandwidths grows linearly, from 0.13 seconds at n = 10⁴ to 14
 at n = 10⁶ on one thread, and eight threads make it about four times faster from
 n = 10⁵ on.
 
-Four defaults grow faster than linearly and become slow for large samples (#93),
+Three procedures grow faster than linearly and become slow for large samples (#93),
 and `LocalQuantileRegression` also grows faster than linearly (6.9 seconds at
 n = 10⁵):
 
@@ -70,9 +72,11 @@ n = 10⁵):
 3. `fit(BoundedKDE, x; method = BetaKernels())` chooses the smoothing parameter of the
    beta kernels by least-squares cross-validation, which does not use the threads: 33
    seconds at n = 10⁴.
-4. `fit(MultivariateKDE, X)` evaluates its sums exactly over all pairs: 5.5 seconds at
-   n = 10⁴ and 548 at n = 10⁵ on one thread, which threads cut eightfold. A binned
-   engine is planned in #86.
+
+Exact multivariate bandwidth selection also grows quadratically. The older 2-D
+plug-in fit takes 5.5 seconds at n = 10⁴ and 548 at n = 10⁵ on one thread, which
+eight threads cut about eightfold. PI and SCV now bin by default in 2-D (#86);
+3-D selection and LSCV remain exact by default.
 
 ## Against other Julia packages
 
@@ -117,9 +121,9 @@ KernelSmoothing.jl / R:
 | `fit(LocalQuantileRegression, x, y)` (with its bandwidth) | quantreg `lprq` (given h, 30 points) | 0.027 / 0.03 | 0.33 / 0.49 | 6.9 / 39 |  |
 | `fit(ConditionalDensity, x, y)` | np `npcdens` with `cv.ml` | 1.8 / 1.6 | 182 / 161 |  |  |
 | `fit(BoundedKDE, x; support = (0, 1))` | evmix `fbckden` (reflection, likelihood CV) | 0.0016 / 46 | 0.003 / – | 0.023 / – | 0.32 / – |
-| `fit(MultivariateKDE, X2)` (plug-in, exact) | ks `Hpi`, exact | 0.055 / 1 | 5.5 / 131 | 548 / – |  |
+| `fit(MultivariateKDE, X2; bandwidth = PlugInMatrix(binned = false))` | ks `Hpi`, exact | 0.055 / 1 | 5.5 / 131 | 548 / – |  |
 | (the same) | ks `Hpi`, binned | 0.055 / 1 | 5.5 / 0.77 | 548 / 0.39 | – / 0.54 |
-| `fit(MultivariateKDE, X2; bandwidth = SCVMatrix())` | ks `Hscv`, exact | 0.53 / 4.8 | 106 / 563 |  |  |
+| `fit(MultivariateKDE, X2; bandwidth = SCVMatrix(binned = false))` | ks `Hscv`, exact | 0.53 / 4.8 | 106 / 563 |  |  |
 | (the same) | ks `Hscv`, binned | 0.53 / 6.9 | 106 / 6.8 | – / 4.5 | – / 4.8 |
 
 The calls are not all the same computation: `density` and `bw.ucv` bin the data, the
@@ -136,10 +140,45 @@ polynomial regression (nprobust), 40 to 80 times for regression discontinuity
 `kdrobust`), 18 to 40 times for the manipulation test (rddensity), and 5 to 24 times
 for the exact bandwidth matrices (ks). It is about as fast as locfit's density
 estimate and as np's conditional density with likelihood cross-validation, both of
-which grow quadratically. Two gaps remain, both because R bins the data: least-squares
-cross-validation for a density, where `bw.ucv` takes milliseconds at n = 10⁵ against
-2.7 seconds, and the binned bandwidth matrices of ks, which take under a second at
-n = 10⁶ against minutes for the exact sums (#86).
+which grow quadratically. Univariate least-squares cross-validation remains slower
+because R bins the data: `bw.ucv` takes milliseconds at n = 10⁵ against 2.7 seconds. Binned bandwidth
+matrices are now available (#86), with the selection times below. The older rows
+above compare exact Julia fits with both exact and binned ks selectors.
+
+## Binned bandwidth matrices (#86)
+
+The benchmark uses shared samples: the correlated normal target in 2-D and the
+trivariate mixture of the [multivariate note](multivariate.md) in 3-D
+(`benchmark/binned.jl` and `benchmark/binned.R`, commit `50cd11f`). Times are minima
+over runs and exclude reading the samples. They measure `select_bandwidth`, not
+`fit` or density evaluation. The Julia grids have 151 points per axis in 2-D and
+51 in 3-D. PI and SCV use the default calls in 2-D; LSCV and all 3-D rules use
+`binned = true`. The R calls are the defaults of ks 1.15.3, which bin these samples.
+These are method comparisons: pilot ordering and definitions, the default 3-D
+pilot, and the LSCV optimizer differ. A faster selection need not agree with ks.
+
+Seconds on one thread, KernelSmoothing.jl / ks:
+
+| selector | ks | dimension | n = 10⁴ | n = 10⁵ |
+|---|---|---|---|---|
+| `PlugInMatrix()` | `Hpi` | 2-D | 0.0356 / 0.769 | 0.0485 / 0.325 |
+| `SCVMatrix()` | `Hscv` | 2-D | 0.0655 / 4.24 | 0.118 / 2.84 |
+| `LSCVMatrix(binned = true)` | `Hlscv` | 2-D | 0.119 / 3.21 | 0.14 / 3.76 |
+| `PlugInMatrix(binned = true)` | `Hpi` | 3-D | 0.479 / 3.89 | 0.521 / 3.41 |
+| `SCVMatrix(binned = true)` | `Hscv` | 3-D | 1.31 / 40.4 | 1.57 / 30.7 |
+| `LSCVMatrix(binned = true)` | `Hlscv` | 3-D | 2.52 / 69.1 | 5.43 / 70 |
+
+At n = 10⁴ on one thread, exact selection takes 5.4 seconds for PI, 94 for SCV
+and 53 for LSCV in 2-D, and 11, 157 and 140 seconds in 3-D. Exact selections at
+n = 10⁵ were not timed in this benchmark. Four threads reduce the 3-D binned SCV
+times from 1.31 to 0.65 seconds at n = 10⁴ and from 1.57 to 0.75 at n = 10⁵;
+2-D PI changes little, from 0.036 to 0.035 and from 0.048 to 0.047 seconds.
+
+The LSCV times describe an unreliable approximation. In particular, the binned
+3-D selection at n = 10⁵ is degenerate despite reporting convergence. LSCV stays
+exact by default, and the [binning-error study](multivariate.md#binned-selection-86)
+recommends avoiding binned LSCV until #101. PI and SCV also stay exact by default in
+3-D because the full matrices miss the selection-error target at a grid of 51.
 
 ## Where the time goes
 
@@ -166,7 +205,7 @@ For the density estimates, which are fast, the selection takes 63% to 79% of the
 and the sorting of the data about 20%. For regression discontinuity the estimate at
 the chosen bandwidths includes the preparation of the data, so that the parts add up
 to more than the total; there, the sorting takes 22% to 41% of the time. These
-timings ran on the development allocation, a different node from the main table.
+timings come from a separate run from the main table.
 
 ## Recommendations
 
