@@ -15,6 +15,16 @@ function tiecounts(x)
   return n - size(unique(z; dims = 2), 2), [1 - length(unique(row)) / n for row in eachrow(z)]
 end
 
+@testset "LSCV relative eigenvalues" begin
+  H0 = Matrix(2.0I, 2, 2)
+  Hy = [2.0 0.0; 0.0 8.0]
+  @test all(isnan, KernelSmoothing._lscveigenratio([1.0 0.0; 0.0 -1.0], Hy))
+  @test all(isnan, KernelSmoothing._lscveigenratio(H0, [Inf 0.0; 0.0 8.0]))
+  ρmin, ρmax = KernelSmoothing._lscveigenratio(H0, Hy)
+  @test ρmin ≈ 1.0
+  @test ρmax ≈ 4.0
+end
+
 @testset "LSCV duplicate runaway" begin
   for duplicates in (50, 100)
     @testset "$duplicates duplicate pairs" begin

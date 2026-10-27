@@ -172,3 +172,135 @@ differs by 0.59% on the same sample. These are single-sample comparisons.
   kernel standard deviations in units of grid spacing. A value below 1 calls for
   a finer grid or exact sums. This diagnostic does not guarantee the error gate.
 - Do not use binned LSCV until the near-field correction of #101 is available.
+
+## Tied data and collapsed LSCV selections (#102)
+
+### Question
+
+Rounded or duplicated observations can give LSCV spurious small-bandwidth minima.
+With enough coincident pairs, its criterion can decrease without bound as the
+bandwidth becomes singular. Previously, the search could stop there and report
+convergence. Can separate diagnostics identify ties and numerical collapse without
+flagging the small bandwidths needed by continuous multimodal densities?
+
+### Design
+
+We use six continuous designs: `normal`, N(0, I); `corr09`, a normal with unit
+variances and equicorrelation 0.9; `bimodal6` and `bimodal10`, mixtures
+0.5 N(0, I) + 0.5 N(s e₁, I), with s = 6 and 10; `lattice`, clusters with
+standard deviation 0.05 at uniformly chosen nodes of a unit-spaced 5 × 5 lattice
+in 2-D or 3 × 3 × 3 lattice in 3-D; and `lognormal`, the coordinatewise
+exponential of N(0, I). Six tied designs reuse the normal sample at each
+(d, n, seed): `round1`, `round2` and `round3` round to 1, 2 and 3 decimal places;
+`dup5`, `dup10` and `dup25` replace the last k observations by copies of the first
+k, with k = round(f n) and f = 0.05, 0.10 and 0.25.
+
+Exact selections cross these designs with d = 2 and 3, n = 100, 400 and 2000,
+full and diagonal matrices, and seeds 1–30, giving 4,320 cases. Another 40 cases
+use binned full LSCV on `normal` and its `round2` twin, with d = 2 and 3,
+n = 10⁴ and 10⁵, seeds 1–5, and the default grids. Samples use `Xoshiro` with a
+fixed seed determined by design family, d, n and replicate. The results are from
+commit `f6f9b09`, dated 2026-10-27. To reproduce the manifest and selections:
+
+```sh
+julia --project=benchmark benchmark/lscv_ties.jl manifest
+julia --project=benchmark benchmark/lscv_ties.jl run 1 4360 lscv-ties.csv
+```
+
+The manifest command prints the number of cases. The run command accepts any
+inclusive range of case ids and uses one Julia thread and one BLAS thread. Each
+CSV row records the design and settings, status and error message, selection time,
+convergence and collapse flags, relative eigenvalue extremes, duplicates and
+coordinate ties, and separate tie, collapse, coarse-grid and other warning flags.
+It also records H and independently computed S, A, H₀ and Hy, using padded lower
+triangles. Failed selections remain in the output.
+
+Here S is the sample covariance with divisor n − 1. The transformation is
+A = S⁻¹ᐟ² for full matrices and diag(1 / sqrt(diag(S))) for diagonal ones.
+With Σy = A S Aᵀ, the starting matrix is
+H₀ = (4 / ((d + 2)n))^(2 / (d + 4)) Σy, using its diagonal for diagonal
+selection, and Hy = A H Aᵀ. From the stored H₀ and Hy, Python independently
+computes the extreme eigenvalues (ρ_min, ρ_max) of Symmetric(L₀⁻¹ Hy L₀⁻ᵀ),
+where H₀ = L₀L₀ᵀ. Collapse means
+ρ_min ≤ 10⁻⁸ or ρ_max ≥ 10⁸, a noncomputable ratio, a nonfinite H or Hy, or
+a non-positive-definite H.
+
+Separate computations on the original samples count observations equal to an
+earlier one and coordinate tie fractions 1 − distinct/n, treating signed zeros
+equally. The tie warning uses duplicates > 0 or max(ties) > 0.1. Selection times
+exclude sample generation and these computations, but include compilation on the
+first selection. Total selection time was 9,936 s (2.76 hours). The slowest case
+took 59.6 s: exact diagonal `dup25`, d = 2, n = 2000, seed 26.
+
+### Results
+
+All 4,360 cases have rows, with no missing cases, duplicate case ids or selection
+errors. None of the 2,160 continuous exact selections collapsed. Their smallest
+relative eigenvalue was 2.33 × 10⁻⁴, on full `bimodal6` with d = 3, n = 100,
+seed 13. This is 2.33 × 10⁴ times the lower collapse limit. The largest relative
+eigenvalue was 6.12, on the same case. These are empirical margins for the designs
+studied, not guarantees for every continuous density.
+
+The package's duplicate counts and coordinate tie fractions agree with the
+independent counts in every case. The tie warning appears exactly when those
+counts meet its condition, and never on the continuous designs, including their
+binned cases. All 335 collapsed selections emit the collapse warning and report
+`converged = false`. The collapse flags agree with the independent matrix checks.
+
+Counts pooled over dimensions, sample sizes, forms and seeds are:
+
+| design | sums | cases | ρ_min < 0.2 | collapsed | tie-warned |
+|---|---|---|---|---|---|
+| normal | exact | 360 | 46 | 0 | 0 |
+| corr09 | exact | 360 | 138 | 0 | 0 |
+| bimodal6 | exact | 360 | 324 | 0 | 0 |
+| bimodal10 | exact | 360 | 360 | 0 | 0 |
+| lattice | exact | 360 | 360 | 0 | 0 |
+| lognormal | exact | 360 | 359 | 0 | 0 |
+| round1 | exact | 360 | 48 | 3 | 360 |
+| round2 | exact | 360 | 48 | 0 | 356 |
+| round3 | exact | 360 | 46 | 0 | 122 |
+| dup5 | exact | 360 | 117 | 0 | 360 |
+| dup10 | exact | 360 | 226 | 41 | 360 |
+| dup25 | exact | 360 | 318 | 291 | 360 |
+| normal | binned | 20 | 0 | 0 | 0 |
+| round2 | binned | 20 | 0 | 0 | 20 |
+
+The small-scale column uses independently recomputed ratios and includes collapsed
+selections. It describes the selected scale, not density error. No binned case
+collapsed in these normal and rounded-normal samples; this does not resolve the
+binned LSCV failures on other targets described above.
+
+For `dup25`, collapse counts by dimension and sample size are:
+
+| d | n | full, out of 30 | diagonal, out of 30 | total, out of 60 |
+|---|---|---|---|---|
+| 2 | 100 | 28 | 25 | 53 |
+| 2 | 400 | 29 | 27 | 56 |
+| 2 | 2000 | 29 | 24 | 53 |
+| 3 | 100 | 30 | 30 | 60 |
+| 3 | 400 | 30 | 30 | 60 |
+| 3 | 2000 | 6 | 3 | 9 |
+
+In the 360 exact normal-versus-`round2` pairs, both selections have ρ_min < 0.2
+in 46 pairs. Only `round2` is below this level in 2 pairs, only normal in none,
+and neither in 312. Neither design collapses. Thus the tie warning identifies the
+sample's discreteness even when rounding changes the small-scale count little.
+
+Among the 1,825 noncollapsed exact selections from tied designs, the smallest
+ρ_min was 5.07 × 10⁻⁷, on full `dup10` with d = 3, n = 400, seed 8. This selection
+emits the tie warning but stays above the collapse limit. The two diagnostics
+therefore address different problems: ties can matter well before numerical
+singularity, while continuous mixtures and lattices can need small bandwidths.
+
+### Recommendations
+
+- Prefer `SCVMatrix` or `PlugInMatrix` for tied or rounded data. A tie warning
+  identifies a risk of spurious LSCV minima even when the selected matrix has not
+  collapsed; it does not establish that a particular selection is inaccurate.
+- Treat a collapse warning as an unusable LSCV selection. Inspect
+  `details.collapsed` and `details.converged`, and choose another rule. The returned
+  matrix is the one found by the search; it is not replaced by a fallback.
+- Do not reject a selection on continuous multimodal data solely because its
+  relative eigenvalues are small. Compare the data's structure and other bandwidth
+  rules; the collapse diagnostic detects degeneracy, not density-estimation error.
