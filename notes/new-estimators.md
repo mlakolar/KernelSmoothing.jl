@@ -279,12 +279,8 @@ For the Qu–Yoon adaptation:
 | qy2 | 0.8 | 2000 | 94.2 / 94.6 | 77.0 / 96.6 | 85.4 / 95.6 | 94.6 / 95.2 | 93.8 / 95.2 | 0.261 |
 
 The pre-registered criterion required RBC coverage within [92.5%, 97.5%] at every
-point of every design at n = 2000. It held: the independent acceptance check reports
-94.5% to 96.5%. At n = 500, which was not gated, that check reports 93.7% to 96.9%.
-The supplied summary differs slightly from the acceptance check. Its maximum at
-n = 2000 is 96.6% (`qy2`, τ = 0.8, x = −0.4), and its minimum at n = 500 is 93.6%
-(`qy2`, τ = 0.8, x = 0.8). The tables retain these summary values; the criterion
-still holds.
+point of every design at n = 2000. It held: RBC coverage ranged from 94.5% to 96.6%.
+At n = 500, which was not gated, RBC coverage ranged from 93.6% to 96.9%.
 
 Bias correction reduces the bias at the sine peaks and improves coverage there.
 For example, with t₃ errors, τ = 0.5 and n = 2000, bias/SD changes from −0.902 to

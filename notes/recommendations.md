@@ -30,8 +30,9 @@ designs of the notes; they are not guarantees.
   to 15% shorter than the robust intervals; a bound that is too small by half brings
   coverage down to 86% to 88%. ([RD](rd-honest.md))
 - **Use the default `confint` (RBC) for `LocalQuantileRegression`** where the quantile
-  function may curve. It covers at about 94% to 97% in these designs, at the cost of
-  intervals about 1.4 times as long as the conventional ones.
+  function may curve. At n = 2000 it covers at 94.5% to 96.6% in these designs
+  (93.6% to 96.9% at n = 500), at the cost of intervals about 1.4 times as long as
+  the conventional ones.
   ([estimators of #60–#65](new-estimators.md))
 - **`LocalRandomization` needs a window in which the outcome is flat**. A slope in the
   window makes the tests reject far too often (#95).
