@@ -77,14 +77,20 @@ const K = EpanechnikovKernel()
         @test vcov(m) ≈ vcov(numeric) rtol = 1e-12
         @test m.smooth ≈ numeric.smooth rtol = 1e-12
         if mode === :response
+          @test bandwidth(m) ≈ ref.h rtol = 1e-12
+          @test coef(m) ≈ ref.coef rtol = 1e-12
+          @test vec(vcov(m)) ≈ ref.vcov rtol = 1e-12
+          @test m.smooth ≈ ref.smooth rtol = 1e-12
+        elseif mode === :smallest
           default = fit(PartiallyLinear, U, X, Yp; weights = w, points = PTS)
-          @test default.bandwidth_mode === :response
-          for actual in (m, default)
-            @test bandwidth(actual) ≈ ref.h rtol = 1e-12
-            @test coef(actual) ≈ ref.coef rtol = 1e-12
-            @test vec(vcov(actual)) ≈ ref.vcov rtol = 1e-12
-            @test actual.smooth ≈ ref.smooth rtol = 1e-12
-          end
+          @test default.bandwidth_mode === :smallest
+          @test default.selection.rule == CrossValidation()
+          @test default.selection === default.selections[1]
+          @test default.bandwidths == fill(minimum(s.h for s in default.selections), 3) == m.bandwidths
+          @test bandwidth(default) == bandwidth(m)
+          @test coef(default) ≈ coef(m) rtol = 1e-12
+          @test vcov(default) ≈ vcov(m) rtol = 1e-12
+          @test default.smooth ≈ m.smooth rtol = 1e-12
         end
       end
     end
@@ -171,11 +177,20 @@ const K = EpanechnikovKernel()
       @test coef(m) ≈ coef(numeric) rtol = 1e-12
       @test vcov(m) ≈ vcov(numeric) rtol = 1e-12
       @test m.smooth ≈ numeric.smooth rtol = 1e-12
+      if mode === :smallest
+        default = fit(PartiallyLinear, U, Xc, yc; bandwidth = rule, kernel, degree, weights = W, points = PTS)
+        @test default.bandwidth_mode === :smallest
+        @test default.bandwidths == fill(minimum(s.h for s in default.selections), 3) == m.bandwidths
+        @test bandwidth(default) < default.selection.h
+        @test coef(default) ≈ coef(m) rtol = 1e-12
+        @test vcov(default) ≈ vcov(m) rtol = 1e-12
+        @test default.smooth ≈ m.smooth rtol = 1e-12
+      end
     end
   end
   m = fit(PartiallyLinear, U, X, Yp)
   @test m.selection.rule == CrossValidation()
-  @test nobs(m) == N && bandwidth(m) == m.selection.h
+  @test nobs(m) == N && bandwidth(m) == minimum(s.h for s in m.selections)
   @test coef(m) ≈ [1.5, -0.5] atol = 0.05
   t = coeftable(m)
   @test t.estimate == coef(m) && t.se == stderror(m) && t.upper ≈ confint(m)[:, 2]

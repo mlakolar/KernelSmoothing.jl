@@ -17,11 +17,19 @@ The partially linear model `y = x'β + g(u) + ε` of Robinson (1988) and Speckma
 fitted with [`fit`](@ref)`(PartiallyLinear, u, X, y)`. The parametric part is the
 weighted least squares regression of `y - m̂_y(u)` on `X - m̂_X(u)`, where `m̂_y` and
 `m̂_X` are local polynomial smooths in `u` of `y` and of each column of `X`.
-With cross-validation, `bandwidth_mode = :response` uses the bandwidth chosen for
-`y` throughout, `:smallest` uses the smallest of the bandwidths chosen for `y` and
-the columns of `X` throughout, and `:each` uses each smooth's own bandwidth.
+With cross-validation, the default `bandwidth_mode = :smallest` uses the smallest
+of the bandwidths chosen for `y` and the columns of `X` for every smooth.
+One common bandwidth avoids the extra residual term `Σⱼ βⱼ (S_j − S_y) x_j`
+from separate smoothers. The smallest cross-validated bandwidth is small enough
+for the covariates' conditional means in the
+[coverage study](https://github.com/mlakolar/KernelSmoothing.jl/blob/master/notes/partially-linear.md).
+The earlier default is reproduced by `:response`, which uses the bandwidth
+chosen for `y` throughout; `:each` is available for each smooth's own bandwidth.
 The smooth part `ĝ` smooths `y - x'β̂` using the effective bandwidth of the smooth
 of `y`. `X` must not contain a constant column, which `g` absorbs.
+Occasionally, a cross-validated bandwidth is so small that a smooth is not
+identified at some observation; `fit` then throws, and a larger numeric
+bandwidth is needed.
 
 The `√n` consistency theorem of Robinson (1988) assumes a common,
 non-data-driven bandwidth with trimming. The sandwich intervals (HC0, or HC1
@@ -52,21 +60,29 @@ end
 
 """
     fit(PartiallyLinear, u, X, y; points = nothing, bandwidth = CrossValidation(),
-        bandwidth_mode = :response, degree = 1, kernel = EpanechnikovKernel(),
+        bandwidth_mode = :smallest, degree = 1, kernel = EpanechnikovKernel(),
         weights = nothing, vce = HCVariance(0))
 
 Fits the partially linear model of `y` on the columns of `X` and a smooth function
 of `u`. `bandwidth` is a positive finite number for all smooths, a vector of
 `1 + size(X, 2)` such numbers (`y` first, then the columns of `X`), or
-[`CrossValidation`](@ref). With cross-validation, `bandwidth_mode = :response`
-uses the bandwidth chosen for `y` throughout, `:smallest` uses the smallest chosen
-for `y` and the columns of `X` throughout, and `:each` uses each smooth's own
-bandwidth. The `:response` mode also cross-validates the covariates to populate
+[`CrossValidation`](@ref). With cross-validation, the default
+`bandwidth_mode = :smallest` uses the smallest bandwidth chosen for `y` and the
+columns of `X` for every smooth. One common bandwidth avoids the extra residual
+term `Σⱼ βⱼ (S_j − S_y) x_j` from separate smoothers. The smallest cross-validated
+bandwidth is small enough for the covariates' conditional means in the
+[coverage study](https://github.com/mlakolar/KernelSmoothing.jl/blob/master/notes/partially-linear.md).
+The earlier default is reproduced by `:response`, which uses the bandwidth
+chosen for `y` throughout; `:each` is available for each smooth's own bandwidth.
+The `:response` mode also cross-validates the covariates to populate
 `selections`, roughly tripling the fit time compared with cross-validating only
 `y`. Numeric bandwidths are copied and converted to `Float64`;
 `bandwidth_mode` is validated but ignored for them. `ĝ` uses the effective
 bandwidth of the smooth of `y`. `points` are those of the smooth part, by default
 as for [`LocalPolynomialRegression`](@ref).
+Occasionally, a cross-validated bandwidth is so small that a smooth is not
+identified at some observation; `fit` then throws, and a larger numeric
+bandwidth is needed.
 
 The `√n` consistency theorem of Robinson (1988) assumes a common,
 non-data-driven bandwidth with trimming. The sandwich intervals are a first-order
@@ -74,7 +90,7 @@ approximation whose small-sample accuracy depends on how well the covariates'
 conditional means are smoothed.
 """
 function fit(::Type{PartiallyLinear}, u::AbstractVector, X::AbstractVecOrMat, y::AbstractVector;
-             points = nothing, bandwidth = CrossValidation(), bandwidth_mode = :response, degree::Integer = 1,
+             points = nothing, bandwidth = CrossValidation(), bandwidth_mode = :smallest, degree::Integer = 1,
              kernel::AbstractKernel = EpanechnikovKernel(), weights = nothing, vce::HCVariance = HCVariance(0))
   p = Int(degree)
   p >= 0 || throw(ArgumentError("degree must be nonnegative, got $degree"))

@@ -132,16 +132,24 @@ Pages = ["locpoly.jl", "surface.jl"]
 
 [`PartiallyLinear`](@ref) fits `y = x'β + g(u) + ε` by the double residuals of
 Robinson (1988): the regression of `y` on `X` after removing from both their local
-polynomial smooths in `u`. With `bandwidth = CrossValidation()`,
-`bandwidth_mode = :response` uses the bandwidth chosen for `y` for every smooth,
-`:smallest` uses the smallest chosen for `y` and the columns of `X` throughout,
-and `:each` uses each smooth's own bandwidth. A positive finite number sets one
-bandwidth for all smooths; a vector sets one for `y`, then each column of `X` in
+polynomial smooths in `u`. With `bandwidth = CrossValidation()`, the default
+`bandwidth_mode = :smallest` uses the smallest bandwidth chosen for `y` and the
+columns of `X` for every smooth. One common bandwidth avoids the extra residual
+term `Σⱼ βⱼ (S_j − S_y) x_j` from separate smoothers. The smallest cross-validated
+bandwidth is small enough for the covariates' conditional means in the
+[coverage study](https://github.com/mlakolar/KernelSmoothing.jl/blob/master/notes/partially-linear.md).
+The earlier default is reproduced by `:response`, which uses the bandwidth
+chosen for `y` throughout; `:each` is available for each smooth's own bandwidth.
+A positive finite number sets one bandwidth for all smooths; a vector sets one
+for `y`, then each column of `X` in
 order. Numeric bandwidths are copied as `Float64`, and `bandwidth_mode` is
 validated but ignored for them. `m.bandwidths` records the effective bandwidths,
 and `m.selections` the cross-validation selections (`nothing` for numeric input).
 `m.selection` remains the selection for `y`. The smooth part `ĝ` smooths
 `y - x'β̂` with the effective bandwidth for `y`, returned by `bandwidth(m)`.
+Occasionally, a cross-validated bandwidth is so small that a smooth is not
+identified at some observation; `fit` then throws, and a larger numeric
+bandwidth is needed.
 
 The `√n` consistency theorem of Robinson (1988) assumes a common,
 non-data-driven bandwidth with trimming. The sandwich intervals are a first-order
