@@ -68,11 +68,48 @@ mean regression,
 h_\tau = h \Big(\frac{\tau (1 - \tau)}{\phi(\Phi^{-1}(\tau))^2}\Big)^{1/5}.
 ```
 
-The standard errors come from the sandwich of a weighted quantile regression,
+The conventional standard errors come from the sandwich of a weighted quantile regression,
 ``\tau(1 - \tau)\, s^2 (Z^\top V Z)^{-1} (Z^\top V^2 Z) (Z^\top V Z)^{-1}``, with the
 sparsity ``s = 1/f(q_\tau(x_0) \mid x_0)`` estimated by the difference quotient of local
 fits at the orders ``\tau \pm \delta``, ``\delta`` the bandwidth of Hall and Sheather
-(1988). They ignore the bias.
+(1988). This replaces the density-weighted bread by the density at ``x_0`` times
+the weighted design Gram matrix, a local approximation rather than an identity.
+
+By default, `confint` returns robust bias-corrected pointwise intervals. A quantile
+fit of order ``p + 1`` at the same ``\tau`` estimates the bias, with pilot bandwidth
+``b = h / \mathtt{rho}`` by default (`rho = 1`). A numeric `pilot` supplies ``b``
+directly and overrides `rho`. With ``u_i = (x_i - x_0)/h``,
+``r_p(u) = (1, u, \ldots, u^p)^\top``,
+``\Gamma_p = \sum_i w_i k(u_i) r_p(u_i) r_p(u_i)^\top``,
+``g = \Gamma_p^{-1} e_\nu`` and
+``\Lambda = \sum_i w_i k(u_i) u_i^{p+1} r_p(u_i)``, the estimated bias is
+
+```math
+\hat B_\nu = \nu!\, h^{p+1-\nu}\, (g^\top\Lambda)\, \hat\beta^{(b)}_{p+1},
+```
+
+where ``\hat\beta^{(b)}_{p+1}`` is the unscaled pilot coefficient. The robust standard
+error uses the influence weights of both quantile fits over the union of their
+windows. It includes the variability of the correction and its covariance with
+the primary estimate, using the same sparsity as the conventional standard error.
+This specializes the joint-score argument of Qu and Yoon (2019, Lemma 3 and
+Remark 2) to an interior point.
+
+Inference assumes independent observations, a conditional density continuous and
+positive near the quantile, a quantile function smooth of order ``p + 2``,
+identified local designs, and shrinking bandwidths with enough observations in
+both windows. The correction is computed for every degree and derivative, but
+validity is claimed only for odd ``p - \nu``, including the default
+`degree = derivative + 1`. For even differences, higher-order quantile and density
+terms can lead the bias and need not be removed by this correction.
+
+`coef` and `stderror` remain conventional by default; pass
+`method = RobustBiasCorrected()` for the corrected estimate and robust standard
+error. Use `confint(q; method = Conventional())` for intervals that require
+negligible bias. `coeftable` reports both methods. A failed pilot leaves the
+conventional results available. Failed sparsity leaves both estimates available,
+with both standard errors and intervals `NaN`. The default also applies through
+`rearrange`.
 
 ## Example
 
@@ -85,7 +122,9 @@ pdf(m, 0.5, 1.0), cdf(m, 0.5, 1.0), quantile(m, 0.9, 1.0)
 conditional(m, 1.0)                      # the conditional distribution at x = 1, a KDE
 
 q = fit(LocalQuantileRegression, x, y; tau = 0.9, points = -2:0.25:2)
-coef(q), confint(q)
+coef(q)                                 # conventional estimates
+coef(q; method = RobustBiasCorrected()), confint(q)
+coeftable(q)                            # both estimates, standard errors and intervals
 ```
 
 ## Reference
@@ -100,7 +139,9 @@ conditional
 ConditionalCV
 LocalQuantileRegression
 fit(::Type{LocalQuantileRegression}, ::AbstractVector, ::AbstractVector)
+coef(::LocalQuantileRegression)
 stderror(::LocalQuantileRegression)
 confint(::LocalQuantileRegression)
+coeftable(::LocalQuantileRegression)
 YuJones
 ```

@@ -56,17 +56,37 @@ end
 
 function quantreg(rows)
   println("### Local quantile regression: coverage of 95% pointwise intervals (Monte Carlo standard error)\n")
+  println("Coverage, SE calibration and length comparisons use the common valid set of both methods. Coverage and its paired difference are in percent and percentage points, respectively.\n")
+  println("Length ratios are RBC / conventional; zero conventional denominators give NaN. SDs and the paired Monte Carlo SE need at least two valid replications.\n")
   out = []
+  valid(r) = isfinite(r.estimate) && isfinite(r.se)
+  valid_bc(r) = isfinite(r.estimate_bc) && isfinite(r.se_rbc)
+  avg(v) = isempty(v) ? NaN : mean(v)
+  sd(v) = length(v) < 2 ? NaN : std(v)
   G = groupby(rows, (:design, :n, :point))
   for k in sort(collect(keys(G)))
     g = G[k]
-    ok = filter(r -> isfinite(r.estimate) && isfinite(r.se), g)
-    c = mean(abs(r.estimate - r.truth) <= Z * r.se for r in ok)
-    bias = mean(r.estimate - r.truth for r in ok)
-    push!(out, (k..., pct(c, length(ok)), fmt(bias), fmt(std(r.estimate for r in ok)), fmt(mean(r.se for r in ok)),
-                fmt(median(r.h for r in g)), length(g) - length(ok)))
+    ok = filter(r -> valid(r) && valid_bc(r), g)
+    R = length(ok)
+    cc = [abs(r.estimate - r.truth) <= Z * r.se for r in ok]
+    cr = [abs(r.estimate_bc - r.truth) <= Z * r.se_rbc for r in ok]
+    delta = Int.(cr) .- Int.(cc)
+    paired = string(fmt(100avg(delta); d = 1), " (", fmt(100sd(delta) / sqrt(R); d = 1), ")")
+    se = [r.se for r in ok]
+    se_rbc = [r.se_rbc for r in ok]
+    ratio = R == 0 || avg(se) == 0 ? NaN : avg(se_rbc) / avg(se)
+    ratios = R == 0 || any(iszero, se) ? NaN : avg(se_rbc ./ se)
+    design, τs = rsplit(k[1], "-"; limit = 2)
+    push!(out, (design, k[2], parse(Float64, τs), k[3], length(g), count(r -> !valid(r), g),
+                count(r -> !valid_bc(r), g), R, pct(avg(cc), R), pct(avg(cr), R), paired,
+                fmt(sd([r.estimate for r in ok])), fmt(avg(se)), fmt(sqrt(avg(se.^2))),
+                fmt(sd([r.estimate_bc for r in ok])), fmt(avg(se_rbc)), fmt(sqrt(avg(se_rbc.^2))),
+                fmt(ratio), fmt(ratios)))
   end
-  table(("design", "n", "point", "coverage", "bias", "sd", "mean se", "median h", "NaN"), out)
+  table(("design", "n", "τ", "point", "attempted", "failed conventional", "failed RBC", "common valid",
+         "conventional coverage (MC SE)", "RBC coverage (MC SE)", "RBC − conventional (MC SE)",
+         "conventional SD", "conventional mean se", "conventional RMS se", "RBC SD", "RBC mean se", "RBC RMS se",
+         "ratio of mean lengths", "mean paired length ratio"), out)
 end
 
 function shape(rows)

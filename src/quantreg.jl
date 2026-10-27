@@ -141,9 +141,22 @@ minimizes the kernel-weighted check loss
 and `ν! β̂_ν` estimates the derivative of order `ν` of the quantile function
 `q_τ(x)`. Each local fit is a linear program, solved exactly by the simplex method,
 so that the fit interpolates `degree + 1` observations of its window. Fitted with
-[`fit`](@ref)`(LocalQuantileRegression, x, y)`; `coef(m)` returns the estimates at
-the points, `stderror(m)` and `confint(m; level)` the standard errors and
-intervals of [`stderror`](@ref).
+[`fit`](@ref)`(LocalQuantileRegression, x, y)`; `coef(m)` and `stderror(m)` describe
+the conventional estimates. With `method = RobustBiasCorrected()` they describe
+the bias-corrected estimates, using a quantile fit of order `p + 1` with pilot
+bandwidth `b`. The default intervals of [`confint`](@ref) are robust bias-corrected,
+with the variability of both fits and their covariance included.
+
+Pointwise inference assumes independent observations, a conditional density
+`f(y | x)` continuous and positive near `q_τ(x₀)`, a quantile function smooth of
+order `p + 2`, identified local designs, and `h, b → 0` with enough observations in
+both windows. Replacing the density-weighted bread by `f(q_τ(x₀) | x₀)` times the
+weighted design Gram matrix is a local approximation, not an identity. The joint
+quantile-score argument specializes Qu and Yoon (2019, Lemma 3 and Remark 2) to an
+interior point. Bias correction is computed for every degree and derivative, but
+validity is claimed only for odd `degree - derivative`, as in the default
+`degree = derivative + 1`. For even differences, higher-order quantile and density
+terms can lead the bias and need not be removed by this correction.
 """
 struct LocalQuantileRegression{D<:SmoothingData,K<:AbstractKernel,S<:BandwidthSelection} <: StatsAPI.RegressionModel
   data::D
@@ -153,13 +166,16 @@ struct LocalQuantileRegression{D<:SmoothingData,K<:AbstractKernel,S<:BandwidthSe
   derivative::Int
   points::Vector{Float64}
   h::Float64
+  b::Float64
   coefficients::Matrix{Float64}   # β̂ at each point, one row per point
+  pilot_coefficients::Matrix{Float64}   # unscaled coefficients of order p + 1
   selection::S
 end
 
 """
     fit(LocalQuantileRegression, x, y; tau = 0.5, bandwidth = YuJones(), derivative = 0,
-        degree = derivative + 1, kernel = EpanechnikovKernel(), points = nothing, weights = nothing)
+        degree = derivative + 1, kernel = EpanechnikovKernel(), pilot = nothing, rho = 1,
+        points = nothing, weights = nothing)
 
 Local polynomial estimates of the quantile of order `tau` of `y` given `x`, or of
 its derivative of order `derivative`, at `points` (by default 30 points between
@@ -167,6 +183,15 @@ the quantiles of order 0.025 and 0.975 of `x`). The `bandwidth` is a positive nu
 or a rule, by default [`YuJones`](@ref)`()`, which rescales a bandwidth for the mean
 regression of the same `degree`. The kernel must be nonnegative. quantreg's `lprq`
 estimates the derivative from the same local linear fits, `degree = 1`.
+
+The pilot fit of order `degree + 1` at the same quantile estimates the bias. Its
+bandwidth is `b = h / rho` by default, so `rho = 1` uses the same bandwidth for
+both fits. A numeric `pilot` overrides `rho`, which is then not validated; `b`
+must be positive and finite after conversion to `Float64`. Each fit uses one
+bandwidth for all points. The pilot is fitted immediately, while the sparsity for
+standard errors is estimated only when requested. A failed pilot leaves the
+conventional results available. The assumptions and the odd `degree - derivative`
+validity scope are given under [`LocalQuantileRegression`](@ref).
 """
 function fit(::Type{LocalQuantileRegression}, x::AbstractVector, y::AbstractVector; weights = nothing, kwargs...)
   return fit(LocalQuantileRegression, SmoothingData(x, y; weights); kwargs...)
@@ -174,7 +199,7 @@ end
 
 function fit(::Type{LocalQuantileRegression}, d::SmoothingData; tau::Real = 0.5, bandwidth = YuJones(),
              derivative::Integer = 0, degree::Integer = derivative + 1,
-             kernel::AbstractKernel = EpanechnikovKernel(), points = nothing)
+             kernel::AbstractKernel = EpanechnikovKernel(), pilot = nothing, rho::Real = 1, points = nothing)
   _noclusters(d, "LocalQuantileRegression")
   d.y === nothing && throw(ArgumentError("quantile regression needs responses; use SmoothingData(x, y)"))
   0 < tau < 1 || throw(ArgumentError("tau must be between 0 and 1, got $tau"))
@@ -189,9 +214,19 @@ function fit(::Type{LocalQuantileRegression}, d::SmoothingData; tau::Real = 0.5,
         throw(ArgumentError("bandwidth must be a positive number or a BandwidthSelector, got $(repr(bandwidth))"))
   h = sel.h
   h isa Float64 || throw(ArgumentError("quantile regression takes one bandwidth for all points"))
+  b = if pilot !== nothing
+    pilot isa Real || throw(ArgumentError("pilot must be a positive number, got $(repr(pilot))"))
+    Float64(pilot)
+  else
+    0 < rho < Inf || throw(ArgumentError("rho must be positive and finite, or pass the pilot bandwidth"))
+    Float64(h / rho)
+  end
+  0 < b < Inf || throw(ArgumentError("pilot bandwidth must be positive and finite, got $b"))
   rows = _pointwise(x0 -> _localquantile(d, kernel, x0, h, p, τ), pts)
   β = reduce(vcat, (r' for r in rows); init = zeros(0, p + 1))
-  return LocalQuantileRegression(d, kernel, τ, p, Int(derivative), pts, h, β, sel)
+  pilots = _pointwise(x0 -> _localquantile(d, kernel, x0, b, p + 1, τ), pts)
+  βb = reduce(vcat, (r' for r in pilots); init = zeros(0, p + 2))
+  return LocalQuantileRegression(d, kernel, τ, p, Int(derivative), pts, h, b, β, βb, sel)
 end
 
 """
@@ -247,10 +282,49 @@ end
 
 bandwidth(m::LocalQuantileRegression) = m.h
 nobs(m::LocalQuantileRegression) = nobs(m.data)
-coef(m::LocalQuantileRegression) = factorial(m.derivative) .* m.coefficients[:, m.derivative + 1]
 
 """
-    stderror(m::LocalQuantileRegression)
+    coef(m::LocalQuantileRegression; method = Conventional())
+
+The quantile or derivative estimates at the points. With
+`method = RobustBiasCorrected()`, subtract the bias estimated by the quantile fit
+of order `degree + 1` with bandwidth `b`. These are the centres of the default
+intervals of [`confint`](@ref); they are `NaN` where the primary fit or pilot fails.
+Only `Conventional()` and `RobustBiasCorrected()` are supported. See
+[`LocalQuantileRegression`](@ref) for the assumptions and the odd
+`degree - derivative` validity scope.
+"""
+function coef(m::LocalQuantileRegression; method = Conventional())
+  bc = _rqmethod(method)
+  return bc ? _pointwise(j -> _rqcoefbc(m, j), eachindex(m.points)) :
+              factorial(m.derivative) .* m.coefficients[:, m.derivative + 1]
+end
+
+function _rqmethod(method)
+  method isa Union{Conventional,RobustBiasCorrected} ||
+    throw(ArgumentError("quantile regression inference is Conventional() or RobustBiasCorrected()"))
+  return method isa RobustBiasCorrected
+end
+
+# the design weights shared with local polynomial regression; a missing quantile
+# pilot or a design that does not identify the correction leaves only it missing
+function _rqsetup(m::LocalQuantileRegression, j)
+  all(isfinite, view(m.coefficients, j, :)) &&
+    all(isfinite, view(m.pilot_coefficients, j, :)) || return nothing
+  f = _localsetup(m.data, m.kernel, m.points[j], m.h, m.b, m.degree, m.derivative)
+  return f.ok && all(isfinite, f.c) ? f : nothing
+end
+
+function _rqcoefbc(m::LocalQuantileRegression, j)
+  f = _rqsetup(m, j)
+  f === nothing && return NaN
+  ν = m.derivative
+  bias = factorial(ν) * m.h^(m.degree + 1 - ν) * f.s * m.pilot_coefficients[j, end]
+  return factorial(ν) * m.coefficients[j, ν + 1] - bias
+end
+
+"""
+    stderror(m::LocalQuantileRegression; method = Conventional())
 
 The standard errors of the estimates, from the sandwich of a weighted quantile
 regression (Koenker 2005, Section 3.4) with the conditional density at the quantile
@@ -263,15 +337,27 @@ the sparsity `1 / f(q_τ(x₀) | x₀)`, estimated by the difference quotient
 `(q̂_{τ+δ}(x₀) - q̂_{τ-δ}(x₀)) / (2δ)` of local fits at the orders `τ ± δ`, with the
 bandwidth `δ` of Hall and Sheather (1988) for the effective number of observations
 in the window. Where the two fits do not increase, as for discrete responses, the
-sparsity cannot be estimated and the standard error is `NaN`. They describe the variability of the estimates, not their bias, so
-that intervals from them cover only when the bandwidth is small enough for the bias
-to be negligible.
-"""
-stderror(m::LocalQuantileRegression) = _pointwise(j -> _rqse(m, j), eachindex(m.points))
+sparsity cannot be estimated and both standard errors are `NaN`; the estimates
+remain available.
 
+With `method = RobustBiasCorrected()`, use the influence weights of both quantile
+fits over the union of their windows, including their covariance and the
+variability of the bias correction. Both standard errors use the same sparsity,
+estimated lazily from the order-`degree` fits with bandwidth `h`. A failed pilot
+leaves only the robust standard error missing. Only `Conventional()` and
+`RobustBiasCorrected()` are supported. The conditional density approximation and
+the odd `degree - derivative` validity scope are stated under
+[`LocalQuantileRegression`](@ref). Conventional intervals require negligible bias.
+"""
+function stderror(m::LocalQuantileRegression; method = Conventional())
+  bc = _rqmethod(method)
+  return _pointwise(j -> (bc ? _rqse(m, j).se_rbc : _rqse(m, j).se), eachindex(m.points))
+end
+
+# one sparsity estimate per point for both standard errors
 function _rqse(m::LocalQuantileRegression, j)
   d, k, x0, h, p, τ = m.data, m.kernel, m.points[j], m.h, m.degree, m.tau
-  all(isfinite, view(m.coefficients, j, :)) || return NaN
+  all(isfinite, view(m.coefficients, j, :)) || return (se = NaN, se_rbc = NaN)
   r = _poswindow(d, k, x0, h)
   w = [_weight(d.w, i) * k((d.x[i] - x0) / h) for i in r]
   neff = sum(w)^2 / sum(abs2, w)
@@ -280,24 +366,63 @@ function _rqse(m::LocalQuantileRegression, j)
   δ = neff^(-1 / 3) * z^(2 / 3) * (1.5 * Distributions.pdf(Distributions.Normal(), qz)^2 / (2 * qz^2 + 1))^(1 / 3)
   δ = min(δ, τ / 2, (1 - τ) / 2)
   hi, lo = _localquantile(d, k, x0, h, p, τ + δ)[1], _localquantile(d, k, x0, h, p, τ - δ)[1]
-  hi > lo || return NaN   # the difference quotient estimates no sparsity
+  hi > lo || return (se = NaN, se_rbc = NaN)   # the difference quotient estimates no sparsity
   s = (hi - lo) / (2δ)
   Z = [((d.x[i] - x0) / h)^q for i in r, q in 0:p]
   G = Z' * (w .* Z)
   V = G \ (Z' * (w .^ 2 .* Z)) / G
   ν = m.derivative
-  return sqrt(max(τ * (1 - τ) * V[ν + 1, ν + 1], 0.0)) * s * factorial(ν) / h^ν
+  se = sqrt(max(τ * (1 - τ) * V[ν + 1, ν + 1], 0.0)) * s * factorial(ν) / h^ν
+  f = _rqsetup(m, j)
+  f === nothing && return (se = se, se_rbc = NaN)
+  vbc = 0.0
+  for i in f.a:f.e
+    u, v = (d.x[i] - x0) / h, (d.x[i] - x0) / m.b
+    ℓbc = _weight(d.w, i) * (k(u) * evalpoly(u, f.g) - f.ρ * f.s * k(v) * evalpoly(v, f.c))
+    vbc += ℓbc^2
+  end
+  return (se = se, se_rbc = sqrt(τ * (1 - τ) * vbc) * s * factorial(ν) / h^ν)
 end
 
 """
-    confint(m::LocalQuantileRegression; level = 0.95)
+    confint(m::LocalQuantileRegression; level = 0.95, method = RobustBiasCorrected())
 
-The intervals `coef(m) ± z stderror(m)` at the points, as a matrix with the lower
-and upper ends as columns; like the standard errors, they ignore the bias.
+Pointwise intervals `coef(m; method) ± z stderror(m; method)` at the points, as a
+matrix with the lower and upper ends as columns. By default these are robust
+bias-corrected intervals. With `method = Conventional()`, they are centred at the
+conventional estimates and require negligible bias. Only these two methods are
+supported. See [`LocalQuantileRegression`](@ref) for the assumptions, including the
+odd `degree - derivative` validity scope of the correction. Intervals obtained
+through [`rearrange`](@ref) inherit this default.
 """
-function confint(m::LocalQuantileRegression; level::Real = 0.95)
+function confint(m::LocalQuantileRegression; level::Real = 0.95, method = RobustBiasCorrected())
+  0 < level < 1 || throw(ArgumentError("level must be between 0 and 1, got $level"))
+  _rqmethod(method)
+  z = quantile(Distributions.Normal(), (1 + level) / 2)
+  b, se = coef(m; method), stderror(m; method)
+  return hcat(b .- z .* se, b .+ z .* se)
+end
+
+"""
+    coeftable(m::LocalQuantileRegression; level = 0.95)
+
+The results as a named tuple of equal-length columns: `point`, bandwidths `h` and
+`b`, the conventional `estimate`, standard error `se` and interval `lower`,
+`upper`, and the bias-corrected `estimate_bc`, robust standard error `se_rbc` and
+interval `lower_rbc`, `upper_rbc`. Sparsity is estimated once per point for both
+standard errors. A failed pilot affects only the corrected results; failed
+sparsity affects both standard errors and intervals, leaving the estimates
+available. The assumptions and the odd `degree - derivative` validity scope are
+given under [`LocalQuantileRegression`](@ref).
+"""
+function coeftable(m::LocalQuantileRegression; level::Real = 0.95)
   0 < level < 1 || throw(ArgumentError("level must be between 0 and 1, got $level"))
   z = quantile(Distributions.Normal(), (1 + level) / 2)
-  b, se = coef(m), stderror(m)
-  return hcat(b .- z .* se, b .+ z .* se)
+  ses = _pointwise(j -> _rqse(m, j), eachindex(m.points))
+  se, se_rbc = [s.se for s in ses], [s.se_rbc for s in ses]
+  estimate, estimate_bc = coef(m), coef(m; method = RobustBiasCorrected())
+  return (point = copy(m.points), h = fill(m.h, length(m.points)), b = fill(m.b, length(m.points)),
+          estimate = estimate, se = se, lower = estimate .- z .* se, upper = estimate .+ z .* se,
+          estimate_bc = estimate_bc, se_rbc = se_rbc,
+          lower_rbc = estimate_bc .- z .* se_rbc, upper_rbc = estimate_bc .+ z .* se_rbc)
 end

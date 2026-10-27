@@ -4,6 +4,7 @@ using Test
 using KernelSmoothing
 using KernelSmoothing: _rqsimplex, _cdcv
 using Distributions: Distributions
+using LinearAlgebra
 using QuadGK
 using Random
 
@@ -81,16 +82,17 @@ end
   m = fit(LocalQuantileRegression, X, Y; tau = 0.25)
   @test bandwidth(m) == s.h && m.selection.rule == YuJones()
   @test nobs(m) == length(X)
-  # weights: integer weights act as repeated observations
+  # weights: integer weights act as repeated observations for the estimates
   w = 1 .+ mod.(1:150, 3)
   mw = fit(LocalQuantileRegression, X, Y; weights = w, tau = 0.5, bandwidth = 0.5, points = [-1.0, 0.0, 1.0])
   idx = reduce(vcat, [fill(i, w[i]) for i in 1:150])
   mr = fit(LocalQuantileRegression, X[idx], Y[idx]; tau = 0.5, bandwidth = 0.5, points = [-1.0, 0.0, 1.0])
   @test coef(mw) ≈ coef(mr) rtol = 1e-10
+  @test coef(mw; method = RobustBiasCorrected()) ≈ coef(mr; method = RobustBiasCorrected()) rtol = 1e-10
   # standard errors and intervals
   se = stderror(m)
   @test all(v -> isfinite(v) && v > 0, se)
-  ci = confint(m; level = 0.9)
+  ci = confint(m; level = 0.9, method = Conventional())
   @test all(ci[:, 1] .< coef(m) .< ci[:, 2])
   @test ci[:, 2] .- ci[:, 1] ≈ 2 * Distributions.quantile(Distributions.Normal(), 0.95) .* se
   @test all(isfinite, stderror(fit(LocalQuantileRegression, X, Y; tau = 0.5, derivative = 1)))
@@ -113,6 +115,151 @@ end
   @test_throws ArgumentError fit(LocalQuantileRegression, SmoothingData(X); tau = 0.5)
   @test_throws ArgumentError confint(m; level = 1.5)
   @test_throws ArgumentError select_bandwidth(YuJones(), d, EpanechnikovKernel(); tau = 0.0)
+end
+
+@testset "quantile conventional standard errors at a99bcc9" begin
+  points = [-1.5, -0.5, 0.0, 0.7, 1.4]
+  for (τ, h, p, ν, ref) in (
+      (0.25, 0.5, 1, 0, [0.2514469273573268, 0.0876007640484024, 0.08493853473752128, 0.10724141770655232, 0.23063146375700266]),
+      (0.5, 0.4, 1, 0, [0.29442388404994135, 0.10934543221195414, 0.08532069989335814, 0.11517667909259963, 0.3802786732296921]),
+      (0.9, 0.6, 2, 1, [0.4301858532046626, 0.5057015763068441, 0.3725732516947525, 0.4145407389391761, 0.9908496348764847]))
+    m = fit(LocalQuantileRegression, X, Y; tau = τ, bandwidth = h, degree = p, derivative = ν, points)
+    @test stderror(m) ≈ ref rtol = 1e-12
+    @test stderror(m; method = Conventional()) == stderror(m)
+  end
+end
+
+# a dense reference using only the kernel and public quantile fits
+function rq_reference(x, y, w, k, x0, h, b, p, ν, τ)
+  u, v = (x .- x0) ./ h, (x .- x0) ./ b
+  Zh = [t^j for t in u, j in 0:p]
+  Zb = [t^j for t in v, j in 0:p+1]
+  wh, wb = w .* k.(u), w .* k.(v)
+  g = (Zh' * (wh .* Zh)) \ [j == ν ? 1.0 : 0.0 for j in 0:p]
+  c = (Zb' * (wb .* Zb)) \ [j == p + 1 ? 1.0 : 0.0 for j in 0:p+1]
+  Λ = Zh' * (wh .* u .^ (p + 1))
+  ℓ = wh .* (Zh * g)
+  ℓbc = ℓ .- (h / b)^(p + 1) * dot(g, Λ) .* wb .* (Zb * c)
+  # Hall and Sheather's difference quotient, with Kish's effective window size
+  neff = sum(wh)^2 / sum(abs2, wh)
+  N = Distributions.Normal()
+  z, qz = Distributions.quantile(N, 0.975), Distributions.quantile(N, τ)
+  δ = neff^(-1 / 3) * z^(2 / 3) * (1.5 * Distributions.pdf(N, qz)^2 / (2 * qz^2 + 1))^(1 / 3)
+  δ = min(δ, τ / 2, (1 - τ) / 2)
+  hi = only(coef(fit(LocalQuantileRegression, x, y; weights = w, kernel = k, tau = τ + δ,
+                    degree = p, derivative = 0, bandwidth = h, points = [x0])))
+  lo = only(coef(fit(LocalQuantileRegression, x, y; weights = w, kernel = k, tau = τ - δ,
+                    degree = p, derivative = 0, bandwidth = h, points = [x0])))
+  s = (hi - lo) / (2δ)
+  dpilot = only(coef(fit(LocalQuantileRegression, x, y; weights = w, kernel = k, tau = τ,
+                        degree = p + 1, derivative = p + 1, bandwidth = b, points = [x0])))
+  bias = factorial(ν) * h^(p + 1 - ν) * dot(g, Λ) * dpilot / factorial(p + 1)
+  scale = factorial(ν) / h^ν
+  return (se = scale * s * sqrt(τ * (1 - τ) * sum(abs2, ℓ)),
+          se_rbc = scale * s * sqrt(τ * (1 - τ) * sum(abs2, ℓbc)), bias = bias)
+end
+
+@testset "quantile robust bias correction" begin
+  # an interior and a boundary point, with non-uniform observation weights
+  x = repeat(collect(range(-1.0, 1.0; length = 17)); inner = 5)
+  errors = repeat([-1.0, -0.5, 0.0, 0.5, 1.0], 17)
+  y = 0.3 .+ x .+ 0.2 .* x .^ 2 .- 0.1 .* x .^ 3 .+ 0.05 .* x .^ 4 .+ (0.5 .+ 0.1 .* x) .* errors
+  w = repeat(1 .+ mod.(1:17, 4) ./ 3; inner = 5)
+  points, h, τ = [-1.0, 0.15], 0.85, 0.5
+  rbc = RobustBiasCorrected()
+  for k in (EpanechnikovKernel(), GaussianKernel()), (p, ν) in ((1, 0), (2, 1), (3, 2)), ratio in (0.75, 1.0, 1.3)
+    b = h * ratio
+    m = fit(LocalQuantileRegression, x, y; weights = w, kernel = k, tau = τ,
+            degree = p, derivative = ν, bandwidth = h, pilot = b, points)
+    se, se_rbc = stderror(m), stderror(m; method = rbc)
+    estimate, estimate_bc = coef(m), coef(m; method = rbc)
+    @test all(isfinite, se) && all(>(0), se)
+    @test all(isfinite, se_rbc) && all(>(0), se_rbc)
+    for (j, x0) in enumerate(points)
+      ref = rq_reference(x, y, w, k, x0, h, b, p, ν, τ)
+      @test se[j] ≈ ref.se rtol = 1e-9
+      @test se_rbc[j] ≈ ref.se_rbc rtol = 1e-9
+      @test estimate_bc[j] ≈ estimate[j] - ref.bias rtol = 1e-9 atol = 1e-11
+    end
+  end
+  # the order-2 pilot recovers the unscaled quadratic coefficient, without an
+  # exactness claim for the bias-corrected local linear estimate
+  xp = collect(range(-1.0, 1.0; length = 13))
+  mp = fit(LocalQuantileRegression, xp, xp .^ 2; tau = 0.37, bandwidth = 2.0,
+           pilot = 1.7, points = [-0.4, 0.0, 0.6])
+  @test mp.pilot_coefficients ≈ hcat(mp.points .^ 2, 2 .* mp.points, ones(3)) atol = 1e-12
+  # changing the units of x scales derivatives and their standard errors
+  for (p, ν) in ((1, 0), (2, 1), (3, 2))
+    m = fit(LocalQuantileRegression, x, y; weights = w, degree = p, derivative = ν,
+            bandwidth = h, pilot = 1.1, points)
+    c = 2.5
+    mc = fit(LocalQuantileRegression, c .* x, y; weights = w, degree = p, derivative = ν,
+             bandwidth = c * h, pilot = c * 1.1, points = c .* points)
+    @test coef(mc; method = rbc) ≈ coef(m; method = rbc) ./ c^ν rtol = 1e-9 atol = 1e-11
+    @test stderror(mc; method = rbc) ≈ stderror(m; method = rbc) ./ c^ν rtol = 1e-9
+  end
+  # multiplying all weights leaves every column unchanged; repeated rows are
+  # tested above only for estimates, since the sandwich uses squared weights
+  mw = fit(LocalQuantileRegression, X, Y; weights = 1 .+ mod.(1:150, 3), bandwidth = 0.6,
+           pilot = 0.8, degree = 2, derivative = 1, points = [-0.5, 0.5])
+  ms = fit(LocalQuantileRegression, X, Y; weights = 7 .* (1 .+ mod.(1:150, 3)), bandwidth = 0.6,
+           pilot = 0.8, degree = 2, derivative = 1, points = [-0.5, 0.5])
+  tw, ts = coeftable(mw), coeftable(ms)
+  for name in keys(tw)
+    @test getproperty(tw, name) ≈ getproperty(ts, name) rtol = 1e-9 atol = 1e-11
+  end
+end
+
+@testset "quantile inference failures and API" begin
+  rbc = RobustBiasCorrected()
+  # the primary fit and its sparsity survive a pilot with too few distinct x
+  m = fit(LocalQuantileRegression, X, Y; bandwidth = 0.5, pilot = 1e-6, points = [0.0])
+  @test all(isfinite, coef(m)) && all(isfinite, stderror(m)) && only(stderror(m)) > 0
+  @test all(isnan, coef(m; method = rbc)) && all(isnan, stderror(m; method = rbc))
+  @test all(isfinite, confint(m; method = Conventional())) && all(isnan, confint(m))
+  # continuous covariates and constant responses identify both fits, but no sparsity
+  md = fit(LocalQuantileRegression, X, zeros(length(X)); bandwidth = 0.5, points = [0.0])
+  td = coeftable(md)
+  @test all(isfinite, td.estimate) && all(isfinite, td.estimate_bc)
+  @test all(isnan, td.se) && all(isnan, td.se_rbc)
+  @test all(isnan, confint(md; method = Conventional())) && all(isnan, confint(md))
+  # primary failure leaves all inference missing, even with a wide pilot
+  mf = fit(LocalQuantileRegression, X, Y; bandwidth = 0.01, pilot = 20.0, points = [10.0])
+  tf = coeftable(mf)
+  @test all(isnan, vcat(tf.estimate, tf.se, tf.estimate_bc, tf.se_rbc))
+  m = fit(LocalQuantileRegression, X, Y; bandwidth = 0.5, points = [-0.5, 0.0, 0.5])
+  @test m.b == m.h && size(m.pilot_coefficients) == (3, m.degree + 2)
+  @test confint(m) == confint(m; method = rbc)
+  @test confint(rearrange(m)) == confint(rearrange(m); method = rbc)
+  for method in (Conventional(), rbc)
+    z = Distributions.quantile(Distributions.Normal(), 0.95)
+    estimate, se = coef(m; method), stderror(m; method)
+    @test confint(m; level = 0.9, method) ≈ hcat(estimate .- z .* se, estimate .+ z .* se)
+  end
+  t = coeftable(m; level = 0.9)
+  @test keys(t) == (:point, :h, :b, :estimate, :se, :lower, :upper, :estimate_bc, :se_rbc, :lower_rbc, :upper_rbc)
+  @test all(col -> length(col) == length(m.points), values(t))
+  @test t.point == m.points && t.h == fill(m.h, 3) && t.b == fill(m.b, 3)
+  @test t.estimate == coef(m) && t.se == stderror(m)
+  @test t.estimate_bc == coef(m; method = rbc) && t.se_rbc == stderror(m; method = rbc)
+  @test hcat(t.lower, t.upper) == confint(m; level = 0.9, method = Conventional())
+  @test hcat(t.lower_rbc, t.upper_rbc) == confint(m; level = 0.9)
+  for method in (Honest(1.0), Honest(1.0; bias_corrected = true), :unsupported)
+    @test_throws ArgumentError coef(m; method)
+    @test_throws ArgumentError stderror(m; method)
+    @test_throws ArgumentError confint(m; method)
+  end
+  for v in (0.0, -1.0, Inf, NaN)
+    @test_throws ArgumentError fit(LocalQuantileRegression, X, Y; bandwidth = 0.5, rho = v, points = [0.0])
+    @test_throws ArgumentError fit(LocalQuantileRegression, X, Y; bandwidth = 0.5, pilot = v, points = [0.0])
+    @test fit(LocalQuantileRegression, X, Y; bandwidth = 0.5, pilot = 0.7, rho = v, points = [0.0]).b == 0.7
+  end
+  @test fit(LocalQuantileRegression, X, Y; bandwidth = 0.5, rho = 2, points = [0.0]).b == 0.25
+  @test_throws ArgumentError fit(LocalQuantileRegression, X, Y; bandwidth = 0.5, pilot = [0.5], points = [0.0])
+  @test_throws ArgumentError fit(LocalQuantileRegression, X, Y; bandwidth = 0.5, pilot = :selected, points = [0.0])
+  @test_throws ArgumentError fit(LocalQuantileRegression, X, Y; bandwidth = 0.5, pilot = big"1e1000", points = [0.0])
+  @test_throws ArgumentError fit(LocalQuantileRegression, X, Y; bandwidth = 0.5, rho = big"1e1000", points = [0.0])
+  @test_throws ArgumentError coeftable(m; level = 0)
 end
 
 @testset "conditional density" begin
