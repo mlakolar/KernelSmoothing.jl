@@ -37,8 +37,12 @@ designs of the notes; they are not guarantees.
 - **`LocalRandomization` needs a window in which the outcome is flat**. A slope in the
   window makes the tests reject far too often (#95).
   ([estimators of #60–#65](new-estimators.md))
-- **In `PartiallyLinear`, pass a small bandwidth** when a covariate depends on u in a
-  nonlinear way (#96). ([partially linear model](partially-linear.md))
+- **In `PartiallyLinear`, keep the default `bandwidth_mode = :smallest`** (#96).
+  It uses the smallest cross-validated bandwidth for all smooths. It improves
+  coverage in the primary cells and meets the no-harm condition in both runs,
+  with little change in mean interval length. Use a larger common numeric
+  bandwidth if a smooth is not identified at an observation.
+  ([partially linear model](partially-linear.md))
 - **A manipulation test that does not reject proves little** with a few thousand
   observations, since only large jumps in the density are detected reliably.
   ([manipulation test](boundary-manipulation.md))

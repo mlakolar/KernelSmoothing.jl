@@ -3,6 +3,8 @@
 # NREPS" per task, to tasks.txt in the given directory, for the given studies (by
 # default all), and a short list for a canary run to tasks-quick.txt.
 # Usage: maketasks.sh [OUTDIR [STUDY ...]]
+# PARTIALLYLINEAR_CONFIRMATION=1 also writes tasks-partiallylinear-confirmation.txt
+# for replications 2001–4000 when partiallylinear is selected; default lists stay the same.
 set -euo pipefail
 out=${1:-.}
 shift || true
@@ -33,7 +35,20 @@ add rddensity "normal-0 normal-0.1 normal-0.25 normal-0.5 beta-0 beta-0.1 beta-0
 add lpdboundary "exponential beta13" "500 2000 10000" 2000 250
 add mvkde "correlated bimodal skewed" "200" 500 25
 add mvkde "correlated bimodal skewed" "1000" 200 10
-add partiallylinear "sine sine-heteroskedastic logistic" "200 1000" 2000 500
+partiallylinear_designs="sine sine-heteroskedastic logistic quadratic cancellation g-zero linear-means"
+# At 0.1–0.2 s per replication at n = 1000, 1000 replications take a few minutes.
+add partiallylinear "$partiallylinear_designs" "200 1000" 2000 1000 no
+if [[ $studies == *" partiallylinear "* ]]; then
+  echo "partiallylinear sine 1000 1 2" >> "$out/tasks-quick.txt"
+  if [[ ${PARTIALLYLINEAR_CONFIRMATION:-0} == 1 ]]; then
+    : > "$out/tasks-partiallylinear-confirmation.txt"
+    for d in $partiallylinear_designs; do for n in 200 1000; do
+      for first in 2001 3001; do
+        echo "partiallylinear $d $n $first 1000" >> "$out/tasks-partiallylinear-confirmation.txt"
+      done
+    done; done
+  fi
+fi
 # Exact 2-D SCV took 106 s at n = 10⁴ (notes/timings.md). Allow one replication
 # per task there and above; 3-D has no measured baseline. Check its canary before
 # running the full list. Two replications at 10³ assume roughly quadratic scaling.
@@ -47,3 +62,6 @@ if [[ $studies == *" mvbinning "* ]]; then
   echo "mvbinning trivariate 1000 1 2" >> "$out/tasks-quick.txt"
 fi
 wc -l "$out/tasks.txt" "$out/tasks-quick.txt"
+if [[ $studies == *" partiallylinear "* && ${PARTIALLYLINEAR_CONFIRMATION:-0} == 1 ]]; then
+  wc -l "$out/tasks-partiallylinear-confirmation.txt"
+fi

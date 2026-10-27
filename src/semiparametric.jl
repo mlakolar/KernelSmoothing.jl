@@ -13,23 +13,43 @@ end
 """
     PartiallyLinear <: RegressionModel
 
-The partially linear model `y = x'β + g(u) + ε` (Robinson 1988; Speckman 1988),
+The partially linear model `y = x'β + g(u) + ε` of Robinson (1988) and Speckman (1988),
 fitted with [`fit`](@ref)`(PartiallyLinear, u, X, y)`. The parametric part is the
 weighted least squares regression of `y - m̂_y(u)` on `X - m̂_X(u)`, where `m̂_y` and
-`m̂_X` are local polynomial smooths in `u` of `y` and of each column of `X` with the
-same bandwidth, which removes `g` without estimating it first; `β̂` is then
-`√n`-consistent and its standard errors are the sandwich ones of that regression
-(HC0, or HC1 with `vce = HCVariance(1)`). The smooth part `ĝ` is the smooth of
-`y - x'β̂` in `u`. `X` must not contain a constant column, which `g` absorbs.
+`m̂_X` are local polynomial smooths in `u` of `y` and of each column of `X`.
+With cross-validation, the default `bandwidth_mode = :smallest` uses the smallest
+of the bandwidths chosen for `y` and the columns of `X` for every smooth.
+One common bandwidth avoids the extra residual term `Σⱼ βⱼ (S_j − S_y) x_j`
+from separate smoothers. The smallest cross-validated bandwidth is small enough
+for the covariates' conditional means in the
+[coverage study](https://github.com/mlakolar/KernelSmoothing.jl/blob/master/notes/partially-linear.md).
+The earlier default is reproduced by `:response`, which uses the bandwidth
+chosen for `y` throughout; `:each` is available for each smooth's own bandwidth.
+The smooth part `ĝ` smooths `y - x'β̂` using the effective bandwidth of the smooth
+of `y`. `X` must not contain a constant column, which `g` absorbs.
+Occasionally, a cross-validated bandwidth is so small that a smooth is not
+identified at some observation; `fit` then throws, and a larger numeric
+bandwidth is needed.
+
+The `√n` consistency theorem of Robinson (1988) assumes a common,
+non-data-driven bandwidth with trimming. The sandwich intervals (HC0, or HC1
+with `vce = HCVariance(1)`) are a first-order approximation; their small-sample
+accuracy depends on how well the covariates' conditional means are smoothed.
 
 `coef(m)`, `stderror(m)`, `vcov(m)`, `confint(m)` and `coeftable(m)` describe `β̂`;
-`m.points` and `m.smooth` hold `ĝ` at the points.
+`m.points` and `m.smooth` hold `ĝ` at the points. `m.bandwidths` holds the effective
+bandwidths, `y` first and then the columns of `X` in their original order;
+`m.selections` holds their cross-validation selections, or `nothing` for numeric
+bandwidths. `m.selection` is the selection for `y`, and `bandwidth(m)` is that of `ĝ`.
 """
 struct PartiallyLinear{K<:AbstractKernel,S<:BandwidthSelection} <: StatsAPI.RegressionModel
   kernel::K
   degree::Int
   vce::HCVariance
   selection::S
+  selections::Union{Nothing,Vector{_AnySelection}}
+  bandwidths::Vector{Float64}
+  bandwidth_mode::Symbol
   nobs::Int
   h::Float64
   coef::Vector{Float64}
@@ -40,33 +60,69 @@ end
 
 """
     fit(PartiallyLinear, u, X, y; points = nothing, bandwidth = CrossValidation(),
-        degree = 1, kernel = EpanechnikovKernel(), weights = nothing, vce = HCVariance(0))
+        bandwidth_mode = :smallest, degree = 1, kernel = EpanechnikovKernel(),
+        weights = nothing, vce = HCVariance(0))
 
 Fits the partially linear model of `y` on the columns of `X` and a smooth function
-of `u`. `bandwidth` is a number or [`CrossValidation`](@ref), which chooses the
-bandwidth of the smooth of `y` in `u` by leave-one-out cross-validation; the
-estimate of `β` is not sensitive to it within a wide range. `points` are those of
-the smooth part, by default as for [`LocalPolynomialRegression`](@ref).
+of `u`. `bandwidth` is a positive finite number for all smooths, a vector of
+`1 + size(X, 2)` such numbers (`y` first, then the columns of `X`), or
+[`CrossValidation`](@ref). With cross-validation, the default
+`bandwidth_mode = :smallest` uses the smallest bandwidth chosen for `y` and the
+columns of `X` for every smooth. One common bandwidth avoids the extra residual
+term `Σⱼ βⱼ (S_j − S_y) x_j` from separate smoothers. The smallest cross-validated
+bandwidth is small enough for the covariates' conditional means in the
+[coverage study](https://github.com/mlakolar/KernelSmoothing.jl/blob/master/notes/partially-linear.md).
+The earlier default is reproduced by `:response`, which uses the bandwidth
+chosen for `y` throughout; `:each` is available for each smooth's own bandwidth.
+The `:response` mode also cross-validates the covariates to populate
+`selections`, roughly tripling the fit time compared with cross-validating only
+`y`. Numeric bandwidths are copied and converted to `Float64`;
+`bandwidth_mode` is validated but ignored for them. `ĝ` uses the effective
+bandwidth of the smooth of `y`. `points` are those of the smooth part, by default
+as for [`LocalPolynomialRegression`](@ref).
+Occasionally, a cross-validated bandwidth is so small that a smooth is not
+identified at some observation; `fit` then throws, and a larger numeric
+bandwidth is needed.
+
+The `√n` consistency theorem of Robinson (1988) assumes a common,
+non-data-driven bandwidth with trimming. The sandwich intervals are a first-order
+approximation whose small-sample accuracy depends on how well the covariates'
+conditional means are smoothed.
 """
 function fit(::Type{PartiallyLinear}, u::AbstractVector, X::AbstractVecOrMat, y::AbstractVector;
-             points = nothing, bandwidth = CrossValidation(), degree::Integer = 1,
+             points = nothing, bandwidth = CrossValidation(), bandwidth_mode = :smallest, degree::Integer = 1,
              kernel::AbstractKernel = EpanechnikovKernel(), weights = nothing, vce::HCVariance = HCVariance(0))
   p = Int(degree)
   p >= 0 || throw(ArgumentError("degree must be nonnegative, got $degree"))
   vce.type <= 1 || throw(ArgumentError("partially linear fits have HC0 and HC1 standard errors"))
+  bandwidth_mode in (:smallest, :each, :response) || throw(ArgumentError(
+    "bandwidth_mode must be :smallest, :each or :response, got $(repr(bandwidth_mode))"))
   d, Xs = _semidata(u, X, y, weights)
   pts = points === nothing ? _regressionpoints(d, false) : _checkpoints(points)
-  sel = if bandwidth isa CrossValidation
-    select_bandwidth(bandwidth, d, kernel; degree = p)
-  elseif bandwidth isa Real
-    BandwidthSelection(_bandwidths(bandwidth, 1), nothing, NamedTuple())
+  q = size(Xs, 2)
+  sel, hs, selections = if bandwidth isa CrossValidation
+    sels = _AnySelection[_anyselection(select_bandwidth(bandwidth, d, kernel; degree = p))]
+    for j in axes(Xs, 2)
+      push!(sels, _anyselection(select_bandwidth(bandwidth, _withy(d, Xs[:, j]), kernel; degree = p)))
+    end
+    hs = [s.h::Float64 for s in sels]
+    bandwidth_mode === :smallest && fill!(hs, minimum(hs))
+    bandwidth_mode === :response && fill!(hs, hs[1])
+    (sels[1], hs, sels)
+  elseif bandwidth isa Union{Real,AbstractVector{<:Real}}
+    if bandwidth isa AbstractVector
+      length(bandwidth) == q + 1 || throw(DimensionMismatch(
+        "bandwidth has $(length(bandwidth)) entries for 1 + size(X, 2) = $(q + 1) smooths (y first, then the columns of X)"))
+    end
+    hs = bandwidth isa Real ? fill(_bandwidths(bandwidth, 1), q + 1) : _bandwidths(bandwidth, q + 1)
+    (_anyselection(BandwidthSelection(hs[1], nothing, NamedTuple())), hs, nothing)
   else
-    throw(ArgumentError("bandwidth must be a positive number or CrossValidation(), got $(repr(bandwidth))"))
+    throw(ArgumentError("bandwidth must be a positive number, a vector of positive numbers or CrossValidation(), got $(repr(bandwidth))"))
   end
-  h = sel.h isa Float64 ? sel.h : sel.h[1]
-  smooth(v) = local_polynomial(_withy(d, v), d.x; bandwidth = h, degree = p, kernel)
-  ỹ = d.y .- smooth(d.y)
-  X̃ = hcat([Xs[:, j] .- smooth(Xs[:, j]) for j in axes(Xs, 2)]...)
+  h = hs[1]
+  smooth(v, b) = local_polynomial(_withy(d, v), d.x; bandwidth = b, degree = p, kernel)
+  ỹ = d.y .- smooth(d.y, h)
+  X̃ = hcat([Xs[:, j] .- smooth(Xs[:, j], hs[j + 1]) for j in axes(Xs, 2)]...)
   all(isfinite, ỹ) && all(isfinite, X̃) || throw(ArgumentError("a smooth in u is not identified at some observation; use a larger bandwidth"))
   w = d.w === nothing ? ones(nobs(d)) : d.w
   F = LinearAlgebra.qr(sqrt.(w) .* X̃, LinearAlgebra.ColumnNorm())
@@ -82,7 +138,7 @@ function fit(::Type{PartiallyLinear}, u::AbstractVector, X::AbstractVecOrMat, y:
   vce.type == 1 && (meat .*= n / (n - q))
   V = G \ (G \ meat)'
   g = local_polynomial(_withy(d, d.y .- Xs * β), pts; bandwidth = h, degree = p, kernel)
-  return PartiallyLinear(kernel, p, vce, _anyselection(sel), n, h, β, (V + V') / 2, pts, g)
+  return PartiallyLinear(kernel, p, vce, sel, selections, hs, bandwidth_mode, n, h, β, (V + V') / 2, pts, g)
 end
 
 nobs(m::PartiallyLinear) = m.nobs
