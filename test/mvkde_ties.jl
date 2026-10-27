@@ -3,7 +3,6 @@ module MultivariateKDETiesTest
 using Test
 using KernelSmoothing
 using LinearAlgebra
-using Logging: current_logger
 using Random
 
 include(joinpath(@__DIR__, "data", "ks_golden.jl"))
@@ -30,14 +29,14 @@ end
     @testset "$duplicates duplicate pairs" begin
       x = randn(Xoshiro(7), 2, 200)
       x[:, 201-duplicates:200] .= x[:, 1:duplicates]
-      sel = @test_logs (:warn, r"tied or duplicated") (:warn, r"degenerate bandwidth matrix") match_mode = :any begin
-        result = select_bandwidth(LSCVMatrix(binned = false), x)
-        messages = [log.message for log in current_logger().logs]
-        for phrase in (r"tied or duplicated", r"degenerate bandwidth matrix")
-          @test count(message -> occursin(phrase, message), messages) == 1
-          @test all(message -> startswith(message, "LSCVMatrix: "), filter(message -> occursin(phrase, message), messages))
-        end
-        result
+      logs, sel = Test.collect_test_logs() do
+        select_bandwidth(LSCVMatrix(binned = false), x)
+      end
+      messages = [log.message for log in logs]
+      for phrase in (r"tied or duplicated", r"degenerate bandwidth matrix")
+        @test any(log -> occursin((:warn, phrase), log), logs)
+        @test count(message -> occursin(phrase, message), messages) == 1
+        @test all(message -> startswith(message, "LSCVMatrix: "), filter(message -> occursin(phrase, message), messages))
       end
       @test sel isa BandwidthSelection
       @test size(bandwidth(sel)) == (2, 2)
@@ -55,11 +54,11 @@ end
   for d in (2, 3), diagonal in (false, true)
     @testset "d = $d, diagonal = $diagonal" begin
       x = randn(Xoshiro(102), d, 60)
-      sel = @test_logs (:warn, r"degenerate bandwidth matrix") match_mode = :any begin
-        result = select_bandwidth(LSCVMatrix(; diagonal, binned = true, gridsize = 3), x)
-        @test !any(log -> occursin(r"tied or duplicated", log.message), current_logger().logs)
-        result
+      logs, sel = Test.collect_test_logs() do
+        select_bandwidth(LSCVMatrix(; diagonal, binned = true, gridsize = 3), x)
       end
+      @test any(log -> occursin((:warn, r"degenerate bandwidth matrix"), log), logs)
+      @test !any(log -> occursin(r"tied or duplicated", log.message), logs)
       @test sel.details.binned
       @test sel.details.duplicates === 0
       @test all(iszero, sel.details.ties)
