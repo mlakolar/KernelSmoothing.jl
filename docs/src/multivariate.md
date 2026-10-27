@@ -125,7 +125,8 @@ select_bandwidth(SCVMatrix(binned = false), x)   # exact pair sums
 ```
 
 A binned LSCV criterion can develop a spurious minimum as ``H \to 0`` when
-observations share grid cells; use `binned = false` in this case.
+observations share grid cells; a hybrid fix is tracked in issue #101.
+Use `binned = false` in this case.
 `LSCVMatrix(binned = true)` remains available explicitly.
 
 Each selection builds one grid spanning the transformed observations and reuses

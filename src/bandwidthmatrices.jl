@@ -610,7 +610,7 @@ unchanged.
 dimensions, with the smeared self-pairs removed and the exact diagonal kept.
 With `binned = nothing`, exact sums are used in every dimension. A binned LSCV
 criterion can develop a spurious minimum as `H → 0` when observations share grid
-cells; use `binned = false` in this case.
+cells; a hybrid fix is tracked in issue #101. Use `binned = false` in this case.
 
 `gridsize` is the number of nodes per axis, at least 3, defaulting to 151 in two
 dimensions and 51 in three. `binned = false`
@@ -661,7 +661,7 @@ function _selectmatrix(rule::LSCVMatrix, d::_MvData)
   ties = [1 - length(Set(v + 0.0 for v in row)) / nobs(d) for row in eachrow(d.x)]
   if duplicates > 0 || maximum(ties) > _LSCV_TIES
     @warn "LSCVMatrix: tied or duplicated observations ($duplicates duplicated observations; " *
-      "largest per-coordinate tie fraction $(maximum(ties))). Least-squares cross-validation " *
+      "largest per-coordinate tie fraction $(round(maximum(ties); digits = 3))). Least-squares cross-validation " *
       "can select spuriously small bandwidths on tied or rounded data; use SCVMatrix or PlugInMatrix."
   end
   A, y, Σ = _pretransform(d, rule.diagonal ? :scale : :sphere)

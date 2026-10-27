@@ -167,7 +167,7 @@ reproduces the R package where the keyword exists.
     exact sums by default in three dimensions because binning at practical grid
     sizes misses the 2% selection-error target. [`LSCVMatrix`](@ref) always uses
     exact sums by default because its binned criterion can develop a spurious
-    minimum as ``H \to 0`` when observations share grid cells.
+    minimum as ``H \to 0`` when observations share grid cells (issue #101).
     `binned = true` remains available in two and three dimensions, with default
     grid sizes of 151 and 51, respectively; `binned = false` restores exact sums.
     Both bin linearly, but ks subtracts ``F(0)`` for each observation's self-pair,
