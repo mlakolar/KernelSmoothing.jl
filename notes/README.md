@@ -16,7 +16,7 @@ The [recommendations](recommendations.md) collect the advice of all notes on one
 
 | note | estimators |
 |---|---|
-| [Estimators added in #60–#65](new-estimators.md) | `LocalLikelihood` (new families and intervals), `LocalQuantileRegression`, `rearrange` and `constrain`, `BoundedKDE`, `LocalRandomization` |
+| [Estimators added in #60–#65](new-estimators.md) | `LocalLikelihood` (new families and intervals), `LocalQuantileRegression` (conventional and RBC intervals, #94), `rearrange` and `constrain`, `BoundedKDE`, `LocalRandomization` |
 | [Local polynomial regression and density estimation](regression-density.md) | `LocalPolynomialRegression`, `PointwiseDensity`, `conf_band` |
 | [Cluster-robust variances](clusters.md) | `ClusterVariance` |
 | [Regression discontinuity and honest intervals](rd-honest.md) | `RegressionDiscontinuity`, `Honest`, `FLCIOptimal` |
