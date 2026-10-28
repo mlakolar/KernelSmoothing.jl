@@ -6,6 +6,7 @@
 /docs/build/
 .vscode/
 /docs/Manifest*.toml
+/benchmark/Manifest*.toml
 
 # Generated master dependency test environments
 .master-test-env/
