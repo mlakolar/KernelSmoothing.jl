@@ -362,7 +362,8 @@ function _nnls(A, b; maxiter = 3 * size(A, 2) + 50, tol = nothing, stats = nothi
   factor = _NNLSQR(m, k)
   P = factor.P
   tol = tol === nothing ? 10 * eps() * max(m, k) : tol
-  w = As' * bs
+  r = copy(bs)
+  w = As' * r
   converged = false
   guarded = false
   fallback = false
@@ -451,7 +452,15 @@ function _nnls(A, b; maxiter = 3 * size(A, 2) + 50, tol = nothing, stats = nothi
       _nnls_passive_solve!(z, factor, As, bs, fallback)
     end
     fill!(rejected, false)
-    w = As' * (bs .- As * x)
+    # x is zero off P, also after fallback solves. Only inactive dual entries
+    # are read by the entering and stopping tests; include rejected indices.
+    copyto!(r, bs)
+    for i in P
+      LinearAlgebra.axpy!(-x[i], view(As, :, i), r)
+    end
+    for i in 1:k
+      w[i] = passive[i] ? 0.0 : LinearAlgebra.dot(view(As, :, i), r)
+    end
   end
   converged || guarded || @warn "the nonnegative least-squares solver reached its iteration limit; the projection may be inexact"
   if stats !== nothing

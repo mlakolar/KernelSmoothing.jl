@@ -207,8 +207,6 @@ end
   matrix_bytes = sizeof(Float64) * m * n
   workspace_bytes = 2 * matrix_bytes
   @test bytes - workspace_bytes < matrix_bytes ÷ 3
-  println("sparse NNLS allocation: total=", bytes, " workspace=", workspace_bytes,
-          " excess=", bytes - workspace_bytes, " bound=", matrix_bytes ÷ 3)
 end
 
 @testset "amortized rebuild counts" begin
@@ -303,6 +301,23 @@ end
     B = randn(rng, m, 8)
     A = hcat(B, B[:, 1], -B[:, 2], B[:, 3] + B[:, 4], zeros(m))
     check_reference(A, randn(rng, m))
+  end
+end
+
+@testset "passive residual and inactive dual against dense reference" begin
+  rng = Xoshiro(916)
+  for (m, n) in ((12, 6), (32, 20), (40, 36)), _ in 1:3
+    A, b = randn(rng, m, n), randn(rng, m)
+    check_reference(A, b; rtol = 1e-12, atol = 0.0)
+  end
+  for _ in 1:3
+    B = randn(rng, 24, 8)
+    b = randn(rng, 24)
+    # A linearly dependent set and exact duplicate columns need only agree in fit.
+    for A in (hcat(B, B[:, 1] + B[:, 2], -B[:, 3], zeros(24)),
+              hcat(B, B[:, 1], B[:, 1], B[:, 2]))
+      check_reference(A, b; rtol = 1e-12, atol = 0.0)
+    end
   end
 end
 

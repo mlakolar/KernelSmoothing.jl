@@ -10,14 +10,16 @@
 # relative vector differences and weighted objectives can be checked afterwards.
 # Timings exclude diagnostics and CSV output. If the warm-up takes less than
 # 0.1 seconds, take at least 30 timed runs without a budget cutoff, also in --quick
-# mode. Otherwise, take at most five runs within a two-second budget (--quick takes
-# one). Record the minimum, median and spread. Run GC.gc() once before the timed
-# runs of each case, outside the timings. For longer calls, stop repeating when a
+# mode. From 0.1 to under 1 second, take at least 10 runs without a budget cutoff.
+# At 1 second or more, take at most five runs within a two-second budget. --quick
+# takes one run for warm-ups of 0.1 seconds or more. Record the minimum, median
+# and spread. Run GC.gc() once before each case's timed runs, outside the timings.
+# For warm-ups of 1 second or more, stop repeating when a
 # call takes 60 seconds; a slow warm-up is retained as the single run, including
 # compilation. Allocation counts use one separate warmed call, except after a
-# slow call, when the warm-up
-# count is retained and allocations_warmed is false. Package loading is measured
-# after loading the standard libraries. first_call_seconds is per case, including
+# slow call, when the warm-up count is retained and allocations_warmed is false.
+# Package loading is measured after loading the standard libraries.
+# first_call_seconds is per case, including
 # compilation still needed at that point in the process.
 using Random
 using LinearAlgebra
@@ -100,14 +102,16 @@ function timeit(f; budget = 2.0, maxreps = 5)
   end
   GC.gc()
   fast = first_seconds < 0.1
-  repetitions = fast ? max(30, maxreps) : maxreps
+  # maxreps = 1 requests quick mode for warm-ups of 0.1 seconds or more.
+  unbudgeted = fast || (first_seconds < 1 && maxreps > 1)
+  repetitions = fast ? max(30, maxreps) : unbudgeted ? max(10, maxreps) : maxreps
   times = Float64[]
   total = 0.0
-  while length(times) < repetitions && (fast || isempty(times) || total < budget)
+  while length(times) < repetitions && (unbudgeted || isempty(times) || total < budget)
     seconds = @elapsed result = f()
     push!(times, seconds)
     total += seconds
-    !fast && seconds >= 60 && break
+    !unbudgeted && seconds >= 60 && break
   end
   allocations_warmed = maximum(times) < 60
   allocations = allocations_warmed ? (@allocated f()) : warm_allocations
