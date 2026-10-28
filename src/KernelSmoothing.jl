@@ -28,6 +28,7 @@ import Distributions
 import Distributions: cdf, ccdf, cquantile, support, convolve, moment, pdf, logpdf, quantile, insupport, mean, var,
   std, median, cov
 import LinearAlgebra
+import ProximalBase
 import StatsAPI
 import StatsAPI: fit, nobs, stderror, coef, confint, coeftable, predict, fitted, residuals, vcov
 import Random

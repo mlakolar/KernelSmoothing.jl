@@ -97,8 +97,10 @@ cone of the sequences of the given `shape`,
 with `v = weights` (by default equal): `:increasing` or `:decreasing` (isotonic
 regression), `:convex` or `:concave` (nonnegative or nonpositive second divided
 differences at the points), or a monotone convex or concave shape such as
-`:increasing_concave`. The projection is exact: θ is written in the generators of
-the cone, such as the steps `1{t ≥ tⱼ}` for increasing sequences and the hinges
+`:increasing_concave`. The projection is exact. Increasing and decreasing projections
+with equal weights use pooling adjacent violators in O(m) time through
+ProximalBase. Otherwise, θ is written in the generators of the cone, such as the
+steps `1{t ≥ tⱼ}` for increasing sequences and the hinges
 `(t - tⱼ)₊` for convex ones, plus a linear part, and the nonnegative coefficients
 of the generators solve a nonnegative least-squares problem by the active-set
 method of Lawson and Hanson (1974). The cones do not change under increasing affine
@@ -121,11 +123,26 @@ function shape_projection(values::AbstractVector{<:Real}, points::AbstractVector
   v = weights === nothing ? ones(m) : Vector{Float64}(weights)
   length(v) == m || throw(DimensionMismatch("$(length(v)) weights for $m values"))
   all(w -> w > 0 && isfinite(w), v) || throw(ArgumentError("weights must be positive and finite"))
+  if shape in (:increasing, :decreasing) && all(==(v[1]), v)
+    y, s = _scaled_values(values)
+    θ = similar(y)
+    ProximalBase.prox!(θ, ProximalBase.IndIsotonic(; decreasing = shape === :decreasing), y, 1.0)
+    return θ .*= s
+  end
   # the cones are the same for points mapped onto [0, 1], which keeps the generators
   # well scaled whatever the units of the points
   z = m >= 2 ? (t .- t[1]) ./ (t[end] - t[1]) : zeros(m)
   F, E = _conegenerators(shape, z)
-  return _coneproject(Vector{Float64}(values), F, E, v)
+  return _coneproject(values, F, E, v)
+end
+
+# scale the values before pooling or projecting to avoid overflow in the sums
+function _scaled_values(values)
+  y = Vector{Float64}(values)
+  s = maximum(abs, y)
+  s = s > 0 ? s : 1.0
+  y ./= s
+  return y, s
 end
 
 # The linear part F and the generators E (as columns) of the cone of a shape at the
@@ -149,8 +166,9 @@ end
 
 # the projection of y with the weights v onto {F a + E c : c ≥ 0}
 function _coneproject(y, F, E, v)
+  y, s = _scaled_values(y)
   m = length(y)
-  size(E, 2) == 0 && return F * (F \ y)
+  size(E, 2) == 0 && return s .* (F * (F \ y))
   sw = sqrt.(v)
   Fw, Ew, yw = sw .* F, sw .* E, sw .* y
   Q = Matrix(LinearAlgebra.qr(Fw).Q)[:, 1:size(F, 2)]
@@ -159,7 +177,7 @@ function _coneproject(y, F, E, v)
   yr = yw .- Q * (Q' * yw)
   c = _nnls(Er, yr)
   a = Fw \ (yw .- Ew * c)
-  return F * a .+ E * c
+  return s .* (F * a .+ E * c)
 end
 
 # min ‖A x - b‖ over x ≥ 0 by the active-set method of Lawson and Hanson (1974,
