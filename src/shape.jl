@@ -370,6 +370,7 @@ function _nnls(A, b; maxiter = 3 * size(A, 2) + 50, tol = nothing, stats = nothi
   converged = false
   guarded = false
   fallback = false
+  stop_reason = "iteration limit"
   for _ in 1:maxiter
     j = 0
     best = tol
@@ -383,9 +384,9 @@ function _nnls(A, b; maxiter = 3 * size(A, 2) + 50, tol = nothing, stats = nothi
       end
       if fallback
         # Negative tolerances test the coefficient guard, not a negative KKT bound.
+        stop_reason = "candidates could not enter"
         guarded = tol < 0 && all(i -> passive[i] || w[i] <= 10 * eps() * max(m, k), 1:k)
-        guarded && break
-        continue
+        break
       end
       # Re-solve the passive set, then reconsider rejected candidates with the
       # same rank-revealing least-squares solves used before QR updating.
@@ -465,7 +466,7 @@ function _nnls(A, b; maxiter = 3 * size(A, 2) + 50, tol = nothing, stats = nothi
       w[i] = passive[i] ? 0.0 : LinearAlgebra.dot(view(As, :, i), r)
     end
   end
-  converged || guarded || @warn "the nonnegative least-squares solver reached its iteration limit; the projection may be inexact"
+  converged || guarded || @warn "the nonnegative least-squares solver stopped: $stop_reason; the projection may be inexact"
   if stats !== nothing
     stats[:updates] = factor.updates
     stats[:rebuilds] = factor.rebuilds

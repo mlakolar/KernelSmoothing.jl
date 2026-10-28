@@ -243,6 +243,36 @@ end
   @test stats[:rebuilds] <= stats[:updates] / 16 + 1
 end
 
+@testset "fallback rejection and stopping" begin
+  A = [1.0 0.0; 0.0 1.0]
+  b = [1.0, -1.0]
+  stats = Dict{Symbol, Int}()
+  x = @test_logs _nnls(A, b; tol = -1.0, stats)
+  @test x ≈ [1.0, 0.0] atol = 1e-14
+  @test x ≈ (@test_logs _nnls_reference(A, b; tol = -1.0)) atol = 1e-14
+  @test stats[:fallbacks] == 1 && stats[:updates] == 1
+  # The same candidate is refused once by QR and once by the fallback solve.
+  @test stats[:rejections] == 2 && stats[:reconsiderations] == 1
+  @test stats[:deletions] == 0
+  # Stopping at the guard leaves x as it was before the final iteration.
+  @test (@test_logs (:warn, r"iteration limit") _nnls(A, b; tol = -1.0, maxiter = 4)) == x
+end
+
+@testset "backtracking in fallback" begin
+  δ = 2.0^-32
+  A = [1.0 0.0 0.0 100.0; 0.0 1.0 1.0 1.0; 0.0 1.0 -1.0 0.0; 0.0 0.0 0.0 δ]
+  b = [1000.0, 1.0, 0.0, 2δ]
+  stats = Dict{Symbol, Int}()
+  # The first three columns enter by QR. The fourth fails the rank cutoff;
+  # in fallback its positive coefficient makes both middle coefficients negative.
+  x = @test_logs _nnls(A, b; tol = -1.0, stats)
+  reference = @test_logs _nnls_reference(A, b; tol = -1.0)
+  @test x ≈ [900.0, 0.0, 0.0, 1.0] atol = 1e-12
+  @test A * x ≈ A * reference rtol = 1e-12 atol = 1e-12
+  @test stats[:fallbacks] == 1 && stats[:updates] == 3
+  @test stats[:deletions] == 2 && stats[:max_blockers] == 2
+end
+
 @testset "deterministic NNLS updates" begin
   # Two symmetric passive coefficients hit zero in the same backtracking step.
   A = [1.0 0.0 0.0 100.0; 0.0 1.0 1.0 1.0; 0.0 1.0 -1.0 0.0; 0.0 0.0 0.0 1.0]
