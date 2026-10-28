@@ -25,6 +25,7 @@ tests = [
   "rdlocrand",
   "lpdensity",
   "shape",
+  "nnls",
   "binning",
   "mvkde",
   "mvkde_ties",

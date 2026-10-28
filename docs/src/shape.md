@@ -38,17 +38,25 @@ weighted least-squares norm,
 \hat\theta = \arg\min_{\theta \in \mathcal{C}} \sum_{k=1}^m v_k (\theta_k - \hat f(t_k))^2,
 ```
 
-where ``\mathcal{C}`` is the cone of increasing or decreasing sequences, of convex or
-concave ones (nonnegative or nonpositive second divided differences), or of
+where ``\mathcal{C}`` is the cone of increasing or decreasing sequences, of convex
+or concave ones (nonnegative or nonpositive second divided differences), or of
 monotone convex or concave ones: smoothing followed by an isotonic or convex
 regression, as Mammen (1991) proposed for monotone regression. Since ``\mathcal{C}``
 is a closed convex cone, the projection is never farther from a sequence of the
-shape than the estimates. Every sequence of a shape is a linear part plus a
-nonnegative combination of generators, such as the steps ``1\{t \ge t_j\}`` for
-increasing sequences and the hinges ``(t - t_j)_+`` for convex ones, so that the
-projection is a nonnegative least-squares problem, which the active-set method of
-Lawson and Hanson (1974) solves exactly. `shape_projection(values, points; shape,
-weights)` is the projection itself.
+shape than the estimates. Increasing and decreasing projections with equal weights
+use pooling adjacent violators through ProximalBase in ``O(m)`` time. Every sequence
+of a shape is a linear part plus a nonnegative combination of generators, such as
+the steps ``1\{t \ge t_j\}`` for increasing sequences and the hinges ``(t - t_j)_+``
+for convex ones, so that the other projections solve a nonnegative least-squares
+problem by the active-set method of Lawson and Hanson (1974), with a QR
+factorization of the active generators updated as generators enter and leave. Both
+algorithms are exact up to floating-point tolerance; the active-set method stops
+when no generator improves the fit beyond that tolerance and warns at its iteration
+limit. On one thread, pooling takes microseconds; the other projections take about
+10–20 ms for a smooth estimate at 1000 points. Their time grows with the number of
+generators in the solution, up to ``m^3`` when all of them enter (about 0.3 s at 800
+points). `shape_projection(values, points; shape, weights)` is the projection
+itself.
 
 ## Example
 

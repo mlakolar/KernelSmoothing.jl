@@ -90,6 +90,106 @@ end
   @test_logs (:warn, r"iteration limit") _nnls([1.0 0.0; 0.0 1.0; 1.0 1.0], [1.0, 2.0, 3.0]; maxiter = 1)
 end
 
+@testset "equal-weight monotone projections" begin
+  cases = (([2.0], [0.0]), ([2.0, 1.0], [0.0, 1.0]), ([1.0, 2.0], [0.0, 1.0]),
+           (zeros(4), [0.0, 0.2, 0.8, 2.0]), (fill(-2.0, 4), [0.0, 0.2, 0.8, 2.0]),
+           ([-2.0, -1.0, 1.0, 3.0], [0.0, 0.2, 0.8, 2.0]),
+           ([3.0, 1.0, -1.0, -2.0], [0.0, 0.2, 0.8, 2.0]), (Y, T))
+  for (y, t) in cases, shape in (:increasing, :decreasing)
+    y0, t0 = copy(y), copy(t)
+    F, E = KernelSmoothing._conegenerators(shape, t)
+    for w in (nothing, ones(length(y)), fill(3.7, length(y)))
+      w0 = w === nothing ? nothing : copy(w)
+      θ = shape_projection(y, t; shape, weights = w)
+      v = w === nothing ? ones(length(y)) : w
+      @test θ ≈ KernelSmoothing._coneproject(y, F, E, v) rtol = 1e-10 atol = 1e-12
+      @test θ isa Vector{Float64}
+      @test issorted(θ; rev = shape === :decreasing)
+      @test shape_projection(y, t .^ 3; shape, weights = w) ≈ θ rtol = 1e-10 atol = 1e-12
+      @test y == y0 && t == t0 && w == w0
+    end
+  end
+  @test shape_projection([3, 1, 2, 0, 5], 1:5) ≈ [1.5, 1.5, 1.5, 1.5, 5.0]
+  @test shape_projection([3, 1, 2, 0, 5], 1:5; shape = :decreasing) ≈ [3.0, 2.0, 2.0, 2.0, 2.0]
+  for shape in (:increasing, :decreasing)
+    θ = shape_projection(view(Y, :), view(T, :); shape, weights = view(W, :))
+    F, E = KernelSmoothing._conegenerators(shape, T)
+    @test θ ≈ KernelSmoothing._coneproject(Y, F, E, W) rtol = 1e-10 atol = 1e-12
+    @test θ isa Vector{Float64}
+    @test θ ≈ WEIGHTED[shape] rtol = 1e-10 atol = 1e-12
+  end
+  @test shape_projection([2, 0], [0, 1]; weights = [2, 1]) ≈ fill(4 / 3, 2)
+  @test shape_projection([0, 2], [0, 1]; shape = :decreasing, weights = [1, 2]) ≈ fill(4 / 3, 2)
+end
+
+@testset "monotone projection validation" begin
+  for shape in (:increasing, :decreasing), w in (nothing, ones(2), fill(3.7, 2))
+    @test_throws ArgumentError shape_projection(Float64[], Float64[]; shape, weights = w)
+    @test_throws DimensionMismatch shape_projection([1.0, 2.0], [0.0]; shape, weights = w)
+    for y in ([NaN, 2.0], [1.0, Inf])
+      @test_throws ArgumentError shape_projection(y, [0.0, 1.0]; shape, weights = w)
+    end
+    for t in ([0.0, NaN], [0.0, Inf], [1.0, 0.0], [0.0, 0.0])
+      @test_throws ArgumentError shape_projection([1.0, 2.0], t; shape, weights = w)
+    end
+  end
+  for shape in (:increasing, :decreasing)
+    @test_throws DimensionMismatch shape_projection([1.0, 2.0], [0.0, 1.0]; shape, weights = [1.0])
+    for w in (zeros(2), fill(-1.0, 2), fill(Inf, 2), fill(NaN, 2))
+      @test_throws ArgumentError shape_projection([1.0, 2.0], [0.0, 1.0]; shape, weights = w)
+    end
+  end
+end
+
+@testset "shape projections at extreme value scales" begin
+  for shape in SHAPES, w in (nothing, W), a in (1e308, 1e-300)
+    y, t = a .* Y, copy(T)
+    y0, t0 = copy(y), copy(t)
+    w0 = w === nothing ? nothing : copy(w)
+    θ = @test_logs shape_projection(y, t; shape, weights = w)
+    expected = w === nothing ? UNWEIGHTED[shape] : WEIGHTED[shape]
+    @test all(isfinite, θ)
+    @test θ ./ a ≈ expected rtol = 1e-9 atol = 1e-12
+    @test θ isa Vector{Float64}
+    @test y == y0 && t == t0 && w == w0
+  end
+  for (shape, sign) in ((:increasing, 1.0), (:decreasing, -1.0))
+    for w in (nothing, [1.0, 2.0])
+      θ = @test_logs shape_projection(sign .* [1.6e308, 1.5e308], [0.0, 1.0]; shape, weights = w)
+      expected = w === nothing ? 1.55 : 23 / 15
+      @test all(isfinite, θ)
+      @test θ ./ 1e308 ≈ fill(sign * expected, 2) rtol = 1e-14
+    end
+  end
+  # the cone path also scales the linear solve when there are no generators
+  for shape in SHAPES
+    @test shape_projection([1.6e308], [0.0]; shape) ./ 1e308 ≈ [1.6] rtol = 1e-14
+    @test shape_projection(zeros(4), [0.0, 0.2, 0.8, 2.0]; shape) == zeros(4)
+  end
+  for shape in (:convex, :concave)
+    @test shape_projection([1.6e308, 1.5e308], [0.0, 1.0]; shape) ./ 1e308 ≈ [1.6, 1.5] rtol = 1e-14
+  end
+end
+
+struct PointEstimateFit
+  points::Vector{Float64}
+  estimate::Vector{Float64}
+end
+KernelSmoothing.coef(m::PointEstimateFit) = copy(m.estimate)
+
+@testset "constrained fits with pooled weights" begin
+  for (shape, sign) in ((:increasing, 1.0), (:decreasing, -1.0))
+    m = PointEstimateFit([0.0, 0.0, 1.0], sign .* [3.0, 1.0, 0.0])
+    pts, est = copy(m.points), copy(m.estimate)
+    @test coef(constrain(m, shape)) ≈ fill(sign * 4 / 3, 3) rtol = 1e-12
+    # unequal observation weights can give equal summed weights at the unique points
+    w = [1.0, 2.0, 3.0]
+    w0 = copy(w)
+    @test coef(constrain(m, shape; weights = w)) ≈ fill(sign * 5 / 6, 3) rtol = 1e-12
+    @test m.points == pts && m.estimate == est && w == w0
+  end
+end
+
 @testset "rearrangement and constrained fits" begin
   x, y = SX, SY                                   # an increasing truth, x²
   m = fit(LocalPolynomialRegression, x, y; bandwidth = 0.08, points = SPTS)
