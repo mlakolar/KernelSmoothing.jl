@@ -180,16 +180,153 @@ function _coneproject(y, F, E, v)
   return s .* (F * a .+ E * c)
 end
 
-# min ‖A x - b‖ over x ≥ 0 by the active-set method of Lawson and Hanson (1974,
-# Chapter 23), on the columns of A and on b scaled to unit norm, so that its
-# tolerance does not depend on their units: an index enters the passive set when its
-# gradient is positive, but not if the least-squares solution on the new passive set
-# gives it a nonpositive coefficient, which rounding can cause; an infeasible solution
-# is moved toward until a coefficient reaches zero, and those that do leave. (A
-# negative `tol` lets indices with a negative gradient enter, which the guard refuses,
-# for the tests.)
-function _nnls(A, b; maxiter = 3 * size(A, 2) + 50, tol = nothing)
+# A thin QR factorization of the ordered passive columns, with spare columns for
+# updates. Only the first length(P) columns of Q and the leading block of R are live.
+mutable struct _NNLSQR
+  P::Vector{Int}
+  Q::Matrix{Float64}
+  R::Matrix{Float64}
+  h::Vector{Float64}
+  updates::Int
+  rebuilds::Int
+  since_rebuild::Int
+end
+
+function _NNLSQR(m, n)
+  p = min(m, n)
+  return _NNLSQR(Int[], zeros(m, p), zeros(p, p), zeros(p), 0, 0, 0)
+end
+
+function _nnls_qr_factors(A, b, P)
+  F = LinearAlgebra.qr(A[:, P])
+  Q, R = Matrix(F.Q), Matrix(F.R)
+  return Q, R, Q' * b
+end
+
+function _nnls_qr_rebuild!(factor, A, b)
+  p = length(factor.P)
+  if p > 0
+    Q, R, h = _nnls_qr_factors(A, b, factor.P)
+    factor.Q[:, 1:p] .= Q
+    factor.R[1:p, 1:p] .= R
+    factor.h[1:p] .= h
+  end
+  factor.rebuilds += 1
+  factor.since_rebuild = 0
+  return factor
+end
+
+# Append by modified Gram–Schmidt with one reorthogonalization pass. All tests
+# precede the commit, so a refused column leaves the entire factorization unchanged.
+function _nnls_qr_insert!(factor, A, b, j; positive = false)
+  p = length(factor.P)
+  p < size(factor.Q, 2) || return false
+  v = copy(view(A, :, j))
+  na = LinearAlgebra.norm(v)
+  r = zeros(p)
+  for _ in 1:2
+    for i in 1:p
+      q = view(factor.Q, :, i)
+      t = LinearAlgebra.dot(q, v)
+      r[i] += t
+      v .-= t .* q
+    end
+  end
+  d = LinearAlgebra.norm(v)
+  # sqrt(m) converts a per-coordinate cutoff of 1e-10 to a Euclidean norm
+  # cutoff, allowing for residual error spread across the m coordinates.
+  rank_tol = 1e-10 * sqrt(size(A, 1))
+  d > 0 && d >= rank_tol * na || return false
+  v ./= d
+  h = LinearAlgebra.dot(v, b)
+  positive && h / d <= 0 && return false
+  # A small new diagonal amplifies roundoff in the passive solve. Use fresh
+  # Householder factors there, and otherwise amortize rebuilds over max(p, 16) updates.
+  rebuild = factor.since_rebuild + 1 >= max(p + 1, 16) || d < sqrt(eps()) * na
+  if rebuild
+    Q, R, rhs = _nnls_qr_factors(A, b, [factor.P; j])
+    abs(R[end, end]) >= rank_tol * na || return false
+    positive && rhs[end] / R[end, end] <= 0 && return false
+    factor.Q[:, 1:p+1] .= Q
+    factor.R[1:p+1, 1:p+1] .= R
+    factor.h[1:p+1] .= rhs
+    factor.rebuilds += 1
+    factor.since_rebuild = 0
+  else
+    factor.Q[:, p+1] .= v
+    factor.R[1:p, p+1] .= r
+    factor.R[p+1, 1:p] .= 0
+    factor.R[p+1, p+1] = d
+    factor.h[p+1] = h
+    factor.since_rebuild += 1
+  end
+  push!(factor.P, j)
+  factor.updates += 1
+  return true
+end
+
+# Remove a column of R, then chase its subdiagonal bulge with Givens rotations.
+# If R becomes G R, then h becomes G h and Q becomes Q Gᵀ.
+function _nnls_qr_delete!(factor, A, b, position)
+  p = length(factor.P)
+  Q, R, h = factor.Q, factor.R, factor.h
+  for j in position:p-1
+    R[1:p, j] .= view(R, 1:p, j + 1)
+  end
+  for i in position:p-1
+    d = hypot(R[i, i], R[i+1, i])
+    c, s = d == 0 ? (1.0, 0.0) : (R[i, i] / d, R[i+1, i] / d)
+    R[i, i], R[i+1, i] = d, 0.0
+    for j in i+1:p-1
+      a, b_ = R[i, j], R[i+1, j]
+      R[i, j], R[i+1, j] = c * a + s * b_, -s * a + c * b_
+    end
+    a, b_ = h[i], h[i+1]
+    h[i], h[i+1] = c * a + s * b_, -s * a + c * b_
+    for j in axes(Q, 1)
+      a, b_ = Q[j, i], Q[j, i+1]
+      Q[j, i], Q[j, i+1] = c * a + s * b_, -s * a + c * b_
+    end
+  end
+  deleteat!(factor.P, position)
+  factor.updates += 1
+  factor.since_rebuild += 1
+  factor.since_rebuild >= max(p - 1, 16) && _nnls_qr_rebuild!(factor, A, b)
+  return factor
+end
+
+function _nnls_passive_solve!(z, factor, A, b, fallback)
+  fill!(z, 0)
+  P = factor.P
+  p = length(P)
+  if p > 0
+    z[P] = fallback ? A[:, P] \ b :
+           LinearAlgebra.UpperTriangular(view(factor.R, 1:p, 1:p)) \ view(factor.h, 1:p)
+  end
+  return z
+end
+
+# min ‖A x - b‖ over x ≥ 0 by Lawson and Hanson (1974, Chapter 23), with each
+# nonzero column of A and b scaled to unit norm. The ordered passive columns have
+# A_s[:, P] = Q R and h = Qᵀ b_s; passive solves are triangular. Insertions use
+# reorthogonalized Gram–Schmidt and deletions use Givens rotations, with occasional
+# rebuilds. With amortized rebuilds, O(m) updates and n = O(m) cost O(m³), including
+# dual vectors. Accuracy rebuilds and the rank-revealing fallback can require extra
+# factorizations.
+# An entering index needs w_i > tol and a positive tentative coefficient. Rejections
+# last only until x changes. Backtracking zeros the blocking index explicitly and
+# removes every nonpositive coefficient before solving again. Rejected indices are
+# included in the final dual check; a violation switches to rank-revealing passive
+# solves through \ before stopping. A negative tol exercises the coefficient guard,
+# rather than imposing a negative optimality bound. The iteration limit warns when
+# optimality was not reached. Optional internal stats record updates and rebuilds.
+function _nnls(A, b; maxiter = 3 * size(A, 2) + 50, tol = nothing, stats = nothing)
   m, n = size(A)
+  if stats !== nothing
+    for key in (:updates, :rebuilds, :rejections, :reconsiderations, :fallbacks, :deletions, :max_blockers)
+      stats[key] = 0
+    end
+  end
   nb = LinearAlgebra.norm(b)
   nb > 0 || return zeros(n)
   s = [LinearAlgebra.norm(view(A, :, j)) for j in 1:n]
@@ -200,9 +337,14 @@ function _nnls(A, b; maxiter = 3 * size(A, 2) + 50, tol = nothing)
   x = zeros(k)
   passive = falses(k)
   rejected = falses(k)   # entering indices refused since x last changed
+  ever_rejected = stats === nothing ? nothing : falses(k)
+  factor = _NNLSQR(m, k)
+  P = factor.P
   tol = tol === nothing ? 10 * eps() * max(m, k) : tol
   w = As' * bs
   converged = false
+  guarded = false
+  fallback = false
   for _ in 1:maxiter
     j = 0
     best = tol
@@ -210,16 +352,47 @@ function _nnls(A, b; maxiter = 3 * size(A, 2) + 50, tol = nothing)
       !passive[i] && !rejected[i] && w[i] > best && ((j, best) = (i, w[i]))
     end
     if j == 0
-      converged = true
-      break
+      if all(i -> passive[i] || w[i] <= tol, 1:k)
+        converged = true
+        break
+      end
+      if fallback
+        # Negative tolerances test the coefficient guard, not a negative KKT bound.
+        guarded = tol < 0 && all(i -> passive[i] || w[i] <= 10 * eps() * max(m, k), 1:k)
+        guarded && break
+        continue
+      end
+      # Re-solve the passive set, then reconsider rejected candidates with the
+      # same rank-revealing least-squares solves used before QR updating.
+      fallback = true
+      stats !== nothing && (stats[:fallbacks] += 1)
+      fill!(rejected, false)
+    else
+      stats !== nothing && ever_rejected[j] && (stats[:reconsiderations] += 1)
+      if fallback
+        push!(P, j)
+      elseif !_nnls_qr_insert!(factor, As, bs, j; positive = true)
+        rejected[j] = true
+        if stats !== nothing
+          stats[:rejections] += 1
+          ever_rejected[j] = true
+        end
+        continue
+      end
+      passive[j] = true
     end
-    passive[j] = true
-    P = findall(passive)
     z = zeros(k)
-    z[P] = As[:, P] \ bs
-    if z[j] <= 0
+    _nnls_passive_solve!(z, factor, As, bs, fallback)
+    if fallback && j != 0 && z[j] <= 0
+      # The updated path already checked this coefficient before committing.
+      # In fallback mode there is no QR factorization to change or restore.
+      pop!(P)
       passive[j] = false
       rejected[j] = true
+      if stats !== nothing
+        stats[:rejections] += 1
+        ever_rejected[j] = true
+      end
       continue
     end
     for _ in 1:k + 1
@@ -236,17 +409,34 @@ function _nnls(A, b; maxiter = 3 * size(A, 2) + 50, tol = nothing)
       end
       x .+= α .* (z .- x)
       x[blocking] = 0.0
-      for i in P
-        x[i] <= 0 && (passive[i] = false; x[i] = 0.0)
+      blockers = 0
+      for position in length(P):-1:1
+        i = P[position]
+        if x[i] <= 0
+          passive[i] = false
+          x[i] = 0.0
+          if fallback
+            deleteat!(P, position)
+          else
+            _nnls_qr_delete!(factor, As, bs, position)
+          end
+          blockers += 1
+        end
       end
-      P = findall(passive)
-      z = zeros(k)
-      isempty(P) || (z[P] = As[:, P] \ bs)
+      if stats !== nothing
+        stats[:deletions] += blockers
+        stats[:max_blockers] = max(stats[:max_blockers], blockers)
+      end
+      _nnls_passive_solve!(z, factor, As, bs, fallback)
     end
     fill!(rejected, false)
     w = As' * (bs .- As * x)
   end
-  converged || @warn "the nonnegative least-squares solver reached its iteration limit; the projection may be inexact"
+  converged || guarded || @warn "the nonnegative least-squares solver reached its iteration limit; the projection may be inexact"
+  if stats !== nothing
+    stats[:updates] = factor.updates
+    stats[:rebuilds] = factor.rebuilds
+  end
   out = zeros(n)
   out[live] = x .* nb ./ s[live]
   return out
