@@ -582,11 +582,35 @@ sample to sample than plug-in ones, and the criterion can have several local
 minima: the search starts from the normal scale matrix and finds a minimum near
 it. The exact criterion does not depend on the pre-transformation.
 
+Tied or rounded data can give spuriously small bandwidths. The rule warns when
+there are duplicated observations or any coordinate's tie fraction exceeds 0.1;
+consider [`SCVMatrix`](@ref) or [`PlugInMatrix`](@ref). In exact and binned
+selections, the details also record:
+
+- `duplicates::Int`: the number of observations equal to an earlier one.
+- `ties::Vector{Float64}`: per original coordinate, `1 - distinct/nobs`. These
+  counts use the observations kept after zero weights are dropped, count
+  observations rather than weight, and treat `-0.0` as `0.0` for both fields.
+- `eigenratio::Tuple{Float64,Float64}`: the extreme eigenvalues `(ρ_min, ρ_max)`
+  of `Symmetric(L₀⁻¹ Hy L₀⁻ᵀ)`, where `L₀` is the Cholesky factor of the
+  starting normal-scale matrix `H₀ = L₀L₀ᵀ` and `Hy` is the selected matrix,
+  both in the transformed coordinates.
+  The value is `(NaN, NaN)` if these eigenvalues cannot be computed.
+- `collapsed::Bool`: true if `!(ρ_min > 1e-8)` or `!(ρ_max < 1e8)`, if `Hy` or
+  the returned matrix is not finite, or if the returned matrix is not positive
+  definite. The eigenvalue checks also flag `NaN`.
+
+A collapse emits a separate warning and sets `details.converged = false`. The
+criterion has no proper minimum in such cases, as when observations coincide or
+share binning cells. Use [`SCVMatrix`](@ref), [`PlugInMatrix`](@ref) or
+`binned = false`. The selected matrix and `details.criterion` are returned
+unchanged.
+
 `binned = true` approximates the pair sums by linear binning in two or three
 dimensions, with the smeared self-pairs removed and the exact diagonal kept.
 With `binned = nothing`, exact sums are used in every dimension. A binned LSCV
 criterion can develop a spurious minimum as `H → 0` when observations share grid
-cells; a hybrid fix is tracked in issue #101.
+cells; a hybrid fix is tracked in issue #101. Use `binned = false` in this case.
 
 `gridsize` is the number of nodes per axis, at least 3, defaulting to 151 in two
 dimensions and 51 in three. `binned = false`
@@ -609,16 +633,56 @@ LSCVMatrix(; diagonal::Bool = false, binned::Union{Nothing,Bool} = nothing, grid
 
 _binning_dimensions(::LSCVMatrix) = ()
 
+# Relative eigenvalues outside (τ, 1/τ) indicate collapse. τ is about 1e4 below
+# the smallest measured on continuous clustered data (1.1e-4).
+const _LSCV_COLLAPSE = 1e-8
+# Warn above this coordinate tie fraction: three-digit rounding gave 0.05–0.08
+# without collapse, versus about 0.39 with collapses at two digits.
+const _LSCV_TIES = 0.1
+
+# The eigenvalues of L₀⁻¹ Hy L₀⁻ᵀ measure the selected matrix relative to H₀.
+function _lscveigenratio(H0, Hy)
+  all(isfinite, Hy) || return (NaN, NaN)
+  try
+    L0 = LinearAlgebra.cholesky(LinearAlgebra.Symmetric(H0)).L
+    M = L0 \ Hy / L0'
+    λ = LinearAlgebra.eigvals(LinearAlgebra.Symmetric(M))
+    return (λ[1], λ[end])
+  catch
+    return (NaN, NaN)
+  end
+end
+
 function _selectmatrix(rule::LSCVMatrix, d::_MvData)
   count(i -> _weight(d.w, i) > 0, 1:nobs(d)) >= 2 ||
     throw(ArgumentError("least-squares cross-validation needs at least two observations"))
+  # Hash the original coordinates, treating signed zeros as the same value.
+  duplicates = nobs(d) - length(Set(Tuple(v + 0.0 for v in col) for col in eachcol(d.x)))
+  ties = [1 - length(Set(v + 0.0 for v in row)) / nobs(d) for row in eachrow(d.x)]
+  if duplicates > 0 || maximum(ties) > _LSCV_TIES
+    @warn "LSCVMatrix: tied or duplicated observations ($duplicates duplicated observations; " *
+      "largest per-coordinate tie fraction $(round(maximum(ties); digits = 3))). Least-squares cross-validation " *
+      "can select spuriously small bandwidths on tied or rounded data; use SCVMatrix or PlugInMatrix."
+  end
   A, y, Σ = _pretransform(d, rule.diagonal ? :scale : :sphere)
   p, n, W = _dimension(d), d.neff, d.sumw
   bins = _matrixbins(rule, y, d; loo = true)
-  Hy, crit, iter, converged = _minimizematrix(H -> _lscvcriterion(y, d.w, W, n, H, bins), _normalscale(Σ, n, rule.diagonal),
-                                              rule.diagonal)
+  H0 = _normalscale(Σ, n, rule.diagonal)
+  Hy, crit, iter, converged = _minimizematrix(H -> _lscvcriterion(y, d.w, W, n, H, bins), H0, rule.diagonal)
+  H = _backtransform(A, Hy)
+  eigenratio = _lscveigenratio(H0, Hy)
+  ρmin, ρmax = eigenratio
+  collapsed = !(ρmin > _LSCV_COLLAPSE) || !(ρmax < 1 / _LSCV_COLLAPSE) ||
+    !all(isfinite, Hy) || !all(isfinite, H) || !LinearAlgebra.isposdef(H)
+  if collapsed
+    @warn "LSCVMatrix: degenerate bandwidth matrix; the criterion has no proper minimum, " *
+      "as when observations coincide or share binning cells. Use SCVMatrix, PlugInMatrix " *
+      "or binned = false."
+  end
+  converged = converged && !collapsed
   details = (criterion = crit * abs(LinearAlgebra.det(A)), iterations = iter, converged = converged)
-  return BandwidthSelection(_backtransform(A, Hy), rule, merge(details, _binningdetails(bins, Hy)))
+  return BandwidthSelection(H, rule, merge(details, _binningdetails(bins, Hy),
+    (duplicates = duplicates, ties = ties, eigenratio = eigenratio, collapsed = collapsed)))
 end
 
 # the criterion of LSCVMatrix and its gradient in the entries of H

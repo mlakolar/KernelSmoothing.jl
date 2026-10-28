@@ -178,10 +178,16 @@ reproduces the R package where the keyword exists.
 18. [`SCVMatrix`](@ref) agrees with ks's `Hscv` in its criterion, to rounding at a
     given pilot, but its pilot follows Theorem 4 of Duong (2004), from which ks's
     differs, by about 5% for the samples of the tests; the selected matrices
-    differed by 2% to 3%. Least-squares cross-validation agrees with ks's `Hlscv` in two
-dimensions; in three, for the sample of the tests, ks stopped at a matrix whose
-criterion was higher than at ours. For ``d \geq 3`` ks's `Hns.diag` is not the diagonal
-    matrix that minimizes the normal-reference error; `NormalScaleMatrix(diagonal =
+    differed by 2% to 3%. Least-squares cross-validation agrees with ks's `Hlscv` in
+    two dimensions; in three, for the sample of the tests, ks stopped at a matrix
+    whose criterion was higher than at ours. ks warns on duplicated values and
+    bounds the determinant in `Hlscv`. [`LSCVMatrix`](@ref) warns on duplicated
+    observations and on coordinate tie fractions above 10%. It reports a collapse
+    as `details.collapsed = true` and `details.converged = false`, and returns the
+    selected matrix and criterion unchanged instead of bounding the determinant.
+    For tied data, consider [`SCVMatrix`](@ref) or [`PlugInMatrix`](@ref); for a
+    binned collapse, use `binned = false`. For ``d \geq 3`` ks's `Hns.diag` is not
+    the diagonal matrix that minimizes the normal-reference error; `NormalScaleMatrix(diagonal =
     true)` is, and agrees with ks for ``d = 2``.
 
 19. np's least-squares cross-validation for conditional densities (`bwmethod =
