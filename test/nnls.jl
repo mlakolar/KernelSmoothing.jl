@@ -154,6 +154,63 @@ end
   check_qr(factor, A, b)
 end
 
+@testset "passive QR storage growth" begin
+  rng = Xoshiro(915)
+  A = randn(rng, 64, 45)
+  A = hcat(A, A[:, 1])
+  b = randn(rng, 64)
+  factor = _NNLSQR(size(A)...)
+  @test size(factor.Q) == (64, 16)
+  @test size(factor.R) == (16, 16) && length(factor.h) == 16
+  @test factor.max_capacity == 46
+  for j in 1:45
+    @test _nnls_qr_insert!(factor, A, b, j)
+    capacity = j <= 16 ? 16 : j <= 32 ? 32 : 46
+    @test size(factor.Q, 2) == capacity
+    @test size(factor.R) == (capacity, capacity) && length(factor.h) == capacity
+    @test factor.updates == j && factor.rebuilds == (j >= 16)
+    check_qr(factor, A, b)
+    if j in (16, 32)
+      before = deepcopy(factor)
+      Q, R, h = factor.Q, factor.R, factor.h
+      @test !_nnls_qr_insert!(factor, A, b, 46)
+      @test factor.Q === Q && factor.R === R && factor.h === h
+      @test factor.P == before.P && factor.Q == before.Q && factor.R == before.R && factor.h == before.h
+      @test (factor.updates, factor.rebuilds, factor.since_rebuild) ==
+            (before.updates, before.rebuilds, before.since_rebuild)
+    end
+  end
+  for position in (1, 22, 43)
+    _nnls_qr_delete!(factor, A, b, position)
+    check_qr(factor, A, b)
+  end
+  _nnls_qr_rebuild!(factor, A, b)
+  check_qr(factor, A, b)
+  @test size(factor.Q, 2) == 46
+  @test size(_NNLSQR(7, 100).Q) == (7, 7)
+  @test size(_NNLSQR(100, 0).Q) == (100, 0)
+end
+
+@testset "NNLS allocation with few passive columns" begin
+  m, n = 400, 399
+  A = Matrix{Float64}(I, m, n)
+  b = zeros(m)
+  b[1:8] .= 1:8
+  x = _nnls(A, b)   # warm the exact call measured below, outside @allocated
+  @test count(>(0), x) == 8
+  check_optimality(A, b, x)
+  bytes = @allocated _nnls(A, b)
+  # A[:, live] and the normalized As each allocate a dense m × n matrix. Above
+  # those current work arrays, allow one third of a matrix for vectors, headers
+  # and the small QR buffers. The former full Q and R alone cost nearly two
+  # matrices, so they exceed this bound even before the other solver allocations.
+  matrix_bytes = sizeof(Float64) * m * n
+  workspace_bytes = 2 * matrix_bytes
+  @test bytes - workspace_bytes < matrix_bytes ÷ 3
+  println("sparse NNLS allocation: total=", bytes, " workspace=", workspace_bytes,
+          " excess=", bytes - workspace_bytes, " bound=", matrix_bytes ÷ 3)
+end
+
 @testset "amortized rebuild counts" begin
   A = Matrix{Float64}(I, 48, 32)
   b = ones(48)

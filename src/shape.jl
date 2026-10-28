@@ -180,21 +180,40 @@ function _coneproject(y, F, E, v)
   return s .* (F * a .+ E * c)
 end
 
-# A thin QR factorization of the ordered passive columns, with spare columns for
-# updates. Only the first length(P) columns of Q and the leading block of R are live.
+# A thin QR factorization of the ordered passive columns, with spare columns that
+# grow as needed. Only the first length(P) columns of Q and the leading block of R
+# are live.
 mutable struct _NNLSQR
   P::Vector{Int}
   Q::Matrix{Float64}
   R::Matrix{Float64}
   h::Vector{Float64}
+  max_capacity::Int
   updates::Int
   rebuilds::Int
   since_rebuild::Int
 end
 
 function _NNLSQR(m, n)
-  p = min(m, n)
-  return _NNLSQR(Int[], zeros(m, p), zeros(p, p), zeros(p), 0, 0, 0)
+  max_capacity = min(m, n)
+  capacity = min(max_capacity, 16)
+  return _NNLSQR(Int[], zeros(m, capacity), zeros(capacity, capacity), zeros(capacity), max_capacity, 0, 0, 0)
+end
+
+# Grow only after an insertion passes all rejection checks. Copy live blocks and
+# leave the update and rebuild counters alone: resizing does not change the factors.
+function _nnls_qr_grow!(factor, required)
+  capacity = size(factor.Q, 2)
+  required <= capacity && return factor
+  capacity = min(factor.max_capacity, max(required, 2 * capacity))
+  p = length(factor.P)
+  Q = zeros(size(factor.Q, 1), capacity)
+  R, h = zeros(capacity, capacity), zeros(capacity)
+  Q[:, 1:p] .= view(factor.Q, :, 1:p)
+  R[1:p, 1:p] .= view(factor.R, 1:p, 1:p)
+  h[1:p] .= view(factor.h, 1:p)
+  factor.Q, factor.R, factor.h = Q, R, h
+  return factor
 end
 
 function _nnls_qr_factors(A, b, P)
@@ -220,7 +239,7 @@ end
 # precede the commit, so a refused column leaves the entire factorization unchanged.
 function _nnls_qr_insert!(factor, A, b, j; positive = false)
   p = length(factor.P)
-  p < size(factor.Q, 2) || return false
+  p < factor.max_capacity || return false
   v = copy(view(A, :, j))
   na = LinearAlgebra.norm(v)
   r = zeros(p)
@@ -247,12 +266,14 @@ function _nnls_qr_insert!(factor, A, b, j; positive = false)
     Q, R, rhs = _nnls_qr_factors(A, b, [factor.P; j])
     abs(R[end, end]) >= rank_tol * na || return false
     positive && rhs[end] / R[end, end] <= 0 && return false
+    _nnls_qr_grow!(factor, p + 1)
     factor.Q[:, 1:p+1] .= Q
     factor.R[1:p+1, 1:p+1] .= R
     factor.h[1:p+1] .= rhs
     factor.rebuilds += 1
     factor.since_rebuild = 0
   else
+    _nnls_qr_grow!(factor, p + 1)
     factor.Q[:, p+1] .= v
     factor.R[1:p, p+1] .= r
     factor.R[p+1, 1:p] .= 0

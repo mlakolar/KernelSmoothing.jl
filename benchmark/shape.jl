@@ -8,10 +8,14 @@
 # --quick uses 20 and 40 for both. The default result directory is OUT-results
 # (without .csv). It holds every fitted vector, its input and its weights, so the
 # relative vector differences and weighted objectives can be checked afterwards.
-# Timings exclude diagnostics and CSV output. After a warm-up, take at most five
-# runs within a two-second budget. Stop repeating when a call takes 60 seconds;
-# a slow warm-up is retained as the single run, including compilation. Allocation
-# counts use one separate warmed call, except after a slow call, when the warm-up
+# Timings exclude diagnostics and CSV output. If the warm-up takes less than
+# 0.1 seconds, take at least 30 timed runs without a budget cutoff, also in --quick
+# mode. Otherwise, take at most five runs within a two-second budget (--quick takes
+# one). Record the minimum, median and spread. Run GC.gc() once before the timed
+# runs of each case, outside the timings. For longer calls, stop repeating when a
+# call takes 60 seconds; a slow warm-up is retained as the single run, including
+# compilation. Allocation counts use one separate warmed call, except after a
+# slow call, when the warm-up
 # count is retained and allocations_warmed is false. Package loading is measured
 # after loading the standard libraries. first_call_seconds is per case, including
 # compilation still needed at that point in the process.
@@ -91,21 +95,27 @@ end
 function timeit(f; budget = 2.0, maxreps = 5)
   first_seconds = @elapsed warm_allocations = @allocated result = f()
   if first_seconds >= 60
-    return (; result, seconds = first_seconds, spread = 0.0, runs = 1,
+    return (; result, seconds = first_seconds, median_seconds = first_seconds, spread = 0.0, runs = 1,
             first_seconds, allocations = warm_allocations, allocations_warmed = false)
   end
+  GC.gc()
+  fast = first_seconds < 0.1
+  repetitions = fast ? max(30, maxreps) : maxreps
   times = Float64[]
   total = 0.0
-  while length(times) < maxreps && (isempty(times) || total < budget)
+  while length(times) < repetitions && (fast || isempty(times) || total < budget)
     seconds = @elapsed result = f()
     push!(times, seconds)
     total += seconds
-    seconds >= 60 && break
+    !fast && seconds >= 60 && break
   end
   allocations_warmed = maximum(times) < 60
   allocations = allocations_warmed ? (@allocated f()) : warm_allocations
-  return (; result, seconds = minimum(times), spread = maximum(times) - minimum(times),
-          runs = length(times), first_seconds, allocations, allocations_warmed)
+  sort!(times)
+  runs = length(times)
+  median_seconds = (times[(runs + 1) ÷ 2] + times[runs ÷ 2 + 1]) / 2
+  return (; result, seconds = first(times), median_seconds, spread = last(times) - first(times),
+          runs, first_seconds, allocations, allocations_warmed)
 end
 
 function cone_support(values, t, weights, shape)
@@ -174,6 +184,7 @@ function benchmark_case(io, dir, family, shape, m, weighted; quick = false)
   # not zero updates or rebuilds; support diagnostics have their own warning fields.
   csv_row(io, (family, shape, m, kind, support, generators, support == generators,
                measurement === nothing ? NaN : measurement.seconds,
+               measurement === nothing ? NaN : measurement.median_seconds,
                measurement === nothing ? NaN : measurement.spread,
                measurement === nothing ? 0 : measurement.runs,
                measurement === nothing ? NaN : measurement.first_seconds,
@@ -202,7 +213,7 @@ function main()
   ok = true
   open(out, "w") do io
     csv_row(io, ("case", "shape", "m", "weights", "support", "generators", "full_support",
-                 "seconds", "spread_seconds", "runs", "first_call_seconds", "allocations",
+                 "seconds", "median_seconds", "spread_seconds", "runs", "first_call_seconds", "allocations",
                  "allocations_warmed", "warning", "warning_messages", "support_warning",
                  "support_warning_messages", "updates", "rebuilds", "result_sum", "result_norm",
                  "result_sumsq", "weighted_objective", "input_sum", "input_norm", "weights_sum",
